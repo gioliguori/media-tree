@@ -1,0 +1,68 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - media-tree
+
+  janus-videoroom:
+    build:
+      context: ../janus-videoroom
+      dockerfile: Dockerfile
+    container_name: janus-videoroom
+    ports:
+      - "8088:8088"
+      - "8188:8188"
+      - "20000-20050:20000-20050/udp"
+    volumes:
+      - ../janus-videoroom/config:/opt/janus/etc/janus:ro
+    restart: unless-stopped
+    environment:
+      - JANUS_LOG_LEVEL=4
+    networks:
+      - media-tree
+
+  injection-node:
+    build:
+      context: ..
+      dockerfile: injection-node/Dockerfile
+    container_name: injection-1
+    ports:
+      - "7070:7070"
+    environment:
+      - NODE_ID=injection-1
+      - NODE_HOST=injection-1
+      - NODE_PORT=7070
+      - RTP_AUDIO_PORT=5000
+      - RTP_VIDEO_PORT=5002
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JANUS_VIDEOROOM_WS_URL=ws://janus-videoroom:8188
+      - WHIP_BASE_PATH=/whip
+      - WHIP_TOKEN=verysecret
+      - WHIP_SECRET=adminpwd
+    depends_on:
+      redis:
+        condition: service_healthy
+      janus-videoroom:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - media-tree
+
+volumes:
+  redis-data:
+
+networks:
+  media-tree:
+    driver: bridge

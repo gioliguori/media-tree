@@ -1,0 +1,107 @@
+services:
+  # ============ INFRA ============
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============ RELAY NODES ============
+
+  # Relay Node principale (GStreamer)
+  relay-gst-1:
+    build:
+      context: ..
+      dockerfile: relay-node-gstreamer/Dockerfile
+    container_name: relay-gst-1
+    environment:
+      - NODE_ID=relay-gst-1
+      - NODE_HOST=relay-gst-1
+      - API_PORT=7070
+      - AUDIO_PORT=5002
+      - VIDEO_PORT=5004
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "7070:7070"
+      - "5002:5002/udp"
+      - "5004:5004/udp"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Secondo relay per test catena
+  relay-gst-2:
+    build:
+      context: ..
+      dockerfile: relay-node-gstreamer/Dockerfile
+    container_name: relay-gst-2
+    environment:
+      - NODE_ID=relay-gst-2
+      - NODE_HOST=relay-gst-2
+      - API_PORT=7071
+      - AUDIO_PORT=5102
+      - VIDEO_PORT=5104
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "7071:7071"
+      - "5102:5102/udp"
+      - "5104:5104/udp"
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - scenario3
+
+  # ============ TEST TOOLS ============
+
+  # RTP Sender
+  sender:
+    build: ./test
+    container_name: rtp-sender-gst
+    environment:
+      - MODE=sender
+      - TARGET_HOST=relay-gst-1
+      - AUDIO_PORT=5002
+      - VIDEO_PORT=5004
+      - GST_DEBUG=2
+    depends_on:
+      - relay-gst-1
+    restart: unless-stopped
+
+  # RTP Receiver 1
+  receiver-1:
+    build: ./test
+    container_name: rtp-receiver-gst-1
+    environment:
+      - MODE=receiver
+      - LISTEN_AUDIO_PORT=6000
+      - LISTEN_VIDEO_PORT=6002
+      - GST_DEBUG=2
+    ports:
+      - "6000:6000/udp"
+      - "6002:6002/udp"
+    depends_on:
+      - relay-gst-1
+
+  # RTP Receiver 2
+  receiver-2:
+    build: ./test
+    container_name: rtp-receiver-gst-2
+    environment:
+      - MODE=receiver
+      - LISTEN_AUDIO_PORT=6100
+      - LISTEN_VIDEO_PORT=6102
+      - GST_DEBUG=2
+    ports:
+      - "6100:6100/udp"
+      - "6102:6102/udp"
+    depends_on:
+      - relay-gst-1
+    profiles:
+      - scenario2
