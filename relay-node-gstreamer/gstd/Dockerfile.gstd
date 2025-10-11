@@ -1,0 +1,68 @@
+# ============================================
+# STAGE 1: Build gstd
+# ============================================
+FROM debian:12 AS gstd-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    git \
+    build-essential \
+    ninja-build \
+    pkg-config \
+    python3 \
+    python3-pip \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
+    libglib2.0-dev \
+    libjson-glib-dev \
+    libreadline-dev \
+    libncursesw5-dev \
+    libdaemon-dev \
+    libjansson-dev \
+    libsoup2.4-dev \
+    libedit-dev \
+    && update-ca-certificates \
+    && pip3 install --break-system-packages meson \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --branch v0.15.2 --depth 1 https://github.com/RidgeRun/gstd-1.x.git /tmp/gstd && \
+    cd /tmp/gstd && \
+    meson --prefix=/usr/local build && \
+    ninja -C build && \
+    DESTDIR=/gstd-install ninja -C build install
+
+# ============================================
+# STAGE 2: Runtime gstd (minimal)
+# ============================================
+FROM debian:12-slim
+
+# Installa solo runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    gstreamer1.0-tools \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-nice \
+    libglib2.0-0 \
+    libjson-glib-1.0-0 \
+    libreadline8 \
+    libncursesw6 \
+    libdaemon0 \
+    libjansson4 \
+    libsoup2.4-1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia gstd compilato
+COPY --from=gstd-builder /gstd-install/usr/local /usr/local
+RUN ldconfig
+
+# Verifica installazione
+RUN gstd --version
+
+EXPOSE 5000
+
+# Default: HTTP API su porta 5000
+CMD ["gstd", "--enable-http-protocol", "--http-address=0.0.0.0", "--http-port=5000"]
