@@ -12,7 +12,7 @@ export class InjectionNode extends BaseNode {
         this.whipToken = config.whip?.token || 'verysecret';
         this.whipSecret = config.whip?.secret || 'adminpwd';
 
-        // Sessione unica
+        // Sessione
         this.currentSession = {
             sessionId: null,
             roomId: null,

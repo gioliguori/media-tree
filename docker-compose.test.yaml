@@ -32,6 +32,24 @@ services:
     networks:
       - media-tree
 
+  janus-streaming:
+    build:
+      context: ./janus-streaming
+      dockerfile: Dockerfile
+    container_name: janus-streaming
+    ports:
+      - "8089:8088" # HTTP API
+      - "8189:8188" # WebSocket
+      - "6002:5002/udp" # RTP Audio
+      - "6004:5004/udp" # RTP Video
+      - "20051-20150:20051-20150/udp"
+    volumes:
+      - ./janus-streaming/config:/opt/janus/etc/janus:ro
+    environment:
+      - JANUS_LOG_LEVEL=4
+    networks:
+      - media-tree
+
   # ============ INJECTION NODE ============
 
   injection-1:
@@ -108,6 +126,32 @@ services:
       - media-tree
     profiles:
       - relay-switch
+
+  # ============ EGRESS NODE ============
+
+  egress-1:
+    build:
+      context: .
+      dockerfile: egress-node/Dockerfile
+    container_name: egress-1
+    ports:
+      - "7073:7073"
+    environment:
+      - NODE_ID=egress-1
+      - NODE_HOST=egress-1
+      - API_PORT=7073
+      - RTP_AUDIO_PORT=5002
+      - RTP_VIDEO_PORT=5004
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JANUS_STREAMING_WS_URL=ws://janus-streaming:8188
+      - WHEP_BASE_PATH=/whep
+      - WHEP_TOKEN=verysecret
+    depends_on:
+      - redis
+      - janus-streaming
+    networks:
+      - media-tree
 
   # ============ RTP RECEIVER ============
 

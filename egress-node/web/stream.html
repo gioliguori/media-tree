@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Creazione Sessione Streaming</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        .btn-create {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            border: none;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-weight: bold;
+        }
+        .url-box {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 12px;
+            font-family: monospace;
+            word-break: break-all;
+        }
+        .success-alert {
+            display: none;
+            background: rgba(40, 167, 69, 0.1);
+            border: 1px solid rgba(40, 167, 69, 0.3);
+            border-radius: 10px;
+        }
+        .error-alert {
+            display: none;
+            background: rgba(220, 53, 69, 0.1);
+            border: 1px solid rgba(220, 53, 69, 0.3);
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-12">
+                <div class="card p-4 shadow">
+                    <h2 class="text-center mb-4">🎥 Crea Sessione Streaming</h2>
+                    
+                    <!-- Input sessione -->
+                    <div class="mb-4">
+                        <label for="sessionId" class="form-label fw-bold">Nome Sessione</label>
+                        <input type="text" 
+                               class="form-control form-control-lg" 
+                               id="sessionId" 
+                               placeholder="Inserisci il nome della sessione (es. mario, giovanni, etc.)"
+                               required>
+                        <div class="form-text">
+                            Verranno creati automaticamente gli endpoint per lo streaming
+                        </div>
+                    </div>
+                    
+                    <!-- Pulsante creazione -->
+                    <div class="d-grid gap-2 mb-4">
+                        <button class="btn btn-create btn-lg" type="button" id="createBtn" onclick="createSession()">
+                            <span class="loading spinner-border spinner-border-sm me-2" role="status" style="display: none;"></span>
+                            Crea Sessione
+                        </button>
+                    </div>
+
+                    <!-- Risultato successo -->
+                    <div id="successResult" class="success-alert p-4 mb-4">
+                        <h5 class="text-success mb-3">✅ Sessione creata con successo!</h5>
+                        
+                        <div class="mb-3">
+                            <label class="fw-bold">URL per vedere lo stream:</label>
+                            <div class="d-flex align-items-center gap-2 mt-2">
+                                <div class="url-box flex-grow-1" id="viewerUrl"></div>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="copyViewerUrl()">
+                                    📋 Copia
+                                </button>
+                            </div>
+                            <small class="text-muted">Condividi questo link per permettere ad altri di vedere il tuo stream</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="fw-bold">URL per lo streaming (OBS):</label>
+                            <div class="d-flex align-items-center gap-2 mt-2">
+                                <div class="url-box flex-grow-1" id="streamerUrl"></div>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="copyStreamerUrl()">
+                                    📋 Copia
+                                </button>
+                            </div>
+                            <small class="text-muted">Usa questo URL in OBS o altro software di streaming</small>
+                        </div>
+                    </div>
+                    <!-- Risultato errore -->
+                    <div id="errorResult" class="error-alert p-3">
+                        <strong>❌ Errore:</strong> <span id="errorMessage"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let lastSessionData = null;
+
+        async function createSession() {
+            const sessionId = document.getElementById('sessionId').value.trim();
+            
+            if (!sessionId) {
+                showError('Inserisci un nome per la sessione');
+                return;
+            }
+
+            // Mostra stato di caricamento
+            const createBtn = document.getElementById('createBtn');
+            const loading = createBtn.querySelector('.loading');
+            loading.style.display = 'inline-block';
+            createBtn.disabled = true;
+
+            try {
+                // Chiamata all'API del server
+                const response = await fetch('/api/sessions', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ sessionId })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Errore durante la creazione della sessione');
+                }
+
+                // Memorizza i dati della sessione
+                lastSessionData = data;
+                
+                // Mostra risultati
+                displaySuccessResult(data);
+                hideError();
+                
+            } catch (error) {
+                showError(error.message || 'Errore durante la creazione della sessione');
+            } finally {
+                // Nascondi stato di caricamento
+                loading.style.display = 'none';
+                createBtn.disabled = false;
+            }
+        }
+
+        function displaySuccessResult(data) {
+            const baseUrl = window.location.origin;
+            document.getElementById('viewerUrl').textContent = `${baseUrl}/index.html?id=${lastSessionData.sessionId}`;
+            document.getElementById('streamerUrl').textContent = `${baseUrl}/whip/endpoint/${data.sessionId}`;
+            document.getElementById('successResult').style.display = 'block';
+        }
+
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorResult').style.display = 'block';
+            document.getElementById('successResult').style.display = 'none';
+        }
+
+        function hideError() {
+            document.getElementById('errorResult').style.display = 'none';
+        }
+
+        function copyViewerUrl() {
+            const viewerUrl = document.getElementById('viewerUrl').textContent;
+            navigator.clipboard.writeText(viewerUrl).then(() => {
+                alert('URL visualizzazione copiato!');
+            }).catch(() => {
+                prompt('Copia questo URL:', viewerUrl);
+            });
+        }
+
+        function copyStreamerUrl() {
+            const streamerUrl = document.getElementById('streamerUrl').textContent;
+            navigator.clipboard.writeText(streamerUrl).then(() => {
+                alert('URL streaming copiato!');
+            }).catch(() => {
+                prompt('Copia questo URL:', streamerUrl);
+            });
+        }
+
+        // Supporto per il tasto Invio
+        document.getElementById('sessionId').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                createSession();
+            }
+        });
+    </script>
+</body>
+</html>
