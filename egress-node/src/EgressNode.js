@@ -20,16 +20,8 @@ export class EgressNode extends BaseNode {
 
         // Pipeline health monitoring
         this.pipelineHealth = {
-            audio: {
-                running: false,
-                restarts: 0,
-                lastError: null
-            },
-            video: {
-                running: false,
-                restarts: 0,
-                lastError: null
-            }
+            audio: { running: false, restarts: 0, lastError: null },
+            video: { running: false, restarts: 0, lastError: null }
         };
 
         // Destinazione RTP (deriva da config esistente)
@@ -47,8 +39,6 @@ export class EgressNode extends BaseNode {
             active: false
         };
 
-        // Shutdown flag
-        this.isStopping = false;
     }
 
     async onInitialize() {
@@ -75,7 +65,6 @@ export class EgressNode extends BaseNode {
     }
 
     async onStop() {
-        this.isStopping = true;
         console.log(`[${this.nodeId}] Stopping egress node...`);
 
         if (this.currentSession.active) {
@@ -217,8 +206,10 @@ export class EgressNode extends BaseNode {
             'async=false'
         ];
 
-        console.log(`[${this.nodeId}] Starting audio pipeline (attempt #${this.pipelineHealth.audio.restarts + 1})`);
+        const attempt = this.pipelineHealth.audio.restarts + 1;
+        console.log(`[${this.nodeId}] Starting audio pipeline (attempt #${attempt})`);
         console.log(`[${this.nodeId}] Audio pipeline: gst-launch-1.0 ${args.join(' ')}`);
+
 
         this.audioPipeline = spawn('gst-launch-1.0', args);
 
@@ -228,61 +219,8 @@ export class EgressNode extends BaseNode {
         this.pipelineHealth.audio.lastError = null;
 
         // Attach handlers
-        this._attachAudioHandlers();
-    }
-
-    _attachAudioHandlers() {
-        // stdout
-        this.audioPipeline.stdout.on('data', (data) => {
-            const msg = data.toString().trim();
-            if (msg) {
-                console.log(`[${this.nodeId}] Audio stdout: ${msg}`);
-            }
-        });
-
-        // stderr
-        this.audioPipeline.stderr.on('data', (data) => {
-            const msg = data.toString().trim();
-
-            // Filtra messaggi normali di startup
-            if (msg &&
-                !msg.includes('Setting pipeline to PAUSED') &&
-                !msg.includes('Setting pipeline to PLAYING') &&
-                !msg.includes('Prerolled')) {
-                console.log(`[${this.nodeId}] Audio stderr: ${msg}`);
-            }
-        });
-
-        // close handler
-        this.audioPipeline.on('close', (code) => {
-            this.pipelineHealth.audio.running = false;
-            console.log(`[${this.nodeId}] Audio pipeline exited with code ${code}`);
-
-            if (code !== 0) {
-                // Pipeline crashed
-                const errorMsg = `Audio pipeline crashed with code ${code}`;
-                console.error(`[${this.nodeId}] ${errorMsg}`);
-                this.pipelineHealth.audio.lastError = errorMsg;
-
-                // Auto-restart se non siamo in shutdown
-                if (!this.isStopping) {
-                    console.log(`[${this.nodeId}] Restarting audio pipeline in 5 seconds...`);
-                    setTimeout(() => {
-                        if (!this.isStopping) {
-                            this._startAudioPipeline();
-                        }
-                    }, 5000);
-                }
-            }
-
-            this.audioPipeline = null;
-        });
-
-        // spawn error handler
-        this.audioPipeline.on('error', (err) => {
-            console.error(`[${this.nodeId}] Audio pipeline spawn error:`, err.message);
-            this.pipelineHealth.audio.running = false;
-            this.pipelineHealth.audio.lastError = err.message;
+        this._attachPipelineHandlers('audio', this.audioPipeline, () => {
+            this._startAudioPipeline();  // Callback per restart
         });
     }
 
@@ -297,8 +235,10 @@ export class EgressNode extends BaseNode {
             'async=false'
         ];
 
-        console.log(`[${this.nodeId}] Starting video pipeline (attempt #${this.pipelineHealth.video.restarts + 1})`);
+        const attempt = this.pipelineHealth.video.restarts + 1;
+        console.log(`[${this.nodeId}] Starting video pipeline (attempt #${attempt})`);
         console.log(`[${this.nodeId}] Video pipeline: gst-launch-1.0 ${args.join(' ')}`);
+
 
         this.videoPipeline = spawn('gst-launch-1.0', args);
 
@@ -308,59 +248,8 @@ export class EgressNode extends BaseNode {
         this.pipelineHealth.video.lastError = null;
 
         // Attach handlers
-        this._attachVideoHandlers();
-    }
-
-    _attachVideoHandlers() {
-        // stdout
-        this.videoPipeline.stdout.on('data', (data) => {
-            const msg = data.toString().trim();
-            if (msg) {
-                console.log(`[${this.nodeId}] Video stdout: ${msg}`);
-            }
-        });
-
-        // stderr
-        this.videoPipeline.stderr.on('data', (data) => {
-            const msg = data.toString().trim();
-
-            if (msg &&
-                !msg.includes('Setting pipeline to PAUSED') &&
-                !msg.includes('Setting pipeline to PLAYING') &&
-                !msg.includes('Prerolled')) {
-                console.log(`[${this.nodeId}] Video stderr: ${msg}`);
-            }
-        });
-
-        // close handler
-        this.videoPipeline.on('close', (code) => {
-            this.pipelineHealth.video.running = false;
-            console.log(`[${this.nodeId}] Video pipeline exited with code ${code}`);
-
-            if (code !== 0) {
-                const errorMsg = `Video pipeline crashed with code ${code}`;
-                console.error(`[${this.nodeId}] ${errorMsg}`);
-                this.pipelineHealth.video.lastError = errorMsg;
-
-                // Auto-restart
-                if (!this.isStopping) {
-                    console.log(`[${this.nodeId}] Restarting video pipeline in 5 seconds...`);
-                    setTimeout(() => {
-                        if (!this.isStopping) {
-                            this._startVideoPipeline();
-                        }
-                    }, 5000);
-                }
-            }
-
-            this.videoPipeline = null;
-        });
-
-        // spawn error handler
-        this.videoPipeline.on('error', (err) => {
-            console.error(`[${this.nodeId}] Video pipeline spawn error:`, err.message);
-            this.pipelineHealth.video.running = false;
-            this.pipelineHealth.video.lastError = err.message;
+        this._attachPipelineHandlers('video', this.videoPipeline, () => {
+            this._startVideoPipeline();  // Callback per restart
         });
     }
 

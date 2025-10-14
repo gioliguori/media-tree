@@ -13,12 +13,11 @@ export class GStreamerRelayNode extends BaseNode {
         // cache qui non serve perchè il forwarding lo fa gstreamer, nell'altro lo facevamo noi a mano
         // this.childrenTargets = [];
 
-        // Stats
-        this.stats = {
-            audioRestarts: 0,
-            videoRestarts: 0,
-            lastRestart: null
+        this.pipelineHealth = {
+            audio: { running: false, restarts: 0, lastError: null },
+            video: { running: false, restarts: 0, lastError: null }
         };
+
     }
 
     async onInitialize() {
@@ -66,74 +65,55 @@ export class GStreamerRelayNode extends BaseNode {
         // Start new pipelines
         this.startAudioPipeline(childrenInfo);
         this.startVideoPipeline(childrenInfo);
-
-        this.stats.lastRestart = new Date().toISOString();
     }
 
     startAudioPipeline(children) {
         const args = this.buildAudioPipelineArgs(children);
 
+        const attempt = this.pipelineHealth.audio.restarts + 1;
+        console.log(`[${this.nodeId}] Starting audio pipeline (attempt #${attempt})`);
         console.log(`[${this.nodeId}] Audio pipeline: gst-launch-1.0 ${args.join(' ')}`);
 
         // facciamo partire il processo
         this.audioProcess = spawn('gst-launch-1.0', args);
-        this.stats.audioRestarts++;
 
-        // log
-        this.audioProcess.stdout.on('data', (data) => {
-            const msg = data.toString().trim();
-            if (msg) console.log(`[${this.nodeId}] Audio stdout: ${msg}`);
-        });
+        this.pipelineHealth.audio.running = true;
+        this.pipelineHealth.audio.restarts++;
+        this.pipelineHealth.audio.lastError = null;
 
-        this.audioProcess.stderr.on('data', (data) => {
-            const msg = data.toString().trim();
-            if (msg && !msg.includes('Setting pipeline to PAUSED') && !msg.includes('Setting pipeline to PLAYING')) {
-                console.log(`[${this.nodeId}] Audio stderr: ${msg}`);
+        this._attachPipelineHandlers('audio', this.audioProcess, async () => {
+            // Callback per restart
+            const childrenInfo = await this.getChildrenInfo();
+            if (childrenInfo.length > 0) {
+                this.startAudioPipeline(childrenInfo);
             }
-        });
-
-        // exit
-        this.audioProcess.on('close', (code) => {
-            console.log(`[${this.nodeId}] Audio pipeline exited (code ${code})`);
-            this.audioProcess = null;
-        });
-
-        this.audioProcess.on('error', (err) => {
-            console.error(`[${this.nodeId}] Audio pipeline error:`, err.message);
         });
     }
 
     startVideoPipeline(children) {
         const args = this.buildVideoPipelineArgs(children);
 
+        const attempt = this.pipelineHealth.video.restarts + 1;
+        console.log(`[${this.nodeId}] Starting video pipeline (attempt #${attempt})`);
         console.log(`[${this.nodeId}] Video pipeline: gst-launch-1.0 ${args.join(' ')}`);
+
 
         // facciamo partire il processo
         this.videoProcess = spawn('gst-launch-1.0', args);
-        this.stats.videoRestarts++;
 
-        // log
-        this.videoProcess.stdout.on('data', (data) => {
-            const msg = data.toString().trim();
-            if (msg) console.log(`[${this.nodeId}] Video stdout: ${msg}`);
-        });
 
-        this.videoProcess.stderr.on('data', (data) => {
-            const msg = data.toString().trim();
-            if (msg && !msg.includes('Setting pipeline to PAUSED') && !msg.includes('Setting pipeline to PLAYING')) {
-                console.log(`[${this.nodeId}] Video stderr: ${msg}`);
+        this.pipelineHealth.video.running = true;
+        this.pipelineHealth.video.restarts++;
+        this.pipelineHealth.video.lastError = null;
+
+        this._attachPipelineHandlers('video', this.videoProcess, async () => {
+            // Callback per restart
+            const childrenInfo = await this.getChildrenInfo();
+            if (childrenInfo.length > 0) {
+                this.startVideoPipeline(childrenInfo);
             }
         });
 
-        // exit
-        this.videoProcess.on('close', (code) => {
-            console.log(`[${this.nodeId}] Video pipeline exited (code ${code})`);
-            this.videoProcess = null;
-        });
-
-        this.videoProcess.on('error', (err) => {
-            console.error(`[${this.nodeId}] Video pipeline error:`, err.message);
-        });
     }
 
     buildAudioPipelineArgs(children) {
@@ -221,17 +201,20 @@ export class GStreamerRelayNode extends BaseNode {
             console.log(`[${this.nodeId}] Stopping audio pipeline...`);
             this.audioProcess.kill('SIGTERM');
             this.audioProcess = null;
+            this.pipelineHealth.audio.running = false;
         }
 
         if (this.videoProcess) {
             console.log(`[${this.nodeId}] Stopping video pipeline...`);
             this.videoProcess.kill('SIGTERM');
             this.videoProcess = null;
+            this.pipelineHealth.video.running = false;
         }
     }
 
     async onStop() {
         this.stopPipelines();
+        console.log(`[${this.nodeId}] Relay node stopped`);
     }
 
     async getStatus() {
@@ -241,7 +224,8 @@ export class GStreamerRelayNode extends BaseNode {
             gstreamer: {
                 audioRunning: this.audioProcess !== null,
                 videoRunning: this.videoProcess !== null,
-                stats: this.stats
+                audioRestarts: this.pipelineHealth.audio.restarts,
+                videoRestarts: this.pipelineHealth.video.restarts
             },
             forwarding: {
                 childrenCount: this.children.length,

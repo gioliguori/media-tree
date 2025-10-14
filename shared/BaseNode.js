@@ -68,6 +68,9 @@ export class BaseNode {
     this.parent = null;
     this.children = [];
 
+    this.isStopping = false;
+    this.pipelineHealth = null;
+
     this.app.use(express.json());
   }
 
@@ -96,6 +99,7 @@ export class BaseNode {
   }
 
   async stop() {
+    this.isStopping = true;
     console.log(`[${this.nodeId}] Stopping node...`);
 
     if (this.pollTimer) {
@@ -108,6 +112,7 @@ export class BaseNode {
 
     if (this.server) this.server.close();
     if (this.redis) this.redis.disconnect();
+    console.log(`[${this.nodeId}] Node stopped`);
   }
 
   // ============ REDIS ============
@@ -228,6 +233,65 @@ export class BaseNode {
 
   async refreshNodeTTL() {
     await this.redis.expire(`node:${this.nodeId}`, 60);
+  }
+
+  // ============ GSTREAMER HELPER ============
+
+  //@param {string} 'audio' o 'video'
+  //@param {ChildProcess} Pipeline
+  //@param {Function} onRestart - Callback per auto-restart
+
+  _attachPipelineHandlers(type, process, onRestart) {
+    // stdout
+    process.stdout.on('data', (data) => {
+      const msg = data.toString().trim();
+      if (msg) {
+        console.log(`[${this.nodeId}] ${type} stdout: ${msg}`);
+      }
+    });
+
+    // stderr
+    process.stderr.on('data', (data) => {
+      const msg = data.toString().trim();
+
+      if (msg &&
+        !msg.includes('Setting pipeline to PAUSED') &&
+        !msg.includes('Setting pipeline to PLAYING') &&
+        !msg.includes('Prerolled') &&
+        !msg.includes('New clock')) {
+        console.log(`[${this.nodeId}] ${type} stderr: ${msg}`);
+      }
+    });
+
+    // close
+    process.on('close', (code) => {
+      this.pipelineHealth[type].running = false;
+      console.log(`[${this.nodeId}] ${type} pipeline exited with code ${code}`);
+
+      if (code !== 0) {
+        // Pipeline crash
+        const errorMsg = `${type} pipeline crashed with code ${code}`;
+        console.error(`[${this.nodeId}] ${errorMsg}`);
+        this.pipelineHealth[type].lastError = errorMsg;
+
+        // Auto-restart
+        if (!this.isStopping && onRestart) {
+          console.log(`[${this.nodeId}] Restarting ${type} pipeline in 5 seconds...`);
+          setTimeout(() => {
+            if (!this.isStopping) {
+              onRestart();
+            }
+          }, 5000);
+        }
+      }
+    });
+
+    // spawn error
+    process.on('error', (err) => {
+      console.error(`[${this.nodeId}] ${type} pipeline spawn error:`, err.message);
+      this.pipelineHealth[type].running = false;
+      this.pipelineHealth[type].lastError = err.message;
+    });
   }
 
   // ============ API ============
