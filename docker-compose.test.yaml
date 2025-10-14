@@ -163,7 +163,7 @@ services:
       - RTP_VIDEO_PORT=5004
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - JANUS_STREAMING_WS_URL=ws://janus-streaming:8188
+      - JANUS_STREAMING_WS_URL=ws://janus-streaming-1:8188
       - WHEP_BASE_PATH=/whep
       - WHEP_TOKEN=verysecret
     depends_on:

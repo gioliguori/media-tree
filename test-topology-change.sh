@@ -59,7 +59,7 @@ docker-compose -f docker-compose.test.yaml --profile streaming down
 docker-compose -f docker-compose.test.yaml --profile relay-switch down
 
 step "Starting infrastructure (Redis + Janus)"
-docker-compose -f docker-compose.test.yaml up -d redis janus-videoroom janus-streaming
+docker-compose -f docker-compose.test.yaml up -d redis janus-videoroom janus-streaming-1
 wait_step 8
 
 check "Verifying Redis is ready"
@@ -69,7 +69,7 @@ check "Verifying Janus Videoroom is ready"
 timeout 5 bash -c 'until docker logs janus-videoroom 2>&1 | grep -q "WebSocket server started"; do sleep 1; done' || error "Janus Videoroom not ready!"
 
 check "Verifying Janus Streaming is ready"
-timeout 5 bash -c 'until docker logs janus-streaming 2>&1 | grep -q "WebSocket server started"; do sleep 1; done' || error "Janus Streaming not ready!"
+timeout 5 bash -c 'until docker logs janus-streaming-1 2>&1 | grep -q "WebSocket server started"; do sleep 1; done' || error "Janus Streaming not ready!"
 
 step "Flushing Redis"
 docker exec redis redis-cli FLUSHALL
@@ -223,7 +223,7 @@ curl -s http://localhost:7070/session | jq
 
 banner "PHASE 7: VERIFY RTP FLOW THROUGH 4-LEVEL TREE"
 
-info "Expected flow: broadcaster → janus-videoroom → injection-1 → relay-1 → relay-2 → egress-1 → janus-streaming"
+info "Expected flow: broadcaster → janus-videoroom → injection-1 → relay-1 → relay-2 → egress-1 → janus-streaming-1"
 
 check "RTP at relay-1 input (from injection-1)"
 info "Checking port 5002..."
@@ -238,9 +238,9 @@ info "Checking egress-1 receives RTP..."
 EGRESS_AUDIO_PORT=$(docker exec egress-1 printenv RTP_AUDIO_PORT)
 timeout 5 docker exec egress-1 tcpdump -i eth0 -n "udp port $EGRESS_AUDIO_PORT" -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || info "Waiting for packets..."
 
-check "RTP at janus-streaming input (from egress-1)"
-info "Checking port 5002 on janus-streaming..."
-timeout 5 docker exec janus-streaming tcpdump -i eth0 -n 'udp port 5002' -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || info "Waiting for packets..."
+check "RTP at janus-streaming-1 input (from egress-1)"
+info "Checking port 5002 on janus-streaming-1..."
+timeout 5 docker exec janus-streaming-1 tcpdump -i eth0 -n 'udp port 5002' -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || info "Waiting for packets..."
 
 banner "4-LEVEL TREE IS WORKING!"
 info "injection-1 → relay-1 → relay-2 → egress-1"
@@ -321,7 +321,7 @@ curl -s http://localhost:7073/topology | jq
 
 banner "PHASE 9: VERIFY RTP FLOW AFTER CHANGE"
 
-info "New expected flow: broadcaster → janus-videoroom → injection-1 → relay-1 → egress-1 → janus-streaming"
+info "New expected flow: broadcaster → janus-videoroom → injection-1 → relay-1 → egress-1 → janus-streaming-1"
 
 wait_step 5
 
@@ -331,8 +331,8 @@ timeout 5 docker exec relay-1 tcpdump -i eth0 -n 'udp port 5002' -c 3 2>&1 | gre
 check "RTP at egress-1 (now from relay-1 directly)"
 timeout 5 docker exec egress-1 tcpdump -i eth0 -n "udp port $EGRESS_AUDIO_PORT" -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || error "✗ No RTP packets!"
 
-check "RTP at janus-streaming (should still work)"
-timeout 5 docker exec janus-streaming tcpdump -i eth0 -n 'udp port 5002' -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || error "✗ No RTP packets!"
+check "RTP at janus-streaming-1 (should still work)"
+timeout 5 docker exec janus-streaming-1 tcpdump -i eth0 -n 'udp port 5002' -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || error "✗ No RTP packets!"
 
 step "Checking pipeline restart counts after change"
 RELAY1_AUDIO_AFTER=$(curl -s http://localhost:7071/status | jq '.gstreamer.audioRestarts')
