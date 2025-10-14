@@ -6,8 +6,8 @@
 docker-compose -f docker-compose.test.yaml build
 
 # Start infra base
-docker-compose -f docker-compose.test.yaml up -d redis janus-videoroom
-sleep 3
+docker-compose -f docker-compose.test.yaml up -d redis janus-videoroom janus-streaming
+sleep 5
 
 # Flush Redis
 docker exec redis redis-cli FLUSHALL
@@ -16,39 +16,41 @@ docker exec redis redis-cli FLUSHALL
 
 ## SCENARIO 1: Basic Flow - WHIP → Janus → Injection → Relay → Receiver
 
-**Flow**: `whip-client → janus-videoroom → injection-1 → relay-gst-1 → receiver-1`
+**Flow**: `whip-client → janus-videoroom → injection-1 → relay-gst-1 → relay-gst-2 →egress-1 → janus-streaming
 
 ### Step 1: Avvia i componenti
 
 # Avvia injection, relay e receiver
-docker-compose -f docker-compose.test.yaml up -d injection-1 relay-gst-1 receiver-1
+docker-compose -f docker-compose.test.yaml up -d injection-1 relay-gst-1  relay-gst-2 egress-1
+
+sleep 5
+
+# Verifica status
+curl http://localhost:7070/status | jq '{nodeId, nodeType, healthy}'
+curl http://localhost:7071/status | jq '{nodeId, nodeType, healthy}'
+curl http://localhost:7072/status | jq '{nodeId, nodeType, healthy}'
+curl http://localhost:7073/status | jq '{nodeId, nodeType, healthy}'
 
 ### Step 2: Configura topologia in Redis
-
-# Registra receiver-1
-docker exec redis redis-cli HSET node:receiver-1 \
-  id receiver-1 \
-  type egress \
-  host rtp-receiver-gst-1 \
-  port 7000 \
-  audioPort 6000 \
-  videoPort 6002 \
-  status active
-
-docker exec redis redis-cli EXPIRE node:receiver-1 300
 
 # Configura relazioni
 # injection-1 → relay-gst-1
 docker exec redis redis-cli SADD children:injection-1 relay-gst-1
 docker exec redis redis-cli SET parent:relay-gst-1 injection-1
 
-# relay-gst-1 → receiver-1
-docker exec redis redis-cli SADD children:relay-gst-1 receiver-1
-docker exec redis redis-cli SET parent:receiver-1 relay-gst-1
+# relay-gst-1 → relay-gst-2
+docker exec redis redis-cli SADD children:relay-gst-1 relay-gst-2
+docker exec redis redis-cli SET parent:relay-gst-2 relay-gst-1
+
+# relay-gst-2 → egress-1
+docker exec redis redis-cli SADD children:relay-gst-2 egress-1
+docker exec redis redis-cli SET parent:egress-1 relay-gst-2
 
 ### Step 3: Verifica topologia
 
 # Verifica relazioni
+
+# Verifica relazioni in Redis
 docker exec redis redis-cli SMEMBERS children:injection-1
 # Output: "relay-gst-1"
 
@@ -56,12 +58,53 @@ docker exec redis redis-cli GET parent:relay-gst-1
 # Output: "injection-1"
 
 docker exec redis redis-cli SMEMBERS children:relay-gst-1
-# Output: "receiver-1"
+# Output: "relay-gst-2"
+
+docker exec redis redis-cli GET parent:relay-gst-2
+# Output: "relay-gst-1"
+
+docker exec redis redis-cli SMEMBERS children:relay-gst-2
+# Output: "egress-1"
+
+docker exec redis redis-cli GET parent:egress-1
+# Output: "relay-gst-2"
 
 # Aspetta che i nodi registrino le relazioni (polling 30s)
 sleep 35
 
-### Step 4: Crea sessione WHIP
+# Verifica topologia nei nodi
+curl http://localhost:7070/topology | jq
+# Output: {"nodeId": "injection-1", "parent": null, "children": ["relay-gst-1"]}
+
+curl http://localhost:7071/topology | jq
+# Output: {"nodeId": "relay-gst-1", "parent": "injection-1", "children": ["relay-gst-2"]}
+
+curl http://localhost:7072/topology | jq
+# Output: {"nodeId": "relay-gst-2", "parent": "relay-gst-1", "children": ["egress-1"]}
+
+curl http://localhost:7073/topology | jq
+# Output: {"nodeId": "egress-1", "parent": "relay-gst-2", "children": []}
+
+# Step 4: Verifica pipeline GStreamer
+
+# relay-gst-1 pipelines
+curl http://localhost:7071/status | jq '.gstreamer'
+# Output: {"audioRunning": true, "videoRunning": true, "audioRestarts": 1, "videoRestarts": 1}
+
+# relay-gst-2 pipelines
+curl http://localhost:7072/status | jq '.gstreamer'
+# Output: {"audioRunning": true, "videoRunning": true, "audioRestarts": 1, "videoRestarts": 1}
+
+# egress-1 pipelines
+curl http://localhost:7073/pipelines | jq
+# Output:
+# {
+#   "destination": {"host": "janus-streaming", "audioPort": 5002, "videoPort": 5004},
+#   "audio": {"running": true, "restarts": 1, ...},
+#   "video": {"running": true, "restarts": 1, ...}
+# }
+
+### Step 5: Crea sessione WHIP e WHEP
 
 # Crea sessione sull'injection node
 curl -X POST http://localhost:7070/session/create \
@@ -88,13 +131,33 @@ curl -X POST http://localhost:7070/session/create \
 #   }
 # }
 
-### Step 5: Avvia broadcaster WHIP
+# Crea sessione WHEP sull'egress node
+curl -X POST http://localhost:7073/session/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "live-session",
+    "mountpointId": 1
+  }' | jq
+
+# Output atteso:
+# {
+#   "sessionId": "live-session",
+#   "mountpointId": 1,
+#   "whepUrl": "http://egress-1:7073/whep/endpoint/live-session",
+#   "createdAt": 1760446820861
+# }
+
+### Step 6: Avvia broadcaster WHIP
 
 # Start WHIP client
 docker-compose -f docker-compose.test.yaml --profile streaming up -d whip-client
 
 # Aspetta connessione
 sleep 5
+
+# Verifica log broadcaster
+docker logs whip-client --tail 20
+
 
 ### Step 6: Verifica stream
 
@@ -104,278 +167,424 @@ docker logs injection-1 | tail -20
 # Log relay node (dovrebbe mostrare pipeline GStreamer avviata)
 docker logs relay-gst-1 | tail -20
 
-# Log receiver (dovrebbe mostrare "Setting pipeline to PLAYING")
-docker logs receiver-1 | tail -20
+# Log relay-2 (pipeline attiva)
+docker logs relay-gst-2 | tail -30
 
-# Verifica pacchetti RTP sul receiver
-docker exec receiver-1 sh -c 'apt-get update && apt-get install -y tcpdump'
-docker exec receiver-1 tcpdump -i eth0 -n udp port 6000 -c 10
+# Log egress (pipeline forwarding a Janus)
+docker logs egress-1 | tail -30
 
-# Output atteso: pacchetti RTP in arrivo
-
-### Step 7: Verifica status
-
-# Status injection node
-curl http://localhost:7070/status | jq
-
-# Status relay node
-curl http://localhost:7071/status | jq
-
-# Verifica sessione attiva
+# Verifica sessioni attive
 curl http://localhost:7070/session | jq
 # Output:
 # {
 #   "active": true,
 #   "sessionId": "live-session",
 #   "roomId": 1234,
-#   "recipient": {
-#     "host": "relay-gst-1",
-#     "audioPort": 5002,
-#     "videoPort": 5004
-#   },
+#   "recipient": {"host": "relay-gst-1", ...},
 #   "uptime": 45
 # }
 
----
+curl http://localhost:7073/session | jq
+# Output:
+# {
+#   "active": true,
+#   "sessionId": "live-session",
+#   "mountpointId": 1,
+#   "viewers": 0,
+#   "uptime": 45
+# }
+
+
+
+### Step 8: Test WHEP viewer
+
+# Apri browser
+open http://localhost:7073/?id=live-session
+
+# Oppure usa curl per verificare endpoint WHEP
+curl -I http://localhost:7073/whep/endpoint/live-session
 
 ## SCENARIO 2: Cambio Figlio - STESSO SessionID (Update Forwarder)
 
-**Obiettivo**: Cambiare il child da `relay-gst-1` a `relay-gst-2` senza cambiare `sessionId`.
-
-⚠️ **PROBLEMA ATTUALE**: Questo approccio **NON funziona** perché:
-- `destroyEndpoint()` causa errori di race condition
-- Non esiste un metodo `updateForwarder()` nella libreria
-- Dobbiamo ricreare l'endpoint con un nuovo sessionId
-
-### Test (attualmente fallisce)
+### Obiettivo:
+Da: injection-1 → relay-1 → relay-2 → egress-1
+A: injection-1 → relay-1 → egress-1
 
 # Partendo dallo Scenario 1 attivo...
 
-# Avvia relay-gst-2
+# Verifica pipeline prima del cambio
+curl http://localhost:7071/status | jq '.gstreamer.audioRestarts'
+# Output: 1
+
+curl http://localhost:7073/pipelines | jq '.audio.restarts'
+# Output: 1
+
+# Step 1: Trigger cambio topologia
+
+# Rimuovi relay-gst-2 da relay-gst-1 children
+docker exec redis redis-cli SREM children:relay-gst-1 relay-gst-2
+
+# Aggiungi egress-1 direttamente a relay-gst-1
+docker exec redis redis-cli SADD children:relay-gst-1 egress-1
+
+# Aggiorna parent di egress-1
+docker exec redis redis-cli SET parent:egress-1 relay-gst-1
+
+# Verifica cambio in Redis
+docker exec redis redis-cli SMEMBERS children:relay-gst-1
+# Output: "egress-1"
+
+docker exec redis redis-cli GET parent:egress-1
+# Output: "relay-gst-1"
+
+
+# Aspetta polling 
+
+sleep 35
+
+# Verifica topologia aggiornata
+curl http://localhost:7071/topology | jq
+# Output: {"parent": "injection-1", "children": ["egress-1"]}
+
+curl http://localhost:7072/topology | jq
+# Output: {"parent": "relay-gst-1", "children": []} ← children vuoto!
+
+curl http://localhost:7073/topology | jq
+# Output: {"parent": "relay-gst-1", "children": []}
+
+# Step 4: Monitora ricreazione pipeline
+
+# Segui log relay-1 (dovrebbe restartare pipeline)
+docker logs -f relay-gst-1
+
+# Output atteso:
+# [relay-gst-1] Children changed (+1 -1)
+# [relay-gst-1] Added children: [egress-1]
+# [relay-gst-1] Removed children: [relay-gst-2]
+# [relay-gst-1] Rebuilding GStreamer pipelines...
+# [relay-gst-1] Stopping audio pipeline...
+# [relay-gst-1] Stopping video pipeline...
+# [relay-gst-1] Starting pipelines for 1 children
+# [relay-gst-1] Starting audio pipeline (attempt #2)
+# [relay-gst-1] Audio pipeline: gst-launch-1.0 udpsrc port=5002 ... ! udpsink host=egress-1 port=5002 ...
+
+# In un'altra shell, segui log relay-2 (pipeline dovrebbe stopparsi)
+docker logs -f relay-gst-2
+
+# Output atteso:
+# [relay-gst-2] Children changed (+0 -1)
+# [relay-gst-2] Removed children: [egress-1]
+# [relay-gst-2] Rebuilding GStreamer pipelines...
+# [relay-gst-2] Stopping audio pipeline...
+# [relay-gst-2] Stopping video pipeline...
+# [relay-gst-2] No children, pipelines stopped
+
+# Step 5: Verifica stream continua
+# Verifica che il broadcaster sia ancora connesso
+docker logs whip-client --tail 10
+
+# Verifica sessioni ancora attive
+curl http://localhost:7070/session | jq '.active'
+# Output: true
+
+curl http://localhost:7073/session | jq '.active'
+# Output: true
+
+# Verifica pipeline restarts incrementati
+curl http://localhost:7071/status | jq '.gstreamer.audioRestarts'
+# Output: 2 ← Incrementato!
+
+curl http://localhost:7073/pipelines | jq '.audio.restarts'
+# Output: 1 ← NON cambia (egress non ha rebuiltato)
+
+# Verifica relay-2 pipeline fermate
+curl http://localhost:7072/status | jq '.gstreamer'
+# Output: {"audioRunning": false, "videoRunning": false, ...}
+
+# Step 6: Test viewer ancora funzionante
+
+# Ricarica pagina browser
+open http://localhost:7073/?id=live-session
+
+## SCENARIO 3: Topology Change 
+
+# Obiettivo: Aggiungere relay-2 di nuovo nella catena.
+
+Da: injection-1 → relay-1 → egress-1
+A: injection-1 → relay-1 → relay-2 → egress-1
+
+# Partenza dallo Scenario 2 completato
+# relay-2 container già running (se non lo è):
 docker-compose -f docker-compose.test.yaml --profile relay-switch up -d relay-gst-2
 sleep 5
 
-# Cambia topologia in Redis
-docker exec redis redis-cli DEL children:injection-1
-docker exec redis redis-cli SADD children:injection-1 relay-gst-2
-docker exec redis redis-cli SET parent:relay-gst-2 injection-1
 
-docker exec redis redis-cli SADD children:relay-gst-2 receiver-1
-docker exec redis redis-cli SET parent:receiver-1 relay-gst-2
+# Step 1: Trigger cambio topologia
+
+# Rimuovi egress-1 da relay-1 children
+docker exec redis redis-cli SREM children:relay-gst-1 egress-1
+
+# Aggiungi relay-2 a relay-1 children
+docker exec redis redis-cli SADD children:relay-gst-1 relay-gst-2
+
+# Aggiungi egress-1 a relay-2 children
+docker exec redis redis-cli SADD children:relay-gst-2 egress-1
+
+# Aggiorna parent di egress-1
+docker exec redis redis-cli SET parent:egress-1 relay-gst-2
+
+# Verifica
+docker exec redis redis-cli SMEMBERS children:relay-gst-1
+# Output: "relay-gst-2"
+
+docker exec redis redis-cli SMEMBERS children:relay-gst-2
+# Output: "egress-1"
+
+# Step 2: Aspetta polling
+
+sleep 35
+
+# Verifica topologia
+curl http://localhost:7071/topology | jq '.children'
+# Output: ["relay-gst-2"]
+
+curl http://localhost:7072/topology | jq
+# Output: {"parent": "relay-gst-1", "children": ["egress-1"]}
+
+curl http://localhost:7073/topology | jq '.parent'
+# Output: "relay-gst-2"
+
+
+
+# Step 3: Verifica pipeline riavviate
+
+# relay-1 dovrebbe restartare (child cambiato)
+curl http://localhost:7071/status | jq '.gstreamer.audioRestarts'
+# Output: 3 ← Incrementato di nuovo!
+
+# relay-2 dovrebbe restartare (riaggiunta catena)
+curl http://localhost:7072/status | jq '.gstreamer'
+# Output: {"audioRunning": true, "videoRunning": true, "audioRestarts": 2, ...}
+
+# egress NON dovrebbe restartare
+curl http://localhost:7073/pipelines | jq '.audio.restarts'
+# Output: 1 ← Invariato
+
+
+# Step 6: Test viewer ancora funzionante
+
+# Ricarica pagina browser
+open http://localhost:7073/?id=live-session
+
+## SCENARIO 4: Viewer Scale 2 Janus-streaming Instance
+
+# Obiettivo: Distribuire i viewers su 2 istanze Janus per scalare
+
+**Architettura**:
+broadcaster → injection-1 → relay-1 → egress-1 → janus-streaming-1
+                                  └ → egress-2 → janus-streaming-2
+
+# Step 1: Avvia infra con scale-out
+
+# Start base infra + secondo Janus + secondo egress
+docker-compose -f docker-compose.test.yaml up -d redis janus-videoroom janus-streaming-1
+docker-compose -f docker-compose.test.yaml --profile scale-out up -d janus-streaming-2
+sleep 5
+
+# Flush Redis
+docker exec redis redis-cli FLUSHALL
+
+# Avvia nodi
+docker-compose -f docker-compose.test.yaml up -d injection-1 relay-gst-1 egress-1
+docker-compose -f docker-compose.test.yaml --profile scale up -d egress-2
+sleep 5
+
+# Step 2: Verifica istanze Janus
+
+# Janus 1 (primary)
+docker logs janus-streaming-1 | grep "WebSocket server"
+curl -s http://localhost:8089/janus/info | jq
+
+# Janus 2 (scale)
+docker logs janus-streaming-2 | grep "WebSocket server"
+curl -s http://localhost:8090/janus/info | jq
+
+# Verifica status
+curl http://localhost:7070/status | jq '{nodeId, nodeType, healthy}'             # injection
+curl http://localhost:7071/status | jq '{nodeId, nodeType, healthy}'             # relay 
+curl http://localhost:7073/status | jq '{nodeId, nodeType, healthy, janus}'      # egress 1
+curl http://localhost:7074/status | jq '{nodeId, nodeType, healthy, janus}'      # egress 2
+
+# Step 3: Setup redis
+
+# injection → relay-1
+docker exec redis redis-cli SADD children:injection-1 relay-gst-1
+docker exec redis redis-cli SET parent:relay-gst-1 injection-1
+
+# relay-1 → egress-1, egress-2 (fan-out)
+docker exec redis redis-cli SADD children:relay-gst-1 egress-1
+docker exec redis redis-cli SADD children:relay-gst-1 egress-2
+docker exec redis redis-cli SET parent:egress-1 relay-gst-1
+docker exec redis redis-cli SET parent:egress-2 relay-gst-1
 
 # Aspetta polling
 sleep 35
 
-# Monitora log (vedrai l'errore)
-docker logs -f injection-1
+# Verifica topologia
+curl http://localhost:7071/topology | jq '.children'
+# Output: ["egress-1", "egress-2"]
 
-**Risultato atteso**: ❌ Crash con errore `"Invalid endpoint ID"`
+# Step 4: Verifica pipeline
 
-**Motivo**: 
-- `onChildrenChanged()` chiama `destroySession()`
-- `destroySession()` non chiama `destroyEndpoint()` per evitare race conditions
-- `createSession()` prova a creare endpoint con stesso ID
-- La libreria fallisce perché l'endpoint esiste già
-
----
-
-## SCENARIO 3: Cambio Figlio - NUOVO SessionID (Soluzione Workaround)
-
-**Obiettivo**: Cambiare il child creando un nuovo endpoint con sessionId diverso.
-
-⚠️ **Downtime**: ~2-5 secondi (broadcaster deve riconnettersi)
-
-### Step 1: Setup iniziale
-
-# Parti dallo Scenario 1 completo e funzionante
-# (whip-client attivo, stream in corso)
-
-### Step 2: Trigger cambio topologia
-
-# Avvia relay-gst-2
-docker-compose -f docker-compose.test.yaml --profile relay-switch up -d relay-gst-2
-sleep 5
-
-# Cambia topologia in Redis (operazione ATOMICA preferita)
-docker exec redis redis-cli EVAL "redis.call('DEL', KEYS[1]); return redis.call('SADD', KEYS[1], ARGV[1])" 1 children:injection-1 relay-gst-2
-docker exec redis redis-cli SET parent:relay-gst-2 injection-1
-
-docker exec redis redis-cli SADD children:relay-gst-2 receiver-1
-docker exec redis redis-cli SET parent:receiver-1 relay-gst-2
-
-# Aspetta polling (30s + processing)
-sleep 35
-
-### Step 3: Monitora ricreazione endpoint
-
-# Segui log injection node
-docker logs -f injection-1
+# relay-1 dovrebbe usare "tee" per splittare lo stream
+docker logs relay-gst-1 | grep -A 5 "Starting audio pipeline"
 
 # Output atteso:
-# 🔵 onChildrenChanged CALLED [...]
-#    Added: [relay-gst-2]
-#    Removed: [relay-gst-1]
-# 🔒 Setting flag
-# ⚠️ Child changed to relay-gst-2
-# 🔄 Recreating endpoint
-# 🗑️  Calling destroySession
-# ✅ Session destroyed
-# 🆕 Creating new session: live-session-1759941312469
-# ✅ Endpoint recreated
-#
-# ========================================
-# ENDPOINT RECREATED SUCCESSFULLY!
-# ========================================
-# Old ID: live-session
-# New ID: live-session-1759941312469
-#
-# 🔧 RESTART BROADCASTER WITH NEW URL:
-# docker-compose -f docker-compose.test.yaml --profile streaming run --rm \
-#   -e URL=http://injection-1:7070/whip/endpoint/live-session-1759941312469 whip-client
-# ========================================
+# Audio pipeline: gst-launch-1.0 udpsrc port=5002 ... ! tee name=t_audio allow-not-linked=true
+#   t_audio. ! queue ... ! udpsink host=egress-1 port=5002 ...
+#   t_audio. ! queue ... ! udpsink host=egress-2 port=5002 ...
 
-### Step 4: Ricollega broadcaster
+# Verifica entrambi gli egress ricevono
+curl http://localhost:7073/pipelines | jq '.audio.running'
+# Output: true
 
-# Stop vecchio broadcaster
-docker-compose -f docker-compose.test.yaml --profile streaming down
+curl http://localhost:7074/pipelines | jq '.audio.running'
+# Output: true
 
-# COPIA il comando dal log (con il nuovo sessionId)
-# Esempio:
-docker-compose -f docker-compose.test.yaml --profile streaming run --rm \
-  -e URL=http://injection-1:7070/whip/endpoint/live-session-1759941312469 whip-client
+# Step 5: Crea sessioni
 
-### Step 5: Verifica nuovo stream
+# Egress 1 (janus-streaming-1, mountpoint 1)
+curl -X POST http://localhost:7073/session/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "live-stream",
+    "mountpointId": 1
+  }' | jq
 
-# Verifica che relay-gst-2 riceva lo stream
-docker logs relay-gst-2 | tail -20
+# Egress 2 (janus-streaming-2, mountpoint 1)
+curl -X POST http://localhost:7074/session/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "live-stream",
+    "mountpointId": 1
+  }' | jq
 
-# Verifica receiver continua a ricevere
-docker exec receiver-1 tcpdump -i eth0 -n udp port 6000 -c 10
+# Nota: Stesso sessionId
 
-# Status aggiornato
-curl http://localhost:7070/session | jq
-# Output:
-# {
-#   "active": true,
-#   "sessionId": "live-session-1759941312469",  ← Nuovo ID
-#   "recipient": {
-#     "host": "relay-gst-2",  ← Nuovo relay
-#     ...
-#   }
-# }
+# Step 6: Avvia broadcaster
 
----
-
-## SCENARIO 4: Catena Completa con Cambio
-
-**Flow**: `whip → janus → injection → relay-1 → relay-2 → receiver`
-
-### Setup catena
-
-# Start tutti i componenti
-docker-compose -f docker-compose.test.yaml up -d redis janus-videoroom injection-1 relay-gst-1 relay-gst-2 receiver-1
-
-# Flush Redis
-docker exec redis redis-cli FLUSHALL
-sleep 3
-
-# Registra receiver
-docker exec redis redis-cli HSET node:receiver-1 \
-  id receiver-1 type egress host rtp-receiver-gst-1 port 7000 \
-  audioPort 6000 videoPort 6002 status active
-docker exec redis redis-cli EXPIRE node:receiver-1 300
-
-# Topologia: injection → relay-1 → relay-2 → receiver
-docker exec redis redis-cli SADD children:injection-1 relay-gst-1
-docker exec redis redis-cli SET parent:relay-gst-1 injection-1
-
-docker exec redis redis-cli SADD children:relay-gst-1 relay-gst-2
-docker exec redis redis-cli SET parent:relay-gst-2 relay-gst-1
-
-docker exec redis redis-cli SADD children:relay-gst-2 receiver-1
-docker exec redis redis-cli SET parent:receiver-1 relay-gst-2
-
-sleep 35
-
-# Crea sessione e avvia broadcaster
+# Crea sessione injection
 curl -X POST http://localhost:7070/session/create \
   -H "Content-Type: application/json" \
   -d '{
-    "sessionId": "chain-session",
-    "roomId": 5678,
-    "recipient": {"host": "relay-gst-1", "audioPort": 5002, "videoPort": 5004}
+    "sessionId": "live-session",
+    "roomId": 1234,
+    "recipient": {
+      "host": "relay-gst-1",
+      "audioPort": 5002,
+      "videoPort": 5004
+    }
   }' | jq
 
-docker-compose -f docker-compose.test.yaml --profile streaming run --rm \
-  -e URL=http://injection-1:7070/whip/endpoint/chain-session whip-client
+# Start broadcaster
+docker-compose -f docker-compose.test.yaml --profile streaming up -d whip-client
+sleep 8
 
-### Verifica catena
+# Step 7: Verifica RTP su entrambi i Janus
 
-# Ogni nodo dovrebbe avere pipeline attiva
-docker logs relay-gst-1 | grep "pipeline"
-docker logs relay-gst-2 | grep "pipeline"
+# RTP su janus-streaming-1
+docker exec -it janus-streaming-1 sh -c 'apt-get update && apt-get install -y tcpdump'
+docker exec janus-streaming-1 tcpdump -i eth0 -n 'udp port 5002' -c 5
+# Dovrebbe vedere pacchetti RTP
 
-# Verifica pacchetti su relay-2 (input)
-docker exec relay-gst-2 sh -c 'apt-get update && apt-get install -y tcpdump'
-docker exec relay-gst-2 tcpdump -i eth0 -n udp port 5102 -c 5
+# RTP su janus-streaming-2
+docker exec -it janus-streaming-2 sh -c 'apt-get update && apt-get install -y tcpdump'
+docker exec janus-streaming-2 tcpdump -i eth0 -n 'udp port 5002' -c 5
+# Dovrebbe vedere pacchetti RTP
 
-# Verifica pacchetti su receiver (output)
-docker exec receiver-1 tcpdump -i eth0 -n udp port 6000 -c 5
+# Step 8: Test viewers su entrambe le istanze
 
----
+# Viewer 1 → Janus 1
+open http://localhost:7073/?id=live-stream
 
-## Troubleshooting
+# Viewer 2 → Janus 2
+open http://localhost:7074/?id=live-stream
 
-### Injection node non si connette a Janus
+# Session status egress-1
+curl http://localhost:7073/session | jq
 
-# Verifica Janus è attivo
-docker logs janus-videoroom | grep "WebSocket server"
+# Output:
+# {
+#   "active": true,
+#   "sessionId": "live-stream",
+#   "mountpointId": 1,
+#   "viewers": 1,  ← Viewers su questo Janus
+#   "uptime": 120
+# }
 
-# Ping da injection a janus
-docker exec injection-1 ping janus-videoroom -c 3
+# Session status egress-2
+curl http://localhost:7074/session | jq
 
-# Verifica env
-docker exec injection-1 env | grep JANUS
+# Output:
+# {
+#   "active": true,
+#   "sessionId": "live-stream",
+#   "mountpointId": 1,
+#   "viewers": 1,  ← Viewers su questo Janus
+#   "uptime": 115
+# }
 
-### Endpoint già esistente
+# TOTALE viewers = 2 (distribuiti tra i 2 Janus)
 
-# Verifica sessione attiva
-curl http://localhost:7070/session | jq
+# SCENARIO 4-B: Remove Scale
 
-# Distruggi sessione manuale
-curl -X POST http://localhost:7070/session/destroy
+# Step 1: Rimuovi egress-2 dalla chain
 
-# Ricrea
-curl -X POST http://localhost:7070/session/create \
-  -H "Content-Type: application/json" \
-  -d '{"sessionId": "new-session", "roomId": 9999, "recipient": {...}}'
+# Rimuovi egress-2 da relay-1 children
+docker exec redis redis-cli SREM children:relay-gst-1 egress-2
 
-### Nessun pacchetto RTP sul receiver
+# Aspetta polling
+sleep 35
 
-# Verifica GStreamer su relay
-docker logs relay-gst-1 | grep "Setting pipeline"
+# Verifica topologia
+curl http://localhost:7071/topology | jq '.children'
+# Output: ["egress-1"]  ← Solo egress-1 rimane
 
-# Verifica porte aperte
-docker exec relay-gst-1 netstat -uln | grep 5002
+# Verifica relay-1 pipeline rebuiltata
+docker logs relay-gst-1 | tail -20
+# Dovrebbe mostrare: "Rebuilding GStreamer pipelines..."
+# E pipeline ora usa udpsink singolo invece di tee
 
-# Test connettività
-docker exec relay-gst-1 ping rtp-receiver-gst-1 -c 3
+# Step 2: Verifica egress-1 continua a funzionare
 
-# Verifica caps RTP
-docker exec receiver-1 gst-launch-1.0 \
-  udpsrc port=6000 caps="application/x-rtp" ! fakesink
+# Session egress-1 ancora attiva
+curl http://localhost:7073/session | jq '.active'
+# Output: true
 
-### Race condition su destroyEndpoint
+# Viewer su egress-1 continua a vedere stream
+open http://localhost:7073/?id=live-stream
 
-**Sintomo**: Crash con `Error: Invalid endpoint ID`
+# egress-2 non riceve più RTP
+curl http://localhost:7074/pipelines | jq '.audio.running'
+# Output: true (pipeline running ma nessun pacchetto in arrivo)
 
-**Causa**: La libreria janus-whip-server fa cleanup automatico quando il broadcaster si disconnette, creando race condition con la nostra chiamata manuale.
+# Step 3: Re-add egress-2
 
-**Soluzione attuale**: Non chiamare `destroyEndpoint()` in `destroySession()` - vedi codice commentato.
+# Re-aggiungi egress-2
+docker exec redis redis-cli SADD children:relay-gst-1 egress-2
 
-**TODO**: Ricercare se esiste `updateForwarder()` o metodo simile per aggiornare il recipient senza distruggere l'endpoint.
+# Aspetta polling
+sleep 35
 
----
+# Verifica relay-1 rebuiltato con tee di nuovo
+docker logs relay-gst-1 | tail -20
+
+# Verifica egress-2 riceve di nuovo RTP
+docker exec janus-streaming-2 tcpdump -i eth0 -n 'udp port 5002' -c 5
+
+# Test viewer su egress-2
+open http://localhost:7074/?id=live-stream
+
 
 ## Cleanup
 
@@ -383,7 +592,7 @@ docker exec receiver-1 gst-launch-1.0 \
 docker-compose -f docker-compose.test.yaml down
 docker-compose -f docker-compose.test.yaml --profile streaming down
 docker-compose -f docker-compose.test.yaml --profile relay-switch down
-
+docker-compose -f docker-compose.test.yaml --profile scale down
 # Rimuovi volumi
 docker volume prune -f
 
@@ -392,23 +601,22 @@ docker exec redis redis-cli FLUSHALL
 
 ---
 
-## Note Tecniche
 
-### Limiti attuali
 
-1. **No hot-swap**: Non è possibile cambiare il recipient senza ricreare l'endpoint
-2. **Downtime obbligatorio**: ~2-5 secondi quando cambia la topologia
-3. **SessionID change**: Il broadcaster deve riconnettersi con un nuovo URL
+# VECCHIO TEST 2 POI CI PENSIAMO
 
-### Possibili soluzioni future
+**Obiettivo**: Cambiare il child da `relay-gst-1` a `relay-gst-2` senza cambiare `sessionId`.
 
-1. **Metodo `updateForwarder()`**: Aggiornare solo il recipient RTP senza toccare WebRTC
-2. **Dual-endpoint**: Mantenere due endpoint durante la transizione
-3. **Fork libreria**: Estendere janus-whip-server con funzionalità custom
+⚠️ **PROBLEMA ATTUALE**: Questo approccio **NON funziona** perché:
+- `destroyEndpoint()` causa errori di race condition
+- Non esiste un metodo `updateForwarder()` nella libreria
+- Dobbiamo ricreare l'endpoint con un nuovo sessionId
 
-### Architettura consigliata
 
-Per produzione, valutare:
-- **Load balancer** davanti agli injection nodes per nascondere i cambi di endpoint
-- **Signaling layer** per notificare broadcaster dei cambi URL senza downtime
-- **Health checks** per rilevare relay down e triggerare switch automatici
+**Motivo**: 
+- `onChildrenChanged()` chiama `destroySession()`
+- `destroySession()` non chiama `destroyEndpoint()` per evitare race conditions
+- `createSession()` prova a creare endpoint con stesso ID
+- La libreria fallisce perché l'endpoint esiste già
+
+---

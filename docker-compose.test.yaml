@@ -32,6 +32,43 @@ services:
     networks:
       - media-tree
 
+  janus-streaming-1:
+    build:
+      context: ./janus-streaming
+      dockerfile: Dockerfile
+    container_name: janus-streaming-1
+    ports:
+      - "8089:8088" # HTTP API
+      - "8189:8188" # WebSocket
+      - "6002:5002/udp" # RTP Audio
+      - "6004:5004/udp" # RTP Video
+      - "20051-20150:20051-20150/udp"
+    volumes:
+      - ./janus-streaming/config:/opt/janus/etc/janus:ro
+    environment:
+      - JANUS_LOG_LEVEL=4
+    networks:
+      - media-tree
+
+  janus-streaming-2:
+    build:
+      context: ./janus-streaming
+      dockerfile: Dockerfile
+    container_name: janus-streaming-2
+    ports:
+      - "8190:8188" # WebSocket
+      - "8090:8088" # HTTP API
+      - "7002:5002/udp" # RTP Audio
+      - "7004:5004/udp" # RTP Video
+      - "20151-20200:20101-20150/udp" # WebRTC
+    volumes:
+      - ./janus-streaming/config:/opt/janus/etc/janus:ro
+    environment:
+      - JANUS_LOG_LEVEL=4
+    networks:
+      - media-tree
+    profiles:
+      - scale
   # ============ INJECTION NODE ============
 
   injection-1:
@@ -109,21 +146,72 @@ services:
     profiles:
       - relay-switch
 
-  # ============ RTP RECEIVER ============
+  # ============ EGRESS NODE ============
 
-  receiver-1:
-    build: ./relay-node-gstreamer/test
-    container_name: rtp-receiver-gst-1
-    environment:
-      - MODE=receiver
-      - LISTEN_AUDIO_PORT=6000
-      - LISTEN_VIDEO_PORT=6002
-      - GST_DEBUG=2
+  egress-1:
+    build:
+      context: .
+      dockerfile: egress-node/Dockerfile
+    container_name: egress-1
     ports:
-      - "6000:6000/udp"
-      - "6002:6002/udp"
+      - "7073:7073"
+    environment:
+      - NODE_ID=egress-1
+      - NODE_HOST=egress-1
+      - API_PORT=7073
+      - RTP_AUDIO_PORT=5002
+      - RTP_VIDEO_PORT=5004
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JANUS_STREAMING_WS_URL=ws://janus-streaming:8188
+      - WHEP_BASE_PATH=/whep
+      - WHEP_TOKEN=verysecret
+    depends_on:
+      - redis
+      - janus-streaming-1
     networks:
       - media-tree
+
+  egress-2:
+    build:
+      context: .
+      dockerfile: egress-node/Dockerfile
+    container_name: egress-2
+    ports:
+      - "7074:7074"
+    environment:
+      - NODE_ID=egress-2
+      - NODE_HOST=egress-2
+      - API_PORT=7074
+      - RTP_AUDIO_PORT=5002
+      - RTP_VIDEO_PORT=5004
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JANUS_STREAMING_WS_URL=ws://janus-streaming-2:8188
+      - WHEP_BASE_PATH=/whep
+      - WHEP_TOKEN=verysecret
+    depends_on:
+      - redis
+      - janus-streaming-2
+    networks:
+      - media-tree
+    profiles:
+      - scale
+  ## ============ RTP RECEIVER ============
+  #
+  #receiver-1:
+  #  build: ./relay-node-gstreamer/test
+  #  container_name: rtp-receiver-gst-1
+  #  environment:
+  #    - MODE=receiver
+  #    - LISTEN_AUDIO_PORT=6000
+  #    - LISTEN_VIDEO_PORT=6002
+  #    - GST_DEBUG=2
+  #  ports:
+  #    - "6000:6000/udp"
+  #    - "6002:6002/udp"
+  #  networks:
+  #    - media-tree
 
   # ============ WHIP CLIENT ============
 

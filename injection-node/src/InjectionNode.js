@@ -12,7 +12,7 @@ export class InjectionNode extends BaseNode {
         this.whipToken = config.whip?.token || 'verysecret';
         this.whipSecret = config.whip?.secret || 'adminpwd';
 
-        // Sessione unica
+        // Sessione
         this.currentSession = {
             sessionId: null,
             roomId: null,
@@ -230,20 +230,20 @@ export class InjectionNode extends BaseNode {
         console.log(`   Session ID: ${this.currentSession.sessionId}`);
         console.log(`   isDestroyingSession: ${this.isDestroyingSession}`);
 
+        // Check sessione attiva
+        if (!this.currentSession.active) {
+            console.error(`[${this.nodeId}] No active session to destroy`);
+            throw new Error('No active session to destroy');
+        }
         // Check se già in corso
         if (this.isDestroyingSession) {
             console.warn(`[${this.nodeId}] destroySession already in progress`);
             return { sessionId: this.currentSession.sessionId };
         }
 
-        // Check sessione attiva
-        if (!this.currentSession.active) {
-            console.error(`[${this.nodeId}] No active session to destroy`);
-            throw new Error('No active session to destroy');
-        }
-
         // lock
         this.isDestroyingSession = true;
+
 
         const sessionId = this.currentSession.sessionId;
         console.log(`[${this.nodeId}] Destroying session: ${sessionId}`);
