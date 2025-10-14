@@ -1,5 +1,4 @@
 FROM debian:12-slim
-
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,7 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
 COPY entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
 

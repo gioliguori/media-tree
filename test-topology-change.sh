@@ -51,7 +51,7 @@ banner() {
 banner "PHASE 1: BUILD & STARTUP"
 
 step "Building images"
-docker-compose -f docker-compose.test.yaml build injection-1 relay-gst-1 relay-gst-2 egress-1
+docker-compose -f docker-compose.test.yaml build injection-1 relay-1 relay-2 egress-1
 
 step "Stopping all containers"
 docker-compose -f docker-compose.test.yaml down
@@ -75,8 +75,8 @@ step "Flushing Redis"
 docker exec redis redis-cli FLUSHALL
 
 step "Starting media nodes"
-docker-compose -f docker-compose.test.yaml up -d injection-1 relay-gst-1 egress-1
-docker-compose -f docker-compose.test.yaml --profile relay-switch up -d relay-gst-2
+docker-compose -f docker-compose.test.yaml up -d injection-1 relay-1 egress-1
+docker-compose -f docker-compose.test.yaml --profile relay-switch up -d relay-2
 wait_step 10
 
 # ============================================
@@ -88,10 +88,10 @@ banner "PHASE 2: VERIFY STARTUP"
 check "Checking injection-1 status"
 curl -s http://localhost:7070/status | jq '{nodeId, nodeType, healthy}'
 
-check "Checking relay-gst-1 status"
+check "Checking relay-1 status"
 curl -s http://localhost:7071/status | jq '{nodeId, nodeType, healthy}'
 
-check "Checking relay-gst-2 status"
+check "Checking relay-2 status"
 curl -s http://localhost:7072/status | jq '{nodeId, nodeType, healthy}'
 
 check "Checking egress-1 status"
@@ -102,33 +102,33 @@ curl -s http://localhost:7073/status | jq '{nodeId, nodeType, healthy}'
 # ============================================
 
 banner "PHASE 3: SETUP 4-LEVEL TOPOLOGY"
-info "injection-1 → relay-gst-1 → relay-gst-2 → egress-1"
+info "injection-1 → relay-1 → relay-2 → egress-1"
 
 step "Configuring topology in Redis"
 
-# injection-1 → relay-gst-1
-docker exec redis redis-cli SADD children:injection-1 relay-gst-1
-docker exec redis redis-cli SET parent:relay-gst-1 injection-1
+# injection-1 → relay-1
+docker exec redis redis-cli SADD children:injection-1 relay-1
+docker exec redis redis-cli SET parent:relay-1 injection-1
 
-# relay-gst-1 → relay-gst-2
-docker exec redis redis-cli SADD children:relay-gst-1 relay-gst-2
-docker exec redis redis-cli SET parent:relay-gst-2 relay-gst-1
+# relay-1 → relay-2
+docker exec redis redis-cli SADD children:relay-1 relay-2
+docker exec redis redis-cli SET parent:relay-2 relay-1
 
-# relay-gst-2 → egress-1
-docker exec redis redis-cli SADD children:relay-gst-2 egress-1
-docker exec redis redis-cli SET parent:egress-1 relay-gst-2
+# relay-2 → egress-1
+docker exec redis redis-cli SADD children:relay-2 egress-1
+docker exec redis redis-cli SET parent:egress-1 relay-2
 
 check "Verifying Redis topology"
 echo "  injection-1 children:"
 docker exec redis redis-cli SMEMBERS children:injection-1
 
-echo "  relay-gst-1 parent/children:"
-docker exec redis redis-cli GET parent:relay-gst-1
-docker exec redis redis-cli SMEMBERS children:relay-gst-1
+echo "  relay-1 parent/children:"
+docker exec redis redis-cli GET parent:relay-1
+docker exec redis redis-cli SMEMBERS children:relay-1
 
-echo "  relay-gst-2 parent/children:"
-docker exec redis redis-cli GET parent:relay-gst-2
-docker exec redis redis-cli SMEMBERS children:relay-gst-2
+echo "  relay-2 parent/children:"
+docker exec redis redis-cli GET parent:relay-2
+docker exec redis redis-cli SMEMBERS children:relay-2
 
 echo "  egress-1 parent:"
 docker exec redis redis-cli GET parent:egress-1
@@ -140,10 +140,10 @@ check "Verifying topology propagation to nodes"
 echo "injection-1:"
 curl -s http://localhost:7070/topology | jq '{parent, children}'
 
-echo "relay-gst-1:"
+echo "relay-1:"
 curl -s http://localhost:7071/topology | jq '{parent, children}'
 
-echo "relay-gst-2:"
+echo "relay-2:"
 curl -s http://localhost:7072/topology | jq '{parent, children}'
 
 echo "egress-1:"
@@ -155,10 +155,10 @@ curl -s http://localhost:7073/topology | jq '{parent, children}'
 
 banner "PHASE 4: VERIFY GSTREAMER PIPELINES"
 
-check "relay-gst-1 pipelines"
+check "relay-1 pipelines"
 curl -s http://localhost:7071/status | jq '.gstreamer'
 
-check "relay-gst-2 pipelines"
+check "relay-2 pipelines"
 curl -s http://localhost:7072/status | jq '.gstreamer'
 
 check "egress-1 pipelines"
@@ -177,7 +177,7 @@ INJECTION_RESPONSE=$(curl -s -X POST http://localhost:7070/session/create \
     "sessionId": "live-session",
     "roomId": 1234,
     "recipient": {
-      "host": "relay-gst-1",
+      "host": "relay-1",
       "audioPort": 5002,
       "videoPort": 5004
     }
@@ -225,13 +225,13 @@ banner "PHASE 7: VERIFY RTP FLOW THROUGH 4-LEVEL TREE"
 
 info "Expected flow: broadcaster → janus-videoroom → injection-1 → relay-1 → relay-2 → egress-1 → janus-streaming"
 
-check "RTP at relay-gst-1 input (from injection-1)"
+check "RTP at relay-1 input (from injection-1)"
 info "Checking port 5002..."
-timeout 5 docker exec relay-gst-1 tcpdump -i eth0 -n 'udp port 5002' -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || info "Waiting for packets..."
+timeout 5 docker exec relay-1 tcpdump -i eth0 -n 'udp port 5002' -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || info "Waiting for packets..."
 
-check "RTP at relay-gst-2 input (from relay-1)"
+check "RTP at relay-2 input (from relay-1)"
 info "Checking port 5102..."
-timeout 5 docker exec relay-gst-2 tcpdump -i eth0 -n 'udp port 5102' -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || info "Waiting for packets..."
+timeout 5 docker exec relay-2 tcpdump -i eth0 -n 'udp port 5102' -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || info "Waiting for packets..."
 
 check "RTP at egress-1 input (from relay-2)"
 info "Checking egress-1 receives RTP..."
@@ -246,10 +246,10 @@ banner "4-LEVEL TREE IS WORKING!"
 info "injection-1 → relay-1 → relay-2 → egress-1"
 
 check "Pipeline restart counts (should all be 1)"
-echo "relay-gst-1:"
+echo "relay-1:"
 curl -s http://localhost:7071/status | jq '.gstreamer | {audioRestarts, videoRestarts}'
 
-echo "relay-gst-2:"
+echo "relay-2:"
 curl -s http://localhost:7072/status | jq '.gstreamer | {audioRestarts, videoRestarts}'
 
 echo "egress-1:"
@@ -267,7 +267,7 @@ read -p "Press ENTER to continue with topology change test..."
 banner "PHASE 8: TOPOLOGY CHANGE TEST"
 info "Changing from: injection-1 → relay-1 → relay-2 → egress-1"
 info "           to: injection-1 → relay-1 → egress-1"
-info "Removing relay-gst-2 from the chain..."
+info "Removing relay-2 from the chain..."
 
 echo ""
 read -p "Press ENTER to trigger topology change..." 
@@ -283,33 +283,33 @@ info "egress-1 restarts before: audio=$EGRESS_AUDIO_BEFORE video=$EGRESS_VIDEO_B
 
 step "Changing topology in Redis"
 
-# Remove relay-gst-2 from relay-gst-1 children
-docker exec redis redis-cli SREM children:relay-gst-1 relay-gst-2
+# Remove relay-2 from relay-1 children
+docker exec redis redis-cli SREM children:relay-1 relay-2
 
-# Add egress-1 directly to relay-gst-1 children
-docker exec redis redis-cli SADD children:relay-gst-1 egress-1
+# Add egress-1 directly to relay-1 children
+docker exec redis redis-cli SADD children:relay-1 egress-1
 
 # Update egress-1 parent
-docker exec redis redis-cli SET parent:egress-1 relay-gst-1
+docker exec redis redis-cli SET parent:egress-1 relay-1
 
 check "Verifying Redis topology after change"
-echo "  relay-gst-1 children (should have egress-1):"
-docker exec redis redis-cli SMEMBERS children:relay-gst-1
+echo "  relay-1 children (should have egress-1):"
+docker exec redis redis-cli SMEMBERS children:relay-1
 
-echo "  relay-gst-2 children (should be empty):"
-docker exec redis redis-cli SMEMBERS children:relay-gst-2
+echo "  relay-2 children (should be empty):"
+docker exec redis redis-cli SMEMBERS children:relay-2
 
-echo "  egress-1 parent (should be relay-gst-1):"
+echo "  egress-1 parent (should be relay-1):"
 docker exec redis redis-cli GET parent:egress-1
 
 check "Waiting for topology polling (35s)"
 wait_step 35
 
 check "Verifying topology propagation after change"
-echo "relay-gst-1:"
+echo "relay-1:"
 curl -s http://localhost:7071/topology | jq
 
-echo "relay-gst-2:"
+echo "relay-2:"
 curl -s http://localhost:7072/topology | jq
 
 echo "egress-1:"
@@ -325,8 +325,8 @@ info "New expected flow: broadcaster → janus-videoroom → injection-1 → rel
 
 wait_step 5
 
-check "RTP at relay-gst-1 (should still work)"
-timeout 5 docker exec relay-gst-1 tcpdump -i eth0 -n 'udp port 5002' -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || error "✗ No RTP packets!"
+check "RTP at relay-1 (should still work)"
+timeout 5 docker exec relay-1 tcpdump -i eth0 -n 'udp port 5002' -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || error "✗ No RTP packets!"
 
 check "RTP at egress-1 (now from relay-1 directly)"
 timeout 5 docker exec egress-1 tcpdump -i eth0 -n "udp port $EGRESS_AUDIO_PORT" -c 3 2>&1 | grep "UDP" && info "✓ RTP packets detected!" || error "✗ No RTP packets!"
@@ -362,7 +362,7 @@ else
     info "⚠ egress-1 audio pipeline restarted (unexpected but not critical)"
 fi
 
-check "relay-gst-2 pipeline status (should have stopped)"
+check "relay-2 pipeline status (should have stopped)"
 RELAY2_RUNNING=$(curl -s http://localhost:7072/status | jq '.gstreamer.audioRunning')
 if [ "$RELAY2_RUNNING" == "false" ]; then
     info "✓ relay-2 pipelines stopped (expected)"
@@ -405,12 +405,12 @@ echo "=== INJECTION-1 LOG ==="
 docker logs injection-1 --tail 30
 
 echo ""
-echo "=== RELAY-GST-1 LOG ==="
-docker logs relay-gst-1 --tail 30
+echo "=== relay-1 LOG ==="
+docker logs relay-1 --tail 30
 
 echo ""
-echo "=== RELAY-GST-2 LOG ==="
-docker logs relay-gst-2 --tail 30
+echo "=== relay-2 LOG ==="
+docker logs relay-2 --tail 30
 
 echo ""
 echo "=== EGRESS-1 LOG ==="

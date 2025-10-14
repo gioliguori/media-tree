@@ -98,14 +98,14 @@ services:
 
   # ============ RELAY NODES ============
 
-  relay-gst-1:
+  relay-1:
     build:
       context: .
-      dockerfile: relay-node-gstreamer/Dockerfile
-    container_name: relay-gst-1
+      dockerfile: relay-node/Dockerfile
+    container_name: relay-1
     environment:
-      - NODE_ID=relay-gst-1
-      - NODE_HOST=relay-gst-1
+      - NODE_ID=relay-1
+      - NODE_HOST=relay-1
       - API_PORT=7071
       - AUDIO_PORT=5002
       - VIDEO_PORT=5004
@@ -121,14 +121,14 @@ services:
     networks:
       - media-tree
 
-  relay-gst-2:
+  relay-2:
     build:
       context: .
-      dockerfile: relay-node-gstreamer/Dockerfile
-    container_name: relay-gst-2
+      dockerfile: relay-node/Dockerfile
+    container_name: relay-2
     environment:
-      - NODE_ID=relay-gst-2
-      - NODE_HOST=relay-gst-2
+      - NODE_ID=relay-2
+      - NODE_HOST=relay-2
       - API_PORT=7072
       - AUDIO_PORT=5102
       - VIDEO_PORT=5104
@@ -200,8 +200,8 @@ services:
   ## ============ RTP RECEIVER ============
   #
   #receiver-1:
-  #  build: ./relay-node-gstreamer/test
-  #  container_name: rtp-receiver-gst-1
+  #  build: ./relay-node/test
+  #  container_name: rtp-receiver-1
   #  environment:
   #    - MODE=receiver
   #    - LISTEN_AUDIO_PORT=6000

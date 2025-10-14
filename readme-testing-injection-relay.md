@@ -16,12 +16,12 @@ docker exec redis redis-cli FLUSHALL
 
 ## SCENARIO 1: Basic Flow - WHIP → Janus → Injection → Relay → Receiver
 
-**Flow**: `whip-client → janus-videoroom → injection-1 → relay-gst-1 → relay-gst-2 →egress-1 → janus-streaming
+**Flow**: `whip-client → janus-videoroom → injection-1 → relay-1 → relay-2 →egress-1 → janus-streaming
 
 ### Step 1: Avvia i componenti
 
 # Avvia injection, relay e receiver
-docker-compose -f docker-compose.test.yaml up -d injection-1 relay-gst-1  relay-gst-2 egress-1
+docker-compose -f docker-compose.test.yaml up -d injection-1 relay-1  relay-2 egress-1
 
 sleep 5
 
@@ -34,17 +34,17 @@ curl http://localhost:7073/status | jq '{nodeId, nodeType, healthy}'
 ### Step 2: Configura topologia in Redis
 
 # Configura relazioni
-# injection-1 → relay-gst-1
-docker exec redis redis-cli SADD children:injection-1 relay-gst-1
-docker exec redis redis-cli SET parent:relay-gst-1 injection-1
+# injection-1 → relay-1
+docker exec redis redis-cli SADD children:injection-1 relay-1
+docker exec redis redis-cli SET parent:relay-1 injection-1
 
-# relay-gst-1 → relay-gst-2
-docker exec redis redis-cli SADD children:relay-gst-1 relay-gst-2
-docker exec redis redis-cli SET parent:relay-gst-2 relay-gst-1
+# relay-1 → relay-2
+docker exec redis redis-cli SADD children:relay-1 relay-2
+docker exec redis redis-cli SET parent:relay-2 relay-1
 
-# relay-gst-2 → egress-1
-docker exec redis redis-cli SADD children:relay-gst-2 egress-1
-docker exec redis redis-cli SET parent:egress-1 relay-gst-2
+# relay-2 → egress-1
+docker exec redis redis-cli SADD children:relay-2 egress-1
+docker exec redis redis-cli SET parent:egress-1 relay-2
 
 ### Step 3: Verifica topologia
 
@@ -52,46 +52,46 @@ docker exec redis redis-cli SET parent:egress-1 relay-gst-2
 
 # Verifica relazioni in Redis
 docker exec redis redis-cli SMEMBERS children:injection-1
-# Output: "relay-gst-1"
+# Output: "relay-1"
 
-docker exec redis redis-cli GET parent:relay-gst-1
+docker exec redis redis-cli GET parent:relay-1
 # Output: "injection-1"
 
-docker exec redis redis-cli SMEMBERS children:relay-gst-1
-# Output: "relay-gst-2"
+docker exec redis redis-cli SMEMBERS children:relay-1
+# Output: "relay-2"
 
-docker exec redis redis-cli GET parent:relay-gst-2
-# Output: "relay-gst-1"
+docker exec redis redis-cli GET parent:relay-2
+# Output: "relay-1"
 
-docker exec redis redis-cli SMEMBERS children:relay-gst-2
+docker exec redis redis-cli SMEMBERS children:relay-2
 # Output: "egress-1"
 
 docker exec redis redis-cli GET parent:egress-1
-# Output: "relay-gst-2"
+# Output: "relay-2"
 
 # Aspetta che i nodi registrino le relazioni (polling 30s)
 sleep 35
 
 # Verifica topologia nei nodi
 curl http://localhost:7070/topology | jq
-# Output: {"nodeId": "injection-1", "parent": null, "children": ["relay-gst-1"]}
+# Output: {"nodeId": "injection-1", "parent": null, "children": ["relay-1"]}
 
 curl http://localhost:7071/topology | jq
-# Output: {"nodeId": "relay-gst-1", "parent": "injection-1", "children": ["relay-gst-2"]}
+# Output: {"nodeId": "relay-1", "parent": "injection-1", "children": ["relay-2"]}
 
 curl http://localhost:7072/topology | jq
-# Output: {"nodeId": "relay-gst-2", "parent": "relay-gst-1", "children": ["egress-1"]}
+# Output: {"nodeId": "relay-2", "parent": "relay-1", "children": ["egress-1"]}
 
 curl http://localhost:7073/topology | jq
-# Output: {"nodeId": "egress-1", "parent": "relay-gst-2", "children": []}
+# Output: {"nodeId": "egress-1", "parent": "relay-2", "children": []}
 
 # Step 4: Verifica pipeline GStreamer
 
-# relay-gst-1 pipelines
+# relay-1 pipelines
 curl http://localhost:7071/status | jq '.gstreamer'
 # Output: {"audioRunning": true, "videoRunning": true, "audioRestarts": 1, "videoRestarts": 1}
 
-# relay-gst-2 pipelines
+# relay-2 pipelines
 curl http://localhost:7072/status | jq '.gstreamer'
 # Output: {"audioRunning": true, "videoRunning": true, "audioRestarts": 1, "videoRestarts": 1}
 
@@ -113,7 +113,7 @@ curl -X POST http://localhost:7070/session/create \
     "sessionId": "live-session",
     "roomId": 1234,
     "recipient": {
-      "host": "relay-gst-1",
+      "host": "relay-1",
       "audioPort": 5002,
       "videoPort": 5004
     }
@@ -125,7 +125,7 @@ curl -X POST http://localhost:7070/session/create \
 #   "endpoint": "/whip/endpoint/live-session",
 #   "roomId": 1234,
 #   "recipient": {
-#     "host": "relay-gst-1",
+#     "host": "relay-1",
 #     "audioPort": 5002,
 #     "videoPort": 5004
 #   }
@@ -165,10 +165,10 @@ docker logs whip-client --tail 20
 docker logs injection-1 | tail -20
 
 # Log relay node (dovrebbe mostrare pipeline GStreamer avviata)
-docker logs relay-gst-1 | tail -20
+docker logs relay-1 | tail -20
 
 # Log relay-2 (pipeline attiva)
-docker logs relay-gst-2 | tail -30
+docker logs relay-2 | tail -30
 
 # Log egress (pipeline forwarding a Janus)
 docker logs egress-1 | tail -30
@@ -180,7 +180,7 @@ curl http://localhost:7070/session | jq
 #   "active": true,
 #   "sessionId": "live-session",
 #   "roomId": 1234,
-#   "recipient": {"host": "relay-gst-1", ...},
+#   "recipient": {"host": "relay-1", ...},
 #   "uptime": 45
 # }
 
@@ -221,21 +221,21 @@ curl http://localhost:7073/pipelines | jq '.audio.restarts'
 
 # Step 1: Trigger cambio topologia
 
-# Rimuovi relay-gst-2 da relay-gst-1 children
-docker exec redis redis-cli SREM children:relay-gst-1 relay-gst-2
+# Rimuovi relay-2 da relay-1 children
+docker exec redis redis-cli SREM children:relay-1 relay-2
 
-# Aggiungi egress-1 direttamente a relay-gst-1
-docker exec redis redis-cli SADD children:relay-gst-1 egress-1
+# Aggiungi egress-1 direttamente a relay-1
+docker exec redis redis-cli SADD children:relay-1 egress-1
 
 # Aggiorna parent di egress-1
-docker exec redis redis-cli SET parent:egress-1 relay-gst-1
+docker exec redis redis-cli SET parent:egress-1 relay-1
 
 # Verifica cambio in Redis
-docker exec redis redis-cli SMEMBERS children:relay-gst-1
+docker exec redis redis-cli SMEMBERS children:relay-1
 # Output: "egress-1"
 
 docker exec redis redis-cli GET parent:egress-1
-# Output: "relay-gst-1"
+# Output: "relay-1"
 
 
 # Aspetta polling 
@@ -247,37 +247,37 @@ curl http://localhost:7071/topology | jq
 # Output: {"parent": "injection-1", "children": ["egress-1"]}
 
 curl http://localhost:7072/topology | jq
-# Output: {"parent": "relay-gst-1", "children": []} ← children vuoto!
+# Output: {"parent": "relay-1", "children": []} ← children vuoto!
 
 curl http://localhost:7073/topology | jq
-# Output: {"parent": "relay-gst-1", "children": []}
+# Output: {"parent": "relay-1", "children": []}
 
 # Step 4: Monitora ricreazione pipeline
 
 # Segui log relay-1 (dovrebbe restartare pipeline)
-docker logs -f relay-gst-1
+docker logs -f relay-1
 
 # Output atteso:
-# [relay-gst-1] Children changed (+1 -1)
-# [relay-gst-1] Added children: [egress-1]
-# [relay-gst-1] Removed children: [relay-gst-2]
-# [relay-gst-1] Rebuilding GStreamer pipelines...
-# [relay-gst-1] Stopping audio pipeline...
-# [relay-gst-1] Stopping video pipeline...
-# [relay-gst-1] Starting pipelines for 1 children
-# [relay-gst-1] Starting audio pipeline (attempt #2)
-# [relay-gst-1] Audio pipeline: gst-launch-1.0 udpsrc port=5002 ... ! udpsink host=egress-1 port=5002 ...
+# [relay-1] Children changed (+1 -1)
+# [relay-1] Added children: [egress-1]
+# [relay-1] Removed children: [relay-2]
+# [relay-1] Rebuilding GStreamer pipelines...
+# [relay-1] Stopping audio pipeline...
+# [relay-1] Stopping video pipeline...
+# [relay-1] Starting pipelines for 1 children
+# [relay-1] Starting audio pipeline (attempt #2)
+# [relay-1] Audio pipeline: gst-launch-1.0 udpsrc port=5002 ... ! udpsink host=egress-1 port=5002 ...
 
 # In un'altra shell, segui log relay-2 (pipeline dovrebbe stopparsi)
-docker logs -f relay-gst-2
+docker logs -f relay-2
 
 # Output atteso:
-# [relay-gst-2] Children changed (+0 -1)
-# [relay-gst-2] Removed children: [egress-1]
-# [relay-gst-2] Rebuilding GStreamer pipelines...
-# [relay-gst-2] Stopping audio pipeline...
-# [relay-gst-2] Stopping video pipeline...
-# [relay-gst-2] No children, pipelines stopped
+# [relay-2] Children changed (+0 -1)
+# [relay-2] Removed children: [egress-1]
+# [relay-2] Rebuilding GStreamer pipelines...
+# [relay-2] Stopping audio pipeline...
+# [relay-2] Stopping video pipeline...
+# [relay-2] No children, pipelines stopped
 
 # Step 5: Verifica stream continua
 # Verifica che il broadcaster sia ancora connesso
@@ -315,29 +315,29 @@ A: injection-1 → relay-1 → relay-2 → egress-1
 
 # Partenza dallo Scenario 2 completato
 # relay-2 container già running (se non lo è):
-docker-compose -f docker-compose.test.yaml --profile relay-switch up -d relay-gst-2
+docker-compose -f docker-compose.test.yaml --profile relay-switch up -d relay-2
 sleep 5
 
 
 # Step 1: Trigger cambio topologia
 
 # Rimuovi egress-1 da relay-1 children
-docker exec redis redis-cli SREM children:relay-gst-1 egress-1
+docker exec redis redis-cli SREM children:relay-1 egress-1
 
 # Aggiungi relay-2 a relay-1 children
-docker exec redis redis-cli SADD children:relay-gst-1 relay-gst-2
+docker exec redis redis-cli SADD children:relay-1 relay-2
 
 # Aggiungi egress-1 a relay-2 children
-docker exec redis redis-cli SADD children:relay-gst-2 egress-1
+docker exec redis redis-cli SADD children:relay-2 egress-1
 
 # Aggiorna parent di egress-1
-docker exec redis redis-cli SET parent:egress-1 relay-gst-2
+docker exec redis redis-cli SET parent:egress-1 relay-2
 
 # Verifica
-docker exec redis redis-cli SMEMBERS children:relay-gst-1
-# Output: "relay-gst-2"
+docker exec redis redis-cli SMEMBERS children:relay-1
+# Output: "relay-2"
 
-docker exec redis redis-cli SMEMBERS children:relay-gst-2
+docker exec redis redis-cli SMEMBERS children:relay-2
 # Output: "egress-1"
 
 # Step 2: Aspetta polling
@@ -346,13 +346,13 @@ sleep 35
 
 # Verifica topologia
 curl http://localhost:7071/topology | jq '.children'
-# Output: ["relay-gst-2"]
+# Output: ["relay-2"]
 
 curl http://localhost:7072/topology | jq
-# Output: {"parent": "relay-gst-1", "children": ["egress-1"]}
+# Output: {"parent": "relay-1", "children": ["egress-1"]}
 
 curl http://localhost:7073/topology | jq '.parent'
-# Output: "relay-gst-2"
+# Output: "relay-2"
 
 
 
@@ -395,7 +395,7 @@ sleep 5
 docker exec redis redis-cli FLUSHALL
 
 # Avvia nodi
-docker-compose -f docker-compose.test.yaml up -d injection-1 relay-gst-1 egress-1
+docker-compose -f docker-compose.test.yaml up -d injection-1 relay-1 egress-1
 docker-compose -f docker-compose.test.yaml --profile scale up -d egress-2
 sleep 5
 
@@ -418,14 +418,14 @@ curl http://localhost:7074/status | jq '{nodeId, nodeType, healthy, janus}'     
 # Step 3: Setup redis
 
 # injection → relay-1
-docker exec redis redis-cli SADD children:injection-1 relay-gst-1
-docker exec redis redis-cli SET parent:relay-gst-1 injection-1
+docker exec redis redis-cli SADD children:injection-1 relay-1
+docker exec redis redis-cli SET parent:relay-1 injection-1
 
 # relay-1 → egress-1, egress-2 (fan-out)
-docker exec redis redis-cli SADD children:relay-gst-1 egress-1
-docker exec redis redis-cli SADD children:relay-gst-1 egress-2
-docker exec redis redis-cli SET parent:egress-1 relay-gst-1
-docker exec redis redis-cli SET parent:egress-2 relay-gst-1
+docker exec redis redis-cli SADD children:relay-1 egress-1
+docker exec redis redis-cli SADD children:relay-1 egress-2
+docker exec redis redis-cli SET parent:egress-1 relay-1
+docker exec redis redis-cli SET parent:egress-2 relay-1
 
 # Aspetta polling
 sleep 35
@@ -437,7 +437,7 @@ curl http://localhost:7071/topology | jq '.children'
 # Step 4: Verifica pipeline
 
 # relay-1 dovrebbe usare "tee" per splittare lo stream
-docker logs relay-gst-1 | grep -A 5 "Starting audio pipeline"
+docker logs relay-1 | grep -A 5 "Starting audio pipeline"
 
 # Output atteso:
 # Audio pipeline: gst-launch-1.0 udpsrc port=5002 ... ! tee name=t_audio allow-not-linked=true
@@ -480,7 +480,7 @@ curl -X POST http://localhost:7070/session/create \
     "sessionId": "live-session",
     "roomId": 1234,
     "recipient": {
-      "host": "relay-gst-1",
+      "host": "relay-1",
       "audioPort": 5002,
       "videoPort": 5004
     }
@@ -541,7 +541,7 @@ curl http://localhost:7074/session | jq
 # Step 1: Rimuovi egress-2 dalla chain
 
 # Rimuovi egress-2 da relay-1 children
-docker exec redis redis-cli SREM children:relay-gst-1 egress-2
+docker exec redis redis-cli SREM children:relay-1 egress-2
 
 # Aspetta polling
 sleep 35
@@ -551,7 +551,7 @@ curl http://localhost:7071/topology | jq '.children'
 # Output: ["egress-1"]  ← Solo egress-1 rimane
 
 # Verifica relay-1 pipeline rebuiltata
-docker logs relay-gst-1 | tail -20
+docker logs relay-1 | tail -20
 # Dovrebbe mostrare: "Rebuilding GStreamer pipelines..."
 # E pipeline ora usa udpsink singolo invece di tee
 
@@ -571,13 +571,13 @@ curl http://localhost:7074/pipelines | jq '.audio.running'
 # Step 3: Re-add egress-2
 
 # Re-aggiungi egress-2
-docker exec redis redis-cli SADD children:relay-gst-1 egress-2
+docker exec redis redis-cli SADD children:relay-1 egress-2
 
 # Aspetta polling
 sleep 35
 
 # Verifica relay-1 rebuiltato con tee di nuovo
-docker logs relay-gst-1 | tail -20
+docker logs relay-1 | tail -20
 
 # Verifica egress-2 riceve di nuovo RTP
 docker exec janus-streaming-2 tcpdump -i eth0 -n 'udp port 5002' -c 5
@@ -605,7 +605,7 @@ docker exec redis redis-cli FLUSHALL
 
 # VECCHIO TEST 2 POI CI PENSIAMO
 
-**Obiettivo**: Cambiare il child da `relay-gst-1` a `relay-gst-2` senza cambiare `sessionId`.
+**Obiettivo**: Cambiare il child da `relay-1` a `relay-2` senza cambiare `sessionId`.
 
 ⚠️ **PROBLEMA ATTUALE**: Questo approccio **NON funziona** perché:
 - `destroyEndpoint()` causa errori di race condition

@@ -10,7 +10,9 @@ services:
       timeout: 3s
       retries: 5
 
-  # Relay Node principale
+  # ============ RELAY NODES ============
+
+  # Relay Node principale (GStreamer)
   relay-1:
     build:
       context: ..

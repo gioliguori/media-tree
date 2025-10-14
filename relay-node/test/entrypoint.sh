@@ -7,13 +7,14 @@ VIDEO_PORT=${VIDEO_PORT:-5004}
 LISTEN_AUDIO_PORT=${LISTEN_AUDIO_PORT:-6000}
 LISTEN_VIDEO_PORT=${LISTEN_VIDEO_PORT:-6002}
 
-
+echo "=========================================="
 echo "Mode: $MODE"
 
 if [ "$MODE" = "sender" ]; then
-    echo "   Target: $TARGET_HOST"
-    echo "   Audio $TARGET_HOST:$AUDIO_PORT (Opus)"
-    echo "   Video $TARGET_HOST:$VIDEO_PORT (VP8)"
+    echo "Target: $TARGET_HOST"
+    echo "Audio → $TARGET_HOST:$AUDIO_PORT (Opus)"
+    echo "Video → $TARGET_HOST:$VIDEO_PORT (VP8)"
+    echo "=========================================="
     echo ""
     
     gst-launch-1.0 \
@@ -30,8 +31,9 @@ if [ "$MODE" = "sender" ]; then
         udpsink host=$TARGET_HOST port=$VIDEO_PORT
 
 elif [ "$MODE" = "receiver" ]; then
-    echo "   Audio 0.0.0.0:$LISTEN_AUDIO_PORT (Opus)"
-    echo "   Video 0.0.0.0:$LISTEN_VIDEO_PORT (VP8)"
+    echo "Audio ← 0.0.0.0:$LISTEN_AUDIO_PORT (Opus)"
+    echo "Video ← 0.0.0.0:$LISTEN_VIDEO_PORT (VP8)"
+    echo "=========================================="
     echo ""
     
     gst-launch-1.0 \
