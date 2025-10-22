@@ -10,6 +10,7 @@
     "dependencies": {
         "express": "^5.0.0",
         "ioredis": "^5.4.1",
-        "janus-whip-server": "^1.0.0"
+        "janus-whip-server": "github:meetecho/simple-whip-server#pull/25/head",
+        "janode": "^1.8.0"
     }
 }

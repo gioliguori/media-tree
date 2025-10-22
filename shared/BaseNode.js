@@ -11,8 +11,8 @@ export class BaseNode {
 
     // CONFIG STRUCTURE:
     // {
-    //   // === NETWORK (OBBLIGATORIO PER TUTTI I NODI) ===
-    //   nodeId: 'injection-1',           // Identificativo univoco nodo
+    //   
+    //   nodeId: 'injection-1',           // Identificativo nodo
     //   nodeType: 'injection',           // injection | relay | egress
     //   host: 'injection-1',             // Hostname/IP del nodo
     //   port: 7070,                      // Porta API REST
@@ -34,21 +34,35 @@ export class BaseNode {
     //   janus: {
     //     // SOLO PER INJECTION NODE:
     //     videoroom: {
-    //       wsUrl: 'ws://janus-videoroom:8188'
+    //       wsUrl: 'ws://janus-videoroom:8188',
+    //       apiSecret: 'janusoverlord' o 'janusrocks',
+    //       roomSecret: 'adminpwd'             // Secret per modificare room
     //     },
     //     
     //     // SOLO PER EGRESS NODE:
     //     streaming: {
-    //       wsUrl: 'ws://janus-streaming:8188'
+    //       wsUrl: 'ws://janus-streaming:8188',
+    //       apiSecret: 'janusoverlord' o 'janusrocks',
+    //       mountpointSecret: 'adminpwd'             // Secret per modificare mountpoint
     //     }
     //   }
-    //.  // === WHIP ===
-    //     whip: {
-    //       basePath: '/whip'    // opzionale
-    //       token: 'verysecret'  // opzionale
-    //       secret: 'adminpwd'   // opzionale
-    //     }
+    //   // ============ WHIP SERVER (SOLO INJECTION NODE) ============
+    //   whip: {
+    //     basePath: '/whip',             // Base path per WHIP endpoints
+    //     token: 'verysecret'           // Token autenticazione clients            
+    //   },
+    //
+    //   // ============ WHEP SERVER (SOLO EGRESS NODE) ============
+    //   whep: {
+    //     basePath: '/whep',             // Base path per WHEP endpoints
+    //     token: 'verysecret'            // Token autenticazione viewer         
+    //   },
+    //
+    //   // ============ PORT POOL (SOLO EGRESS NODE) ============
+    //   portPoolBase: 6000,              // Prima porta del pool
+    //   portPoolSize: 100                // Numero porte disponibili
     // }
+
 
     this.host = config.host || 'localhost';
     this.port = config.port || 7070;
@@ -77,10 +91,10 @@ export class BaseNode {
   async initialize() {
     console.log(`[${this.nodeId}] Inizializing node ${this.nodeType}...`);
 
-    await this.connectRedis(); // 1. Connette a Redis
-    await this.registerNode(); // 2. Registra nodo in Redis
-    this.setupBaseAPI();       // 3. Configura API endpoints 
-    await this.onInitialize(); // 4. inizializzazione
+    await this.connectRedis(); // Connette a Redis
+    await this.registerNode(); // Registra nodo in Redis
+    this.setupBaseAPI();       // Configura API endpoints 
+    await this.onInitialize(); // inizializzazione
 
     return true;
   }
@@ -92,10 +106,10 @@ export class BaseNode {
 
     this.startPolling();
     await this.updateTopology();
-    await this.onStart();            // Hook per avvio specifico per ogni nodo (override)
+    await this.onStart();            // Hook per avvio specifico per ogni nodo
 
 
-    console.log(`[${this.nodeId}]starting node...`);
+    console.log(`[${this.nodeId}] starting node...`);
   }
 
   async stop() {
@@ -107,7 +121,7 @@ export class BaseNode {
       this.pollTimer = null;
     }
 
-    await this.onStop();             // Hook per avvio specifico per ogni nodo (override)
+    await this.onStop();             // Hook per avvio specifico per ogni nodo
     await this.unregisterNode();
 
     if (this.server) this.server.close();
@@ -127,6 +141,11 @@ export class BaseNode {
 
     await this.redis.ping();
     console.log(`[${this.nodeId}] Redis connected`);
+
+    this.redis.on('error', (err) => {
+      console.error(`[${this.nodeId}] Redis error:`, err.message);
+    });
+
   }
 
   async registerNode() {
@@ -158,7 +177,7 @@ export class BaseNode {
     try {
       // relay/egress
       if (this.nodeType !== 'injection') {
-        const parentId = await this.redis.get(`parent:${this.nodeId}`);  // get e non hget per il controller farà solo set visto che è una stringa unica no?
+        const parentId = await this.redis.get(`parent:${this.nodeId}`);  // get e non hget per il controller farà solo set visto che è una stringa unica
         if (parentId !== this.parent) {
           const oldParent = this.parent;
           this.parent = parentId;

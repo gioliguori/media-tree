@@ -1,5 +1,8 @@
 import { BaseNode } from '../shared/BaseNode.js';
-import { JanusWhipServer } from 'janus-whip-server';
+import { connectToJanusVideoroom, createJanusRoom, destroyJanusRoom } from './janus-videoroom-utils.js';
+import { saveSessionToRedis, deactivateSessionInRedis, getSessionInfo, getAllSessionsInfo } from './session-utils.js';
+import { JanusWhipServer } from 'janus-whip-server'
+
 
 export class InjectionNode extends BaseNode {
     constructor(config) {
@@ -8,33 +11,60 @@ export class InjectionNode extends BaseNode {
         // WHIP Server
         this.whipServer = null;
         this.janusUrl = config.janus.videoroom.wsUrl;
+        this.janusApiSecret = config.janus.videoroom.apiSecret || null;
         this.whipBasePath = config.whip?.basePath || '/whip';
         this.whipToken = config.whip?.token || 'verysecret';
-        this.whipSecret = config.whip?.secret || 'adminpwd';
+        this.roomSecret = config.janus.videoroom.roomSecret || 'adminpwd';
 
-        // Sessione
-        this.currentSession = {
-            sessionId: null,
-            roomId: null,
-            recipient: null,
-            createdAt: null,
-            active: false
-        };
+
+        // Janus connection pool
+        this.janusConnection = null;
+        this.janusSession = null;
+        this.janusVideoRoom = null;
+
+        // OLD_Sessione
+        //this.currentSession = {
+        //    sessionId: null,
+        //    roomId: null,
+        //    recipient: null,
+        //    createdAt: null,
+        //    active: false
+        //};
+
+        // nuova sessione
+        this.sessions = new Map(); // sessionId → sessionData
+        // sessionData = {
+        //   roomId: 1234,
+        //   audioSsrc: 1111,
+        //   videoSsrc: 2222,
+        //   recipients: [{ host, audioPort, videoPort }],
+        //   endpoint: whipEndpoint,
+        //   active: true,
+        //   createdAt: timestamp
+        // }
 
         // lock
-        this.isRecreatingEndpoint = false;
-        this.isDestroyingSession = false;
+        this.operationLocks = new Map();
     }
 
     async onInitialize() {
         console.log(`[${this.nodeId}] Initializing WHIP server...`);
+
+        // connessione a janus per gestione room
+        const { connection, session, videoRoom } = await connectToJanusVideoroom(this.nodeId, {
+            wsUrl: this.janusUrl,
+            apiSecret: this.janusApiSecret
+        });
+
+        this.janusConnection = connection;
+        this.janusSession = session;
+        this.janusVideoRoom = videoRoom;
 
         // Inizializza JanusWhipServer
         this.whipServer = new JanusWhipServer({
             janus: { address: this.janusUrl },
             rest: { app: this.app, basePath: this.whipBasePath }
         });
-
         console.log(`[${this.nodeId}] WHIP server initialized (Janus: ${this.janusUrl})`);
     }
 
@@ -42,243 +72,205 @@ export class InjectionNode extends BaseNode {
         console.log(`[${this.nodeId}] Starting WHIP server...`);
         await this.whipServer.start();
         console.log(`[${this.nodeId}] WHIP server listening on ${this.whipBasePath}`);
+        console.log(`[${this.nodeId}] Injection node ready`);
     }
 
     async onStop() {
         console.log(`[${this.nodeId}] Stopping injection node...`);
 
-        // Distruggi sessione se attiva
-        if (this.currentSession.active) {
+        // Distruggi tutte le sessioni attive
+        const sessionIds = Array.from(this.sessions.keys());
+        console.log(`[${this.nodeId}] Destroying ${sessionIds.length} active sessions...`);
+        // non funziona al momento
+        //for (const sessionId of sessionIds) {
+        //    try {
+        //        await this.destroySession(sessionId);
+        //    } catch (error) {
+        //        console.error(`[${this.nodeId}] Error destroying session ${sessionId}:`, error.message);
+        //    }
+        //}
+
+        // Stop WHIP server
+        if (this.whipServer) {
             try {
-                await this.destroySession();
+                await this.whipServer.stop();
+                console.log(`[${this.nodeId}] WHIP server stopped`);
             } catch (error) {
-                console.error(`[${this.nodeId}] Error destroying session on stop:`, error.message);
+                console.error(`[${this.nodeId}] Error stopping WHIP server:`, error.message);
             }
         }
 
-        // Distruggi WHIP server
-        if (this.whipServer) {
+        // Disconnect Janus
+        if (this.janusConnection) {
             try {
-                await this.whipServer.destroy();
-                console.log(`[${this.nodeId}] WHIP server destroyed`);
+                await this.janusConnection.close();
+                console.log(`[${this.nodeId}] Janus connection closed`);
             } catch (error) {
-                console.error(`[${this.nodeId}] Error destroying WHIP server:`, error.message);
+                console.error(`[${this.nodeId}] Error closing Janus connection:`, error.message);
             }
         }
 
         console.log(`[${this.nodeId}] Injection node stopped`);
     }
 
+    // ============ SESSION MANAGEMENT ============
+
+    async createSession(sessionId, roomId, audioSsrc, videoSsrc, recipients) {
+
+        // Check duplicati
+        if (this.sessions.has(sessionId)) {
+            throw new Error(`Session ${sessionId} already exists`);
+        }
+        // lock
+        if (this.operationLocks.get(sessionId)) {
+            throw new Error(`Operation already in progress for session ${sessionId}`);
+        }
+        this.operationLocks.set(sessionId, true);
+
+        try {
+            console.log(`[${this.nodeId}] Creating session: ${sessionId}`);
+            console.log(`[${this.nodeId}] Room ID: ${roomId}`);
+            console.log(`[${this.nodeId}] Audio SSRC: ${audioSsrc}`);
+            console.log(`[${this.nodeId}] Video SSRC: ${videoSsrc}`);
+            console.log(`[${this.nodeId}] Recipients: ${JSON.stringify(recipients)}`);
+
+
+            // crea room su janus videoroom
+            await createJanusRoom(this.janusVideoRoom, this.nodeId, roomId, `Session ${sessionId}`, this.roomSecret);
+
+            if (!audioSsrc || !videoSsrc) {
+                throw new Error('Missing SSRC values');
+            }
+            // crea whip endpoint
+            const endpoint = this.whipServer.createEndpoint({
+                id: sessionId,
+                token: this.whipToken,
+                customize: (settings) => {
+                    settings.room = roomId;
+                    settings.secret = this.roomSecret;
+                    settings.label = `Publisher ${sessionId}`;
+
+                    settings.recipients = recipients.map(item => ({
+                        host: item.host,
+                        audioPort: item.audioPort,
+                        audioSsrc: audioSsrc,
+                        videoPort: item.videoPort,
+                        videoSsrc: videoSsrc,
+                        videoRtcpPort: item.videoPort + 1
+                    }));
+                }
+            });
+
+            const createdAt = Date.now();
+            // salva in memoria
+            this.sessions.set(sessionId, {
+                sessionId,
+                roomId,
+                audioSsrc,
+                videoSsrc,
+                recipients,
+                endpoint,
+                active: true,
+                createdAt
+            });
+
+            // salva su Redis
+            await saveSessionToRedis(this.redis, this.nodeId, {
+                sessionId,
+                roomId,
+                audioSsrc,
+                videoSsrc,
+                recipients,
+                createdAt
+            });
+
+            console.log(`[${this.nodeId}] Session created: ${sessionId}`);
+            console.log(`[${this.nodeId}] WHIP endpoint: ${this.whipBasePath}/endpoint/${sessionId}`);
+            return {
+                sessionId,
+                endpoint: `${this.whipBasePath}/endpoint/${sessionId}`,
+                roomId,
+                audioSsrc,
+                videoSsrc,
+                recipients
+            };
+        } finally {
+            // Unlock
+            this.operationLocks.delete(sessionId);
+        }
+    }
+
+    // problematica attualmente
+    //async destroySession(sessionId) {
+    //    // Check esistenza
+    //    if (!this.sessions.has(sessionId)) {
+    //        throw new Error(`Session ${sessionId} not found`);
+    //    }
+    //    // Lock
+    //    if (this.operationLocks.get(sessionId)) {
+    //        throw new Error(`Operation already in progress for session ${sessionId}`);
+    //    }
+    //    this.operationLocks.set(sessionId, true);
+    //
+    //    try {
+    //        console.log(`[${this.nodeId}] Destroying session: ${sessionId}`);
+    //
+    //        const session = this.sessions.get(sessionId);
+    //        const { roomId } = session;
+    //
+    //        // rimuovi da memoria
+    //        this.sessions.delete(sessionId);
+    //
+    //        // inattiva su Redis
+    //        await deactivateSessionInRedis(this.redis, this.nodeId, sessionId);
+    //
+    //        //    // distruggi endpoint
+    //        //    try {
+    //        //        if (this.whipServer && endpoint) {
+    //        //            this.whipServer.destroyEndpoint(sessionId);
+    //        //            console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} destroyed`);
+    //        //        } else {
+    //        //            console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} already destroyed or not exists`);
+    //        //        }
+    //        //    } catch (error) {
+    //        //        // Se l'endpoint è già distrutto, continua comunque
+    //        //        if (error.message.includes('Invalid endpoint ID')) {
+    //        //            console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} was already destroyed`);
+    //        //        } else {
+    //        //            console.error(`[${this.nodeId}] Error destroying WHIP endpoint:`, error.message);
+    //        //            // Non bloccare se endpoint già distrutto
+    //        //        }
+    //        //    }
+    //
+    //        // distruggi room
+    //        await destroyJanusRoom(this.janusVideoRoom, this.nodeId, roomId, this.roomSecret);
+    //
+    //        console.log(`[${this.nodeId}] Session destroyed: ${sessionId}`);
+    //
+    //        return { sessionId };
+    //
+    //    } catch (error) {
+    //        console.error(`[${this.nodeId}] Error destroying session ${sessionId}:`, error.message);
+    //        throw error;
+    //    } finally {
+    //        // Unlock
+    //        this.operationLocks.delete(sessionId);
+    //    }
+    //}
+
+
+    getSession(sessionId) {
+        return getSessionInfo(this.sessions, sessionId);
+    }
+
+    getAllSessions() {
+        return getAllSessionsInfo(this.sessions);
+    }
+
     // ============ TOPOLOGY ============
 
     async onChildrenChanged(added, removed) {
-
-        console.log(`isRecreatingEndpoint: ${this.isRecreatingEndpoint}`);
-        console.log(`Session active: ${this.currentSession.active}`);
-        console.log(`Session ID: ${this.currentSession.sessionId}`);
-
-        // se non c'è sessione attiva, skip
-        if (!this.currentSession.active) {
-            console.log(`[${this.nodeId}] No active session`);
-            return;
-        }
-
-        // info nuovo child (prende il primo disponibile)
-        const newChildId = added[0] || this.children[0];
-
-        if (!newChildId) {
-            console.warn(`[${this.nodeId}] No child available`);
-            return;
-        }
-
-        // se il child è lo stesso di prima, skip
-        if (this.currentSession.recipient &&
-            this.currentSession.recipient.host === newChildId) {
-            console.log(`[${this.nodeId}] Child unchanged`);
-            return;
-        }
-
-        // semaforo
-        if (this.isRecreatingEndpoint) {
-            console.log(`[${this.nodeId}] Already recreating`);
-            return;
-        }
-
-        this.isRecreatingEndpoint = true;
-
-        try {
-            const childInfo = await this.getNodeInfo(newChildId);
-
-            if (!childInfo) {
-                console.error(`[${this.nodeId}] Child ${newChildId} not found`);
-                return;
-            }
-
-            const newRecipient = {
-                host: childInfo.host,
-                audioPort: parseInt(childInfo.audioPort),
-                videoPort: parseInt(childInfo.videoPort)
-            };
-
-            console.log(`[${this.nodeId}] Child changed`);
-            console.log(`[${this.nodeId}] Recreating endpoint`);
-
-            // Salva dati correnti
-            const { sessionId, roomId } = this.currentSession;
-            console.log(`[${this.nodeId}] Old session: ${sessionId}`);
-
-            // Distruggi sessione corrente
-            await this.destroySession();
-            console.log(`[${this.nodeId}] Session destroyed`);
-            await new Promise(resolve => setTimeout(resolve, 500));
-            // attualmente non funziona :
-            // - se distruggiamo endpoint in destroySession() mi da errore sulla distruzione, dice che già è stato distrutto, credo 
-            //   dalla libreria JanusWhipServer, se non lo distruggo mi dice endpoint gia esistente. 
-            //   la soluzione commentata funziona (crea endpoint con nuovo sessionId).
-            //   comunque anche se funzionasse è la soluzione sbagliata
-            //   servierebbe updateForwarder()
-
-            await this.createSession(sessionId, roomId, newRecipient);
-            console.log(`[${this.nodeId}] Endpoint recreated`);
-
-            //// Crea nuova sessione
-            //const newSessionId = `${sessionId}-${Date.now()}`;
-            //console.log(`[${this.nodeId}] Creating new session: ${newSessionId}`);
-            //
-            //await this.createSession(newSessionId, roomId, newRecipient);
-            //
-            //console.log(`[${this.nodeId}] Endpoint recreated`);
-            //console.log(`\n========================================`);
-            //console.log(`ENDPOINT RECREATED SUCCESSFULLY!`);
-            //console.log(`========================================`);
-            //console.log(`Old ID: ${sessionId}`);
-            //console.log(`New ID: ${newSessionId}`);
-            //console.log(`New recipient: ${newRecipient.host}:${newRecipient.audioPort}/${newRecipient.videoPort}`);
-            //console.log(`\n RESTART BROADCASTER WITH NEW URL:`);
-            //console.log(`docker-compose -f docker-compose.test.yaml --profile streaming run -d --rm -e URL=http://injection-1:7070/whip/endpoint/${newSessionId} whip-client`);
-            //console.log(`========================================\n`);
-        } catch (error) {
-            console.error(`[${this.nodeId}] Error in onChildrenChange`, error.message);
-        } finally {
-            console.log(`[${this.nodeId}] Releasing flag`);
-            this.isRecreatingEndpoint = false;
-        }
-    }
-
-    // ============ SESSION MANAGEMENT ============
-
-    async createSession(sessionId, roomId, recipient) {
-        console.log(`[${this.nodeId}] Creating session ${sessionId}...`);
-
-        // Validazione input
-        if (!sessionId || !roomId || !recipient) {
-            throw new Error('Missing fields: sessionId, roomId, recipient');
-        }
-
-        if (!recipient.host || !recipient.audioPort || !recipient.videoPort) {
-            throw new Error('Invalid recipient');
-        }
-
-        // Check sessione già attiva
-        if (this.currentSession.active) {
-            throw new Error(`Session already active: ${this.currentSession.sessionId}`);
-        }
-
-        // Crea endpoint WHIP
-        try {
-            this.whipServer.createEndpoint({
-                id: String(sessionId),
-                room: roomId,
-                token: this.whipToken,
-                secret: this.whipSecret,
-                recipient: {
-                    host: recipient.host,
-                    audioPort: recipient.audioPort,
-                    videoPort: recipient.videoPort
-                }
-            });
-        } catch (error) {
-            console.error(`[${this.nodeId}] Failed to create WHIP endpoint:`, error.message);
-            throw error;
-        }
-
-        // Salva stato sessione
-        this.currentSession = {
-            sessionId,
-            roomId,
-            recipient,
-            active: true,
-            createdAt: Date.now()
-        };
-
-        console.log(`[${this.nodeId}]    Session ${sessionId} created`);
-        console.log(`[${this.nodeId}]    Room: ${roomId}`);
-        console.log(`[${this.nodeId}]    Forwarding RTP to: ${recipient.host}:${recipient.audioPort}/${recipient.videoPort}`);
-        console.log(`[${this.nodeId}]    WHIP endpoint: ${this.whipBasePath}/endpoint/${sessionId}`);
-
-        return {
-            sessionId,
-            endpoint: `${this.whipBasePath}/endpoint/${sessionId}`,
-            roomId,
-            recipient
-        };
-    }
-
-    async destroySession() {
-        const destroyId = Date.now();
-        console.log(`   Session active: ${this.currentSession.active}`);
-        console.log(`   Session ID: ${this.currentSession.sessionId}`);
-        console.log(`   isDestroyingSession: ${this.isDestroyingSession}`);
-
-        // Check sessione attiva
-        if (!this.currentSession.active) {
-            console.error(`[${this.nodeId}] No active session to destroy`);
-            throw new Error('No active session to destroy');
-        }
-        // Check se già in corso
-        if (this.isDestroyingSession) {
-            console.warn(`[${this.nodeId}] destroySession already in progress`);
-            return { sessionId: this.currentSession.sessionId };
-        }
-
-        // lock
-        this.isDestroyingSession = true;
-
-
-        const sessionId = this.currentSession.sessionId;
-        console.log(`[${this.nodeId}] Destroying session: ${sessionId}`);
-
-        try {
-            // Reset PRIMA stato della sessione
-            this.currentSession.active = false;
-            // Distruggi endpoint WHIP
-            // La libreria janus-whip-server fa cleanup automatico?
-            // il cleanup automatico della libreria → "Invalid endpoint ID" error
-            //??? try{this.whipServer.destroyEndpoint(String(sessionId));
-            //console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} destroyed`);
-            //} catch (error) {
-
-            //console.error(`[${this.nodeId}] Error destroying WHIP endpoint:`, error.message);
-            //throw error;
-            //}
-
-        } finally {
-            // Reset completo stato
-            this.currentSession = {
-                sessionId: null,
-                roomId: null,
-                recipient: null,
-                active: false,
-                createdAt: null
-            };
-
-            // unlock
-            this.isDestroyingSession = false;
-
-            console.log(`[${this.nodeId}] Session destroyed`);
-        }
-
-        return { sessionId };
+        // ancora non so 
     }
 
     // ============ API ENDPOINTS ============
@@ -287,9 +279,21 @@ export class InjectionNode extends BaseNode {
         // POST /session/create
         this.app.post('/session/create', async (req, res) => {
             try {
-                const { sessionId, roomId, recipient } = req.body;
+                const { sessionId, roomId, audioSsrc, videoSsrc, recipients } = req.body;
 
-                const result = await this.createSession(sessionId, roomId, recipient);
+                if (!sessionId || !roomId || !audioSsrc || !videoSsrc || !recipients) {
+                    return res.status(400).json({
+                        error: 'Missing fields: sessionId, roomId, audioSsrc, videoSsrc, recipients'
+                    });
+                }
+
+                if (!Array.isArray(recipients) || recipients.length === 0) {
+                    return res.status(400).json({
+                        error: 'recipients must be a non-empty array'
+                    });
+                }
+
+                const result = await this.createSession(sessionId, roomId, audioSsrc, videoSsrc, recipients);
                 res.status(201).json(result);
             } catch (error) {
                 console.error(`[${this.nodeId}] Create session error:`, error.message);
@@ -297,10 +301,11 @@ export class InjectionNode extends BaseNode {
             }
         });
 
-        // POST /session/destroy
-        this.app.post('/session/destroy', async (req, res) => {
+        // POST /session/:sessionId/destroy
+        this.app.post('/session/:sessionId/destroy', async (req, res) => {
             try {
-                const result = await this.destroySession();
+                const { sessionId } = req.params;
+                const result = await this.destroySession(sessionId);
                 res.json({ message: 'Session destroyed', ...result });
             } catch (error) {
                 console.error(`[${this.nodeId}] Destroy session error:`, error.message);
@@ -308,49 +313,55 @@ export class InjectionNode extends BaseNode {
             }
         });
 
-        // GET /session
-        this.app.get('/session', (req, res) => {
-            if (this.currentSession.active) {
+        // GET /session/:sessionId
+        this.app.get('/session/:sessionId', (req, res) => {
+            try {
+                const { sessionId } = req.params;
+                const session = this.getSession(sessionId);
+
+                if (!session) {
+                    return res.status(404).json({ error: 'Session not found' });
+                }
+
+                res.json(session);
+            } catch (error) {
+                console.error(`[${this.nodeId}] Get session error:`, error.message);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // GET /sessions
+        this.app.get('/sessions', (req, res) => {
+            try {
+                const sessions = this.getAllSessions();
                 res.json({
-                    active: true,
-                    sessionId: this.currentSession.sessionId,
-                    roomId: this.currentSession.roomId,
-                    recipient: this.currentSession.recipient,
-                    createdAt: this.currentSession.createdAt,
-                    uptime: Math.floor((Date.now() - this.currentSession.createdAt) / 1000)
+                    count: sessions.length,
+                    sessions
                 });
-            } else {
-                res.json({
-                    active: false,
-                    sessionId: null
-                });
+            } catch (error) {
+                console.error(`[${this.nodeId}] Get sessions error:`, error.message);
+                res.status(500).json({ error: error.message });
             }
         });
     }
 
     async getStatus() {
         const baseStatus = await super.getStatus();
-
+        const activeCount = Array.from(this.sessions.values())
+            .filter(item => item.active).length;
         return {
             ...baseStatus,
             janus: {
-                connected: this.whipServer !== null,
+                connected: this.janusVideoRoom !== null,
                 url: this.janusUrl
             },
             whip: {
                 running: this.whipServer !== null,
                 basePath: this.whipBasePath
             },
-            session: this.currentSession.active ? {
-                active: true,
-                sessionId: this.currentSession.sessionId,
-                roomId: this.currentSession.roomId,
-                recipient: this.currentSession.recipient,
-                createdAt: this.currentSession.createdAt,
-                uptime: Math.floor((Date.now() - this.currentSession.createdAt) / 1000)
-            } : {
-                active: false,
-                sessionId: null
+            sessions: {
+                active: activeCount,
+                list: this.getAllSessions()
             }
         };
     }

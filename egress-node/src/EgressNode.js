@@ -1,8 +1,11 @@
-// EgressNode.js
 import { BaseNode } from '../shared/BaseNode.js';
+import { PortPool } from '../shared/PortPool.js';
+import { saveMountpointToRedis, deactivateMountpointInRedis, getMountpointInfo, getAllMountpointsInfo } from './mountpoint-utils.js';
+import { connectToJanusStreaming, createJanusMountpoint, destroyJanusMountpoint } from './janus-streaming-utils.js';
+
 import { JanusWhepServer } from 'janus-whep-server';
-import express from 'express';
 import { spawn } from 'child_process';
+import express from 'express';
 
 export class EgressNode extends BaseNode {
     constructor(config) {
@@ -11,372 +14,549 @@ export class EgressNode extends BaseNode {
         // WHEP Server
         this.whepServer = null;
         this.janusUrl = config.janus.streaming.wsUrl;
+        this.janusApiSecret = config.janus.streaming.apiSecret || null;
         this.whepBasePath = config.whep?.basePath || '/whep';
         this.whepToken = config.whep?.token || 'verysecret';
+        this.mountpointSecret = config.janus.streaming.mountpointSecret || 'adminpwd';
+
+        // Janus connection pool
+        this.janusConnection = null;
+        this.janusSession = null;
+        this.janusStreaming = null;
+
+        // RTP destination host (deriva da janusUrl)
+        this.rtpDestinationHost = new URL(this.janusUrl).hostname;
+        // console.log(`[${this.nodeId}] RTP destination host: ${this.rtpDestinationHost}`);
+
+        // PortPool per allocare porte OUTPUT verso Janus
+        this.portPool = new PortPool(
+            config.portPoolBase || 6000,
+            config.portPoolSize || 100
+        );
+
+        // Mountpoints attivi
+        this.mountpoints = new Map(); // sessionId → mountpointData
+        // mountpointData = {
+        //   sessionId: string,              // ID sessione upstream (da InjectionNode)
+        //   mountpointId: number,           // ID mountpoint Janus (= roomId)
+        //   audioSsrc: number,              // SSRC audio per demux
+        //   videoSsrc: number,              // SSRC video per demux
+        //   janusAudioPort: number,         // Porta allocata dal PortPool per audio
+        //   janusVideoPort: number,         // Porta allocata dal PortPool per video
+        //   endpoint: whepEndpoint,         // Oggetto WHEP endpoint per viewers
+        //   active: boolean,                
+        //   createdAt: timestamp            
+        // }
 
         // GStreamer pipelines
         this.audioPipeline = null;
         this.videoPipeline = null;
 
-        // Pipeline health monitoring
+        // Pipeline health
         this.pipelineHealth = {
             audio: { running: false, restarts: 0, lastError: null },
             video: { running: false, restarts: 0, lastError: null }
         };
 
-        // Destinazione RTP (deriva da config esistente)
-        this.rtpDestination = {
-            host: new URL(this.janusUrl).hostname,  // 'janus-streaming'
-            audioPort: this.rtp.audioPort,          // 5002
-            videoPort: this.rtp.videoPort           // 5004
-        };
+        // Lock per operazioni PER SESSIONE (Map)
+        this.operationLocks = new Map();
 
-        // Sessione
-        this.currentSession = {
-            sessionId: null,
-            mountpointId: null,
-            createdAt: null,
-            active: false
-        };
-
+        // Lock per rebuild GLOBALE (boolean)
+        this.isRebuilding = false;
     }
 
     async onInitialize() {
         console.log(`[${this.nodeId}] Initializing WHEP server...`);
 
+        // Connessione a Janus per gestione mountpoint
+        const { connection, session, streaming } = await connectToJanusStreaming(this.nodeId, {
+            wsUrl: this.janusUrl,
+            apiSecret: this.janusApiSecret
+        });
+
+        this.janusConnection = connection;
+        this.janusSession = session;
+        this.janusStreaming = streaming;
+
+        // Inizializza JanusWhepServer
         this.whepServer = new JanusWhepServer({
             janus: { address: this.janusUrl },
             rest: { app: this.app, basePath: this.whepBasePath }
         });
 
-        // Start GStreamer forwarding
-        this._startRtpForwarding();
-
-        // File statici
+        // file statici test visivo
         this.app.use(express.static('web'));
 
-        console.log(`[${this.nodeId}] WHEP server initialized`);
+        console.log(`[${this.nodeId}] WHEP server initialized Janus: ${this.janusUrl}`);
     }
 
     async onStart() {
         console.log(`[${this.nodeId}] Starting WHEP server...`);
+
         await this.whepServer.start();
+
         console.log(`[${this.nodeId}] WHEP server listening on ${this.whepBasePath}`);
+        console.log(`[${this.nodeId}] Egress node ready (no pipelines started yet)`);
     }
 
     async onStop() {
         console.log(`[${this.nodeId}] Stopping egress node...`);
 
-        if (this.currentSession.active) {
+        // Distruggi tutti i mountpoint 
+        const sessionIds = Array.from(this.mountpoints.keys());
+        console.log(`[${this.nodeId}] Destroying ${sessionIds.length} active mountpoints...`);
+        // non funziona per il momento
+        //for (const sessionId of sessionIds) {
+        //    try {
+        //        await this.destroyMountpoint(sessionId);
+        //    } catch (error) {
+        //        console.error(`[${this.nodeId}] Error destroying mountpoint ${sessionId}:`, error.message);
+        //    }
+        //}
+
+        // Stop GStreamer pipelines
+        this.stopPipelines();
+
+        // Stop WHEP server
+        if (this.whepServer) {
             try {
-                await this.destroySession();
+                await this.whepServer.stop();
+                console.log(`[${this.nodeId}] WHEP server stopped`);
             } catch (error) {
-                console.error(`[${this.nodeId}] Error destroying session:`, error.message);
+                console.error(`[${this.nodeId}] Error stopping WHEP server:`, error.message);
             }
         }
 
-        // Stop pipelines
-        if (this.audioPipeline) {
-            console.log(`[${this.nodeId}] Stopping audio pipeline...`);
-            this.audioPipeline.kill('SIGTERM');
-        }
-        if (this.videoPipeline) {
-            console.log(`[${this.nodeId}] Stopping video pipeline...`);
-            this.videoPipeline.kill('SIGTERM');
-        }
-
-        // Destroy WHEP server
-        if (this.whepServer) {
+        // Disconnect Janus
+        if (this.janusConnection) {
             try {
-                await this.whepServer.destroy();
-                console.log(`[${this.nodeId}] WHEP server destroyed`);
+                await this.janusConnection.close();
+                console.log(`[${this.nodeId}] Janus connection closed`);
             } catch (error) {
-                console.error(`[${this.nodeId}] Error destroying WHEP server:`, error.message);
+                console.error(`[${this.nodeId}] Error closing Janus connection:`, error.message);
             }
         }
 
         console.log(`[${this.nodeId}] Egress node stopped`);
     }
 
-    // ============ TOPOLOGY ============
+    // ============ MOUNTPOINT MANAGEMENT ============
 
-    async onParentChanged(oldParent, newParent) {
-        console.log(`[${this.nodeId}] Parent changed: ${oldParent} → ${newParent}`);
-
-        if (newParent) {
-            const parentInfo = await this.getNodeInfo(newParent);
-
-            if (parentInfo) {
-                console.log(`[${this.nodeId}] New parent: ${parentInfo.host}:${parentInfo.audioPort}/${parentInfo.videoPort}`);
-            } else {
-                console.warn(`[${this.nodeId}] Parent ${newParent} not found in Redis`);
-            }
-        } else {
-            console.log(`[${this.nodeId}] No parent assigned`);
-        }
-    }
-
-    // ============ SESSION MANAGEMENT ============
-
-    async createSession(sessionId, mountpointId) {
-        console.log(`[${this.nodeId}] Creating session ${sessionId}...`);
-
-        // Validazione
-        if (!sessionId || !mountpointId) {
-            throw new Error('Missing fields: sessionId, mountpointId');
+    async createMountpoint(sessionId, audioSsrc, videoSsrc) {
+        // check duplicati
+        if (this.mountpoints.has(sessionId)) {
+            throw new Error(`Mountpoint for session ${sessionId} already exists`);
         }
 
-        if (this.currentSession.active) {
-            throw new Error(`Session already active: ${this.currentSession.sessionId}`);
+        // lock
+        if (this.operationLocks.get(sessionId)) {
+            throw new Error(`Operation already in progress for session ${sessionId}`);
         }
+        this.operationLocks.set(sessionId, true);
 
         try {
-            this.whepServer.createEndpoint({
-                id: String(sessionId),
+            console.log(`[${this.nodeId}] Creating mountpoint for session: ${sessionId}`);
+            console.log(`[${this.nodeId}] Audio SSRC: ${audioSsrc}`);
+            console.log(`[${this.nodeId}] Video SSRC: ${videoSsrc}`);
+
+            // Leggi roomId da Redis (mountpointId = roomId)
+            const sessionData = await this.redis.hgetall(`session:${sessionId}`);
+            if (!sessionData || !sessionData.roomId) {
+                throw new Error(`Session ${sessionId} not found in Redis`);
+            }
+
+            const mountpointId = parseInt(sessionData.roomId);
+            console.log(`[${this.nodeId}] Mountpoint ID: ${mountpointId} (from roomId)`);
+
+            // Alloca porte dal pool
+            const { audioPort, videoPort } = this.portPool.allocate();
+            console.log(`[${this.nodeId}] Allocated ports - Audio: ${audioPort}, Video: ${videoPort}`);
+
+            // Crea mountpoint su Janus Streaming
+            await createJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId, audioPort, videoPort, this.mountpointSecret);
+
+            // Crea WHEP endpoint
+            const endpoint = this.whepServer.createEndpoint({
+                id: sessionId,
                 mountpoint: mountpointId,
                 token: this.whepToken
             });
-        } catch (error) {
-            console.error(`[${this.nodeId}] Failed to create WHEP endpoint:`, error.message);
-            throw error;
+
+            const createdAt = Date.now();
+
+            // Salva in memoria
+            this.mountpoints.set(sessionId, {
+                sessionId,
+                mountpointId,
+                audioSsrc,
+                videoSsrc,
+                janusAudioPort: audioPort,
+                janusVideoPort: videoPort,
+                endpoint,
+                active: true,
+                createdAt
+            });
+
+            // Salva su Redis
+            await saveMountpointToRedis(this.redis, this.nodeId, {
+                sessionId,
+                mountpointId,
+                audioSsrc,
+                videoSsrc,
+                janusAudioPort: audioPort,
+                janusVideoPort: videoPort,
+                createdAt
+            });
+
+            console.log(`[${this.nodeId}] Mountpoint created: ${sessionId}`);
+            console.log(`[${this.nodeId}] WHEP endpoint: ${this.whepBasePath}/endpoint/${sessionId}`);
+
+            // Rebuild pipelines con nuovo mountpoint
+            await this.rebuildPipelines();
+
+            return {
+                sessionId,
+                mountpointId,
+                whepUrl: `${this.whepBasePath}/endpoint/${sessionId}`,
+                janusAudioPort: audioPort,
+                janusVideoPort: videoPort
+            };
+        } finally {
+            this.operationLocks.delete(sessionId);
         }
+    }
+    // problematica attualmente
+    // async destroyMountpoint(sessionId) {
+    //     // check esistenza
+    //     if (!this.mountpoints.has(sessionId)) {
+    //         throw new Error(`Mountpoint for session ${sessionId} not found`);
+    //     }
+    //     // lock
+    //     if (this.operationLocks.get(sessionId)) {
+    //         throw new Error(`Operation already in progress for session ${sessionId}`);
+    //     }
+    //     this.operationLocks.set(sessionId, true);
 
-        // Salva stato
-        this.currentSession = {
-            sessionId,
-            mountpointId,
-            active: true,
-            createdAt: Date.now()
-        };
+    //     try {
+    //         console.log(`[${this.nodeId}] Destroying mountpoint for session: ${sessionId}`);
 
-        console.log(`[${this.nodeId}] Session ${sessionId} created`);
-        console.log(`[${this.nodeId}] Mountpoint ID: ${mountpointId}`);
-        console.log(`[${this.nodeId}] WHEP URL: http://${this.host}:${this.port}${this.whepBasePath}/endpoint/${sessionId}`);
+    //         const mountpoint = this.mountpoints.get(sessionId);
+    //         const { mountpointId, janusAudioPort, janusVideoPort, endpoint } = mountpoint;
 
-        return this.currentSession;
+    //         // memoria locale
+    //         this.mountpoints.delete(sessionId);
+
+    //         // Rilascia porte al pool
+    //         this.portPool.release(janusAudioPort, janusVideoPort);
+    //         console.log(`[${this.nodeId}] Released ports ${janusAudioPort}, ${janusVideoPort} to pool`);
+
+    //         // rimuove dopo 24 ore
+    //         await deactivateMountpointInRedis(this.redis, this.nodeId, mountpointId);
+
+    //         try {
+    //             if (this.whepServer && endpoint) {
+    //                 this.whepServer.destroyEndpoint(sessionId);
+    //                 console.log(`[${this.nodeId}] WHEP endpoint ${sessionId} destroyed`);
+    //             }
+    //         } catch (error) {
+    //             console.error(`[${this.nodeId}] Error destroying WHEP endpoint:`, error.message);
+    //             // Non bloccare - continua con cleanup
+    //         }
+
+    //         await destroyJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId, this.mountpointSecret);
+
+    //         console.log(`[${this.nodeId}] Mountpoint destroyed: ${sessionId}`);
+
+    //         // Rebuild pipelines senza questo mountpoint
+    //         await this.rebuildPipelines();
+
+    //         return { sessionId, mountpointId };
+
+    //     } catch (error) {
+    //         console.error(`[${this.nodeId}] Error destroying mountpoint ${sessionId}:`, error.message);
+    //         throw error;
+    //     } finally {
+    //         this.operationLocks.delete(sessionId);
+    //     }
+    // }
+
+    getMountpoint(sessionId) {
+        return getMountpointInfo(this.mountpoints, sessionId);
     }
 
-    async destroySession() {
-        if (!this.currentSession.active) {
-            throw new Error('No active session');
+    getAllMountpoints() {
+        return getAllMountpointsInfo(this.mountpoints);
+    }
+
+    // ============ GSTREAMER PIPELINE MANAGEMENT ============
+
+    async rebuildPipelines() {
+        // lock
+        if (this.isRebuilding) {
+            console.log(`[${this.nodeId}] Rebuild already in progress`);
+            return;
         }
-
-        console.log(`[${this.nodeId}] Destroying session ${this.currentSession.sessionId}...`);
-
-        const { sessionId } = this.currentSession;
+        this.isRebuilding = true;
 
         try {
-            this.whepServer.destroyEndpoint(String(sessionId));
-            console.log(`[${this.nodeId}] WHEP endpoint destroyed`);
+            console.log(`[${this.nodeId}] Rebuilding GStreamer pipelines...`);
+
+            // Stop pipeline correnti
+            this.stopPipelines();
+
+            // Leggi mountpoint attivi dalla memoria, per il momento funziona, se però crasha nodo
+            // bisogna prenderli da redis (TODO), -> aggiungere in mem, ricreare endpoints, riallocare porte...
+            // magari quando parte il nodo, facciamo chiamata a vuoto però risolve
+            const activeMountpoints = Array.from(this.mountpoints.values())
+                .filter(item => item.active)
+                .map(item => ({
+                    mountpointId: item.mountpointId,
+                    audioSsrc: item.audioSsrc,
+                    videoSsrc: item.videoSsrc,
+                    janusAudioPort: item.janusAudioPort,
+                    janusVideoPort: item.janusVideoPort
+                }));
+
+            if (activeMountpoints.length === 0) {
+                console.log(`[${this.nodeId}] No active mountpoints, pipelines stopped`);
+                return;
+            }
+
+            console.log(`[${this.nodeId}] Starting pipelines for ${activeMountpoints.length} mountpoints`);
+
+            // Start nuove pipeline
+            this._startAudioPipeline(activeMountpoints);
+            this._startVideoPipeline(activeMountpoints);
+
+            console.log(`[${this.nodeId}] Pipelines rebuilt successfully`);
 
         } catch (error) {
-            console.error(`[${this.nodeId}] Error destroying WHEP endpoint:`, error.message);
+            console.error(`[${this.nodeId}] Error rebuilding pipelines:`, error.message);
+            this.pipelineHealth.audio.lastError = error.message;
+            this.pipelineHealth.video.lastError = error.message;
             throw error;
         } finally {
-            // Reset stato
-            this.currentSession = {
-                sessionId: null,
-                mountpointId: null,
-                active: false,
-                createdAt: null
-            };
+            this.isRebuilding = false;
+        }
+    }
 
-            console.log(`[${this.nodeId}] Session destroyed`);
+    stopPipelines() {
+        if (this.audioPipeline) {
+            try {
+                this.audioPipeline.kill('SIGTERM');
+                console.log(`[${this.nodeId}] Audio pipeline stopped`);
+            } catch (error) {
+                console.error(`[${this.nodeId}] Error stopping audio pipeline:`, error.message);
+            }
+            this.audioPipeline = null;
+            this.pipelineHealth.audio.running = false;
         }
 
-        return { sessionId };
+        if (this.videoPipeline) {
+            try {
+                this.videoPipeline.kill('SIGTERM');
+                console.log(`[${this.nodeId}] Video pipeline stopped`);
+            } catch (error) {
+                console.error(`[${this.nodeId}] Error stopping video pipeline:`, error.message);
+            }
+            this.videoPipeline = null;
+            this.pipelineHealth.video.running = false;
+        }
     }
 
-    // ============ RTP FORWARDING (GSTREAMER) ============
+    _startAudioPipeline(mountpoints) {
+        // comando con rtpssrcdemux
+        // this.rtp.audioPort da base node
+        let cmd = `gst-launch-1.0 -v udpsrc port=${this.rtp.audioPort} caps="application/x-rtp,media=audio,encoding-name=OPUS,clock-rate=48000,payload=111" ! rtpssrcdemux name=demux_audio`; //  ! rtpjitterbuffer devo ancora capire se funziona
 
-    _startRtpForwarding() {
-        console.log(`[${this.nodeId}] Starting RTP forwarding to ${this.rtpDestination.host}`);
-        this._startAudioPipeline();
-        this._startVideoPipeline();
-    }
+        mountpoints.forEach(mp => {
+            cmd += ` demux_audio.src_${mp.audioSsrc} ! queue ! udpsink host=${this.rtpDestinationHost} port=${mp.janusAudioPort}`;
+        });
 
-    _startAudioPipeline() {
-        const args = [
-            'udpsrc', `port=${this.rtp.audioPort}`,
-            'caps=application/x-rtp,media=audio,encoding-name=OPUS,clock-rate=48000,payload=111',
-            '!', 'udpsink',
-            `host=${this.rtpDestination.host}`,
-            `port=${this.rtpDestination.audioPort}`,
-            'sync=false',
-            'async=false'
-        ];
-
-        const attempt = this.pipelineHealth.audio.restarts + 1;
-        console.log(`[${this.nodeId}] Starting audio pipeline (attempt #${attempt})`);
-        console.log(`[${this.nodeId}] Audio pipeline: gst-launch-1.0 ${args.join(' ')}`);
-
-
-        this.audioPipeline = spawn('gst-launch-1.0', args);
-
-        // Update health
-        this.pipelineHealth.audio.running = true;
         this.pipelineHealth.audio.restarts++;
+        console.log(`[${this.nodeId}] Starting audio pipeline #${this.pipelineHealth.audio.restarts})`);
+        // console.log(`[${this.nodeId}] Audio command: ${cmd}`);
+
+        this.audioPipeline = spawn('sh', ['-c', cmd]);
+
+        this.pipelineHealth.audio.running = true;
         this.pipelineHealth.audio.lastError = null;
 
-        // Attach handlers
         this._attachPipelineHandlers('audio', this.audioPipeline, () => {
-            this._startAudioPipeline();  // Callback per restart
+            // Callback per auto-restart
+            if (!this.isStopping && this.mountpoints.size > 0) {
+                const activeMountpoints = Array.from(this.mountpoints.values())
+                    .filter(item => item.active)
+                    .map(item => ({
+                        mountpointId: item.mountpointId,
+                        audioSsrc: item.audioSsrc,
+                        videoSsrc: item.videoSsrc,
+                        janusAudioPort: item.janusAudioPort,
+                        janusVideoPort: item.janusVideoPort
+                    }));
+
+                this._startAudioPipeline(activeMountpoints);
+            }
         });
     }
 
-    _startVideoPipeline() {
-        const args = [
-            'udpsrc', `port=${this.rtp.videoPort}`,
-            'caps=application/x-rtp,media=video,encoding-name=VP8,clock-rate=90000,payload=96',
-            '!', 'udpsink',
-            `host=${this.rtpDestination.host}`,
-            `port=${this.rtpDestination.videoPort}`,
-            'sync=false',
-            'async=false'
-        ];
+    _startVideoPipeline(mountpoints) {
+        // Costruisci comando con rtpssrcdemux
+        // this.rtp.audioPort da base node
+        let cmd = `gst-launch-1.0 -v udpsrc port=${this.rtp.videoPort} caps="application/x-rtp,media=video,encoding-name=VP8,clock-rate=90000,payload=96" ! rtpssrcdemux name=demux_video`; //  ! rtpjitterbuffer
 
-        const attempt = this.pipelineHealth.video.restarts + 1;
-        console.log(`[${this.nodeId}] Starting video pipeline (attempt #${attempt})`);
-        console.log(`[${this.nodeId}] Video pipeline: gst-launch-1.0 ${args.join(' ')}`);
+        mountpoints.forEach(mp => {
+            cmd += ` demux_video.src_${mp.videoSsrc} ! queue ! udpsink host=${this.rtpDestinationHost} port=${mp.janusVideoPort}`;
+        });
 
-
-        this.videoPipeline = spawn('gst-launch-1.0', args);
-
-        // Update health
-        this.pipelineHealth.video.running = true;
         this.pipelineHealth.video.restarts++;
+        console.log(`[${this.nodeId}] Starting video pipeline #${this.pipelineHealth.video.restarts})`);
+        // console.log(`[${this.nodeId}] Video command: ${cmd}`);
+
+        this.videoPipeline = spawn('sh', ['-c', cmd]);
+
+        this.pipelineHealth.video.running = true;
         this.pipelineHealth.video.lastError = null;
 
-        // Attach handlers
         this._attachPipelineHandlers('video', this.videoPipeline, () => {
-            this._startVideoPipeline();  // Callback per restart
+            // Callback per auto-restart
+            if (!this.isStopping && this.mountpoints.size > 0) {
+                const activeMountpoints = Array.from(this.mountpoints.values())
+                    .filter(item => item.active)
+                    .map(item => ({
+                        mountpointId: item.mountpointId,
+                        audioSsrc: item.audioSsrc,
+                        videoSsrc: item.videoSsrc,
+                        janusAudioPort: item.janusAudioPort,
+                        janusVideoPort: item.janusVideoPort
+                    }));
+
+                this._startVideoPipeline(activeMountpoints);
+            }
         });
     }
 
-    // ============ VIEWER COUNT HELPER ============
-
-    _getViewerCount(sessionId) {
-        try {
-            const endpoints = this.whepServer.listEndpoints();
-            const currentEndpoint = endpoints.find(ep => ep.id === sessionId);
-
-            return currentEndpoint?.subscribers || 0;
-        } catch (error) {
-            console.error(`[${this.nodeId}] Error getting viewer count:`, error.message);
-            return 0;
-        }
-    }
-
-    // ============ API ============
+    // ============ API ENDPOINTS ============
 
     setupEgressAPI() {
-        // POST /session/create
-        this.app.post('/session/create', async (req, res) => {
+        // POST /mountpoint/create
+        this.app.post('/mountpoint/create', async (req, res) => {
             try {
-                const { sessionId, mountpointId } = req.body;
-                const result = await this.createSession(sessionId, mountpointId);
+                const { sessionId, audioSsrc, videoSsrc } = req.body;
 
-                res.status(201).json({
-                    sessionId: result.sessionId,
-                    mountpointId: result.mountpointId,
-                    whepUrl: `http://${this.host}:${this.port}${this.whepBasePath}/endpoint/${sessionId}`,
-                    createdAt: result.createdAt
-                });
-
-            } catch (error) {
-                console.error(`[${this.nodeId}] Create session error:`, error.message);
-                res.status(500).json({ error: error.message });
-            }
-        });
-
-        // POST /session/destroy
-        this.app.post('/session/destroy', async (req, res) => {
-            try {
-                const result = await this.destroySession();
-                res.json({ message: 'Session destroyed', ...result });
-            } catch (error) {
-                console.error(`[${this.nodeId}] Destroy session error:`, error.message);
-                res.status(500).json({ error: error.message });
-            }
-        });
-
-        // GET /session
-        this.app.get('/session', (req, res) => {
-            if (this.currentSession.active) {
-                const viewers = this._getViewerCount(this.currentSession.sessionId);
-
-                res.json({
-                    active: true,
-                    sessionId: this.currentSession.sessionId,
-                    mountpointId: this.currentSession.mountpointId,
-                    viewers: viewers,
-                    createdAt: this.currentSession.createdAt,
-                    uptime: Math.floor((Date.now() - this.currentSession.createdAt) / 1000)
-                });
-            } else {
-                res.json({
-                    active: false,
-                    sessionId: null
-                });
-            }
-        });
-
-        // GET /pipelines - Pipeline health status
-        this.app.get('/pipelines', (req, res) => {
-            res.json({
-                destination: this.rtpDestination,
-                audio: {
-                    running: this.pipelineHealth.audio.running,
-                    restarts: this.pipelineHealth.audio.restarts,
-                    lastError: this.pipelineHealth.audio.lastError,
-                    port: this.rtp.audioPort,
-                    forwardTo: `${this.rtpDestination.host}:${this.rtpDestination.audioPort}`
-                },
-                video: {
-                    running: this.pipelineHealth.video.running,
-                    restarts: this.pipelineHealth.video.restarts,
-                    lastError: this.pipelineHealth.video.lastError,
-                    port: this.rtp.videoPort,
-                    forwardTo: `${this.rtpDestination.host}:${this.rtpDestination.videoPort}`
+                if (!sessionId || !audioSsrc || !videoSsrc) {
+                    return res.status(400).json({
+                        error: 'Missing fields: sessionId, audioSsrc, videoSsrc'
+                    });
                 }
-            });
+
+                const result = await this.createMountpoint(sessionId, parseInt(audioSsrc), parseInt(videoSsrc), this.mountpointSecret);
+                res.status(201).json(result);
+            } catch (error) {
+                console.error(`[${this.nodeId}] Create mountpoint error:`, error.message);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // POST /mountpoint/:sessionId/destroy
+        //this.app.post('/mountpoint/:sessionId/destroy', async (req, res) => {
+        //     try {
+        //         const { sessionId } = req.params;
+        //         const result = await this.destroyMountpoint(sessionId);
+        //         res.json({ message: 'Mountpoint destroyed', ...result });
+        //     } catch (error) {
+        //         console.error(`[${this.nodeId}] Destroy mountpoint error:`, error.message);
+        //         res.status(500).json({ error: error.message });
+        //     }
+        //});
+
+        // GET /mountpoint/:sessionId
+        this.app.get('/mountpoint/:sessionId', (req, res) => {
+            try {
+                const { sessionId } = req.params;
+                const mountpoint = this.getMountpoint(sessionId);
+
+                if (!mountpoint) {
+                    return res.status(404).json({ error: 'Mountpoint not found' });
+                }
+
+                res.json(mountpoint);
+            } catch (error) {
+                console.error(`[${this.nodeId}] Get mountpoint error:`, error.message);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // GET /mountpoints
+        this.app.get('/mountpoints', (req, res) => {
+            try {
+                const mountpoints = this.getAllMountpoints();
+                res.json({
+                    count: mountpoints.length,
+                    mountpoints
+                });
+            } catch (error) {
+                console.error(`[${this.nodeId}] Get mountpoints error:`, error.message);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // GET /pipelines (debug info)
+        this.app.get('/pipelines', (req, res) => {
+            try {
+                const activeCount = Array.from(this.mountpoints.values())
+                    .filter(item => item.active).length;
+                res.json({
+                    audio: {
+                        running: this.pipelineHealth.audio.running,
+                        restarts: this.pipelineHealth.audio.restarts,
+                        lastError: this.pipelineHealth.audio.lastError
+                    },
+                    video: {
+                        running: this.pipelineHealth.video.running,
+                        restarts: this.pipelineHealth.video.restarts,
+                        lastError: this.pipelineHealth.video.lastError
+                    },
+                    mountpointsActive: activeCount
+                });
+            } catch (error) {
+                console.error(`[${this.nodeId}] Get pipelines error:`, error.message);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // GET /portpool (debug info)
+        this.app.get('/portpool', (req, res) => {
+            try {
+                res.json(this.portPool.getStats());
+            } catch (error) {
+                console.error(`[${this.nodeId}] Get portpool error:`, error.message);
+                res.status(500).json({ error: error.message });
+            }
         });
     }
 
     async getStatus() {
         const baseStatus = await super.getStatus();
-
+        const activeCount = Array.from(this.mountpoints.values())
+            .filter(item => item.active).length;
         return {
             ...baseStatus,
             janus: {
-                connected: this.whepServer !== null,
-                url: this.janusUrl
+                connected: this.janusStreaming !== null,
+                url: this.janusUrl,
+                rtpDestination: this.rtpDestinationHost
             },
             whep: {
                 running: this.whepServer !== null,
                 basePath: this.whepBasePath
             },
-            pipelines: {
-                audio: {
-                    running: this.pipelineHealth.audio.running,
-                    restarts: this.pipelineHealth.audio.restarts
-                },
-                video: {
-                    running: this.pipelineHealth.video.running,
-                    restarts: this.pipelineHealth.video.restarts
-                }
+            gstreamer: this.pipelineHealth,
+            mountpoints: {
+                active: activeCount,
+                list: this.getAllMountpoints()
             },
-            session: this.currentSession.active ? {
-                active: true,
-                sessionId: this.currentSession.sessionId,
-                mountpointId: this.currentSession.mountpointId,
-                viewers: this._getViewerCount(this.currentSession.sessionId),
-                createdAt: this.currentSession.createdAt,
-                uptime: Math.floor((Date.now() - this.currentSession.createdAt) / 1000)
-            } : {
-                active: false,
-                sessionId: null
-            }
+            portPool: this.portPool.getStats()
         };
     }
 }

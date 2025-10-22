@@ -5,7 +5,7 @@ services:
     image: redis:7-alpine
     container_name: redis
     ports:
-      - "6379:6379"
+      - "6379:6379" # Redis standard port
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -22,9 +22,9 @@ services:
       dockerfile: Dockerfile
     container_name: janus-videoroom
     ports:
-      - "8088:8088"
-      - "8188:8188"
-      - "20000-20050:20000-20050/udp"
+      - "8088:8088" # HTTP
+      - "8188:8188" # WebSocket
+      - "20000-20050:20000-20050/udp" # WebRTC
     volumes:
       - ./janus-videoroom/config:/opt/janus/etc/janus:ro
     environment:
@@ -40,9 +40,7 @@ services:
     ports:
       - "8089:8088" # HTTP API
       - "8189:8188" # WebSocket
-      - "6002:5002/udp" # RTP Audio
-      - "6004:5004/udp" # RTP Video
-      - "20051-20150:20051-20150/udp"
+      - "20051-20150:20051-20150/udp" # WebRTC
     volumes:
       - ./janus-streaming/config:/opt/janus/etc/janus:ro
     environment:
@@ -56,10 +54,8 @@ services:
       dockerfile: Dockerfile
     container_name: janus-streaming-2
     ports:
-      - "8190:8188" # WebSocket
       - "8090:8088" # HTTP API
-      - "7002:5002/udp" # RTP Audio
-      - "7004:5004/udp" # RTP Video
+      - "8190:8188" # WebSocket
       - "20151-20200:20101-20150/udp" # WebRTC
     volumes:
       - ./janus-streaming/config:/opt/janus/etc/janus:ro
@@ -69,6 +65,7 @@ services:
       - media-tree
     profiles:
       - scale
+
   # ============ INJECTION NODE ============
 
   injection-1:
@@ -77,19 +74,28 @@ services:
       dockerfile: injection-node/Dockerfile
     container_name: injection-1
     ports:
-      - "7070:7070"
+      - "7070:7070" # REST API e WHIP server
     environment:
       - NODE_ID=injection-1
       - NODE_HOST=injection-1
-      - NODE_PORT=7070
+      - API_PORT=7070
+
+      # RTP ports (for Redis registration only)
       - RTP_AUDIO_PORT=5000
       - RTP_VIDEO_PORT=5002
+
+      # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+
+      # Janus VideoRoom
       - JANUS_VIDEOROOM_WS_URL=ws://janus-videoroom:8188
+      - JANUS_VIDEOROOM_ROOM_SECRET=adminpwd
+
+      # WHIP
       - WHIP_BASE_PATH=/whip
       - WHIP_TOKEN=verysecret
-      - WHIP_SECRET=adminpwd
+
     depends_on:
       - redis
       - janus-videoroom
@@ -103,18 +109,22 @@ services:
       context: .
       dockerfile: relay-node/Dockerfile
     container_name: relay-1
+    ports:
+      - "7071:7071" # REST API
+      - "5002:5002/udp" # RTP audio INPUT
+      - "5004:5004/udp" # RTP video INPUT
     environment:
       - NODE_ID=relay-1
       - NODE_HOST=relay-1
       - API_PORT=7071
-      - AUDIO_PORT=5002
-      - VIDEO_PORT=5004
+
+      # RTP ports
+      - RTP_AUDIO_PORT=5002
+      - RTP_VIDEO_PORT=5004
+
+      # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-    ports:
-      - "7071:7071"
-      - "5002:5002/udp"
-      - "5004:5004/udp"
     depends_on:
       redis:
         condition: service_healthy
@@ -126,18 +136,23 @@ services:
       context: .
       dockerfile: relay-node/Dockerfile
     container_name: relay-2
+    ports:
+      - "7072:7072" # REST API
+      - "5102:5102/udp" # RTP audio INPUT
+      - "5104:5104/udp" # RTP video INPUT
     environment:
       - NODE_ID=relay-2
       - NODE_HOST=relay-2
       - API_PORT=7072
-      - AUDIO_PORT=5102
-      - VIDEO_PORT=5104
+
+      # RTP ports
+      - RTP_AUDIO_PORT=5102
+      - RTP_VIDEO_PORT=5104
+
+        # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-    ports:
-      - "7072:7072"
-      - "5102:5102/udp"
-      - "5104:5104/udp"
+
     depends_on:
       redis:
         condition: service_healthy
@@ -154,16 +169,30 @@ services:
       dockerfile: egress-node/Dockerfile
     container_name: egress-1
     ports:
-      - "7073:7073"
+      - "7073:7073" # REST API e WHEP server
+      - "6000-6100:6000-6100/udp" # PortPool range
     environment:
       - NODE_ID=egress-1
       - NODE_HOST=egress-1
       - API_PORT=7073
+
+      # RTP Input
       - RTP_AUDIO_PORT=5002
       - RTP_VIDEO_PORT=5004
+
+      # PortPool config
+      - PORT_POOL_BASE=6000
+      - PORT_POOL_SIZE=100
+
+      # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+
+      # Janus Streaming
       - JANUS_STREAMING_WS_URL=ws://janus-streaming-1:8188
+      - JANUS_STREAMING_MOUNTPOINT_SECRET=adminpwd
+
+      # WHEP
       - WHEP_BASE_PATH=/whep
       - WHEP_TOKEN=verysecret
     depends_on:
@@ -178,16 +207,30 @@ services:
       dockerfile: egress-node/Dockerfile
     container_name: egress-2
     ports:
-      - "7074:7074"
+      - "7074:7074" # REST API e WHEP server
+      - "6100-6200:6000-6100/udp" # PortPool range
     environment:
       - NODE_ID=egress-2
       - NODE_HOST=egress-2
       - API_PORT=7074
+
+      # RTP Input
       - RTP_AUDIO_PORT=5002
       - RTP_VIDEO_PORT=5004
+
+      # PortPool config
+      - PORT_POOL_BASE=6000
+      - PORT_POOL_SIZE=100
+
+      # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+
+      # Janus Streaming
       - JANUS_STREAMING_WS_URL=ws://janus-streaming-2:8188
+      - JANUS_STREAMING_MOUNTPOINT_SECRET=adminpwd
+
+      # WHEP
       - WHEP_BASE_PATH=/whep
       - WHEP_TOKEN=verysecret
     depends_on:
@@ -197,34 +240,23 @@ services:
       - media-tree
     profiles:
       - scale
-  ## ============ RTP RECEIVER ============
-  #
-  #receiver-1:
-  #  build: ./relay-node/test
-  #  container_name: rtp-receiver-1
-  #  environment:
-  #    - MODE=receiver
-  #    - LISTEN_AUDIO_PORT=6000
-  #    - LISTEN_VIDEO_PORT=6002
-  #    - GST_DEBUG=2
-  #  ports:
-  #    - "6000:6000/udp"
-  #    - "6002:6002/udp"
-  #  networks:
-  #    - media-tree
 
   # ============ WHIP CLIENT ============
 
-  whip-client:
+  # Broadcaster 1: SSRC 1111/2222 (in realtà possiamo mettere cio che vogliamo
+  # tanto seguirà quelli in sessione di janus)
+  whip-client-1:
     build:
       context: ./simple-whip-client
       dockerfile: Dockerfile
-    container_name: whip-client
+    container_name: whip-client-1
     environment:
-      - URL=http://injection-1:7070/whip/endpoint/live-session
+      - URL=http://injection-1:7070/whip/endpoint/broadcaster-1
       - TOKEN=verysecret
-      - AUDIO_PIPE=audiotestsrc is-live=true wave=sine freq=440 ! audioconvert ! audioresample ! queue ! opusenc ! rtpopuspay pt=111 ssrc=1 ! queue ! application/x-rtp,media=audio,encoding-name=OPUS,payload=111
-      - VIDEO_PIPE=videotestsrc is-live=true pattern=ball ! video/x-raw,width=640,height=480,framerate=30/1 ! videoconvert ! queue ! vp8enc deadline=1 ! rtpvp8pay pt=96 ssrc=2 ! queue ! application/x-rtp,media=video,encoding-name=VP8,payload=96
+
+      - AUDIO_PIPE=audiotestsrc is-live=true wave=sine freq=440 ! audioconvert ! audioresample ! queue ! opusenc ! rtpopuspay pt=111 ssrc=1111 ! queue ! application/x-rtp,media=audio,encoding-name=OPUS,payload=111
+      - VIDEO_PIPE=videotestsrc is-live=true pattern=ball ! video/x-raw,width=640,height=480,framerate=30/1 ! videoconvert ! queue ! vp8enc deadline=1 ! rtpvp8pay pt=96 ssrc=2222 ! queue ! application/x-rtp,media=video,encoding-name=VP8,payload=96
+
       - STUN_SERVER=stun://stun.l.google.com:19302
       - GST_DEBUG=2
     depends_on:
@@ -232,7 +264,31 @@ services:
     networks:
       - media-tree
     profiles:
-      - streaming
+      - broadcaster
+
+  # Broadcaster 2: SSRC 3333/4444 (in realtà possiamo mettere cio che vogliamo
+  # tanto seguirà quelli in sessione di janus)
+  whip-client-2:
+    build:
+      context: ./simple-whip-client
+      dockerfile: Dockerfile
+    container_name: whip-client-2
+    environment:
+      - URL=http://injection-1:7070/whip/endpoint/broadcaster-2
+      - TOKEN=verysecret
+
+      # Different pattern
+      - AUDIO_PIPE=audiotestsrc is-live=true wave=sine freq=880 ! audioconvert ! audioresample ! queue ! opusenc ! rtpopuspay pt=111 ssrc=3333 ! queue ! application/x-rtp,media=audio,encoding-name=OPUS,payload=111
+      - VIDEO_PIPE=videotestsrc is-live=true pattern=smpte ! video/x-raw,width=640,height=480,framerate=30/1 ! videoconvert ! queue ! vp8enc deadline=1 ! rtpvp8pay pt=96 ssrc=4444 ! queue ! application/x-rtp,media=video,encoding-name=VP8,payload=96
+
+      - STUN_SERVER=stun://stun.l.google.com:19302
+      - GST_DEBUG=2
+    depends_on:
+      - injection-1
+    networks:
+      - media-tree
+    profiles:
+      - broadcaster
 
 networks:
   media-tree:
