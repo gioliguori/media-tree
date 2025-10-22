@@ -7,8 +7,8 @@ const config = {
     port: parseInt(process.env.API_PORT) || 7070,
 
     rtp: {
-        audioPort: parseInt(process.env.AUDIO_PORT) || 5002,
-        videoPort: parseInt(process.env.VIDEO_PORT) || 5004
+        audioPort: parseInt(process.env.RTP_AUDIO_PORT) || 5002,
+        videoPort: parseInt(process.env.RTP_VIDEO_PORT) || 5004
     },
 
     redis: {
