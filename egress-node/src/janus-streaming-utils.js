@@ -101,7 +101,7 @@ export async function destroyJanusMountpoint(streaming, mountpointId, secret) {
     try {
         console.log(`[Janus] Destroying mountpoint ${mountpointId}...`);
 
-        await streaming.destroy({
+        await streaming.destroyMountpoint({
             id: mountpointId,
             secret: secret,
             permanent: false

@@ -201,62 +201,62 @@ export class InjectionNode extends BaseNode {
     }
 
     // problematica attualmente
-    //async destroySession(sessionId) {
-    //    // Check esistenza
-    //    if (!this.sessions.has(sessionId)) {
-    //        throw new Error(`Session ${sessionId} not found`);
-    //    }
-    //    // Lock
-    //    if (this.operationLocks.get(sessionId)) {
-    //        throw new Error(`Operation already in progress for session ${sessionId}`);
-    //    }
-    //    this.operationLocks.set(sessionId, true);
-    //
-    //    try {
-    //        console.log(`[${this.nodeId}] Destroying session: ${sessionId}`);
-    //
-    //        const session = this.sessions.get(sessionId);
-    //        const { roomId } = session;
-    //
-    //        // rimuovi da memoria
-    //        this.sessions.delete(sessionId);
-    //
-    //        // inattiva su Redis
-    //        await deactivateSessionInRedis(this.redis, this.nodeId, sessionId);
-    //
-    //        //    // distruggi endpoint
-    //        //    try {
-    //        //        if (this.whipServer && endpoint) {
-    //        //            this.whipServer.destroyEndpoint(sessionId);
-    //        //            console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} destroyed`);
-    //        //        } else {
-    //        //            console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} already destroyed or not exists`);
-    //        //        }
-    //        //    } catch (error) {
-    //        //        // Se l'endpoint è già distrutto, continua comunque
-    //        //        if (error.message.includes('Invalid endpoint ID')) {
-    //        //            console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} was already destroyed`);
-    //        //        } else {
-    //        //            console.error(`[${this.nodeId}] Error destroying WHIP endpoint:`, error.message);
-    //        //            // Non bloccare se endpoint già distrutto
-    //        //        }
-    //        //    }
-    //
-    //        // distruggi room
-    //        await destroyJanusRoom(this.janusVideoRoom, this.nodeId, roomId, this.roomSecret);
-    //
-    //        console.log(`[${this.nodeId}] Session destroyed: ${sessionId}`);
-    //
-    //        return { sessionId };
-    //
-    //    } catch (error) {
-    //        console.error(`[${this.nodeId}] Error destroying session ${sessionId}:`, error.message);
-    //        throw error;
-    //    } finally {
-    //        // Unlock
-    //        this.operationLocks.delete(sessionId);
-    //    }
-    //}
+    // async destroySession(sessionId) {
+    //     // Check esistenza
+    //     if (!this.sessions.has(sessionId)) {
+    //         throw new Error(`Session ${sessionId} not found`);
+    //     }
+    //     // Lock
+    //     if (this.operationLocks.get(sessionId)) {
+    //         throw new Error(`Operation already in progress for session ${sessionId}`);
+    //     }
+    //     this.operationLocks.set(sessionId, true);
+
+    //     try {
+    //         console.log(`[${this.nodeId}] Destroying session: ${sessionId}`);
+
+    //         const session = this.sessions.get(sessionId);
+    //         const { roomId } = session;
+
+    //         // rimuovi da memoria
+    //         this.sessions.delete(sessionId);
+
+    //         // inattiva su Redis
+    //         await deactivateSessionInRedis(this.redis, this.nodeId, sessionId);
+
+    //         // distruggi endpoint
+    //         try {
+    //             if (this.whipServer && endpoint) {
+    //                 this.whipServer.destroyEndpoint(sessionId);
+    //                 console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} destroyed`);
+    //             } else {
+    //                 console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} already destroyed or not exists`);
+    //             }
+    //         } catch (error) {
+    //             // Se l'endpoint è già distrutto, continua comunque
+    //             if (error.message.includes('Invalid endpoint ID')) {
+    //                 console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} was already destroyed`);
+    //             } else {
+    //                 console.error(`[${this.nodeId}] Error destroying WHIP endpoint:`, error.message);
+    //                 // Non bloccare se endpoint già distrutto
+    //             }
+    //         }
+
+    //         // distruggi room
+    //         await destroyJanusRoom(this.janusVideoRoom, this.nodeId, roomId, this.roomSecret);
+
+    //         console.log(`[${this.nodeId}] Session destroyed: ${sessionId}`);
+
+    //         return { sessionId };
+
+    //     } catch (error) {
+    //         console.error(`[${this.nodeId}] Error destroying session ${sessionId}:`, error.message);
+    //         throw error;
+    //     } finally {
+    //         // Unlock
+    //         this.operationLocks.delete(sessionId);
+    //     }
+    // }
 
 
     getSession(sessionId) {

@@ -459,16 +459,16 @@ export class EgressNode extends BaseNode {
         });
 
         // POST /mountpoint/:sessionId/destroy
-        //this.app.post('/mountpoint/:sessionId/destroy', async (req, res) => {
-        //     try {
-        //         const { sessionId } = req.params;
-        //         const result = await this.destroyMountpoint(sessionId);
-        //         res.json({ message: 'Mountpoint destroyed', ...result });
-        //     } catch (error) {
-        //         console.error(`[${this.nodeId}] Destroy mountpoint error:`, error.message);
-        //         res.status(500).json({ error: error.message });
-        //     }
-        //});
+        this.app.post('/mountpoint/:sessionId/destroy', async (req, res) => {
+            try {
+                const { sessionId } = req.params;
+                const result = await this.destroyMountpoint(sessionId);
+                res.json({ message: 'Mountpoint destroyed', ...result });
+            } catch (error) {
+                console.error(`[${this.nodeId}] Destroy mountpoint error:`, error.message);
+                res.status(500).json({ error: error.message });
+            }
+        });
 
         // GET /mountpoint/:sessionId
         this.app.get('/mountpoint/:sessionId', (req, res) => {
