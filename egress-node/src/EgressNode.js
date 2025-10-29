@@ -105,14 +105,14 @@ export class EgressNode extends BaseNode {
         // Distruggi tutti i mountpoint 
         const sessionIds = Array.from(this.mountpoints.keys());
         console.log(`[${this.nodeId}] Destroying ${sessionIds.length} active mountpoints...`);
-        // non funziona per il momento
-        //for (const sessionId of sessionIds) {
-        //    try {
-        //        await this.destroyMountpoint(sessionId);
-        //    } catch (error) {
-        //        console.error(`[${this.nodeId}] Error destroying mountpoint ${sessionId}:`, error.message);
-        //    }
-        //}
+
+        for (const sessionId of sessionIds) {
+            try {
+                await this.destroyMountpoint(sessionId);
+            } catch (error) {
+                console.error(`[${this.nodeId}] Error destroying mountpoint ${sessionId}:`, error.message);
+            }
+        }
 
         // Stop GStreamer pipelines
         this.stopPipelines();
@@ -176,6 +176,7 @@ export class EgressNode extends BaseNode {
             await createJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId, audioPort, videoPort, this.mountpointSecret);
 
             // Crea WHEP endpoint
+            console.log(`Session ID : ${sessionId}`)
             const endpoint = this.whepServer.createEndpoint({
                 id: sessionId,
                 mountpoint: mountpointId,
@@ -225,60 +226,61 @@ export class EgressNode extends BaseNode {
             this.operationLocks.delete(sessionId);
         }
     }
-    // problematica attualmente
-    // async destroyMountpoint(sessionId) {
-    //     // check esistenza
-    //     if (!this.mountpoints.has(sessionId)) {
-    //         throw new Error(`Mountpoint for session ${sessionId} not found`);
-    //     }
-    //     // lock
-    //     if (this.operationLocks.get(sessionId)) {
-    //         throw new Error(`Operation already in progress for session ${sessionId}`);
-    //     }
-    //     this.operationLocks.set(sessionId, true);
 
-    //     try {
-    //         console.log(`[${this.nodeId}] Destroying mountpoint for session: ${sessionId}`);
+    async destroyMountpoint(sessionId) {
+        // check esistenza
+        if (!this.mountpoints.has(sessionId)) {
+            throw new Error(`Mountpoint for session ${sessionId} not found`);
+        }
+        // lock
+        if (this.operationLocks.get(sessionId)) {
+            throw new Error(`Operation already in progress for session ${sessionId}`);
+        }
+        this.operationLocks.set(sessionId, true);
 
-    //         const mountpoint = this.mountpoints.get(sessionId);
-    //         const { mountpointId, janusAudioPort, janusVideoPort, endpoint } = mountpoint;
+        try {
+            console.log(`[${this.nodeId}] Destroying mountpoint for session: ${sessionId}`);
 
-    //         // memoria locale
-    //         this.mountpoints.delete(sessionId);
+            const mountpoint = this.mountpoints.get(sessionId);
+            const { mountpointId, janusAudioPort, janusVideoPort, endpoint } = mountpoint;
 
-    //         // Rilascia porte al pool
-    //         this.portPool.release(janusAudioPort, janusVideoPort);
-    //         console.log(`[${this.nodeId}] Released ports ${janusAudioPort}, ${janusVideoPort} to pool`);
+            // Rilascia porte al pool
+            this.portPool.release(janusAudioPort, janusVideoPort);
+            console.log(`[${this.nodeId}] Released ports ${janusAudioPort}, ${janusVideoPort} to pool`);
 
-    //         // rimuove dopo 24 ore
-    //         await deactivateMountpointInRedis(this.redis, this.nodeId, mountpointId);
+            // rimuove dopo 24 ore
+            await deactivateMountpointInRedis(this.redis, this.nodeId, mountpointId);
 
-    //         try {
-    //             if (this.whepServer && endpoint) {
-    //                 this.whepServer.destroyEndpoint(sessionId);
-    //                 console.log(`[${this.nodeId}] WHEP endpoint ${sessionId} destroyed`);
-    //             }
-    //         } catch (error) {
-    //             console.error(`[${this.nodeId}] Error destroying WHEP endpoint:`, error.message);
-    //             // Non bloccare - continua con cleanup
-    //         }
+            // distruggi endpoint
+            try {
+                if (this.whepServer && endpoint) {
+                    this.whepServer.destroyEndpoint({ id: sessionId });
+                    console.log(`[${this.nodeId}] WHEP endpoint ${sessionId} destroyed`);
+                }
+            } catch (error) {
+                console.error(`[${this.nodeId}] Error destroying WHEP endpoint:`, error.message);
+                // Non bloccare - continua con cleanup
+            }
 
-    //         await destroyJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId, this.mountpointSecret);
+            await destroyJanusMountpoint(this.janusStreaming, mountpointId, this.mountpointSecret);
 
-    //         console.log(`[${this.nodeId}] Mountpoint destroyed: ${sessionId}`);
+            // memoria locale
+            this.mountpoints.delete(sessionId);
 
-    //         // Rebuild pipelines senza questo mountpoint
-    //         await this.rebuildPipelines();
+            console.log(`[${this.nodeId}] Mountpoint destroyed: ${sessionId}`);
 
-    //         return { sessionId, mountpointId };
+            // Rebuild pipelines senza questo mountpoint
+            await this.rebuildPipelines();
 
-    //     } catch (error) {
-    //         console.error(`[${this.nodeId}] Error destroying mountpoint ${sessionId}:`, error.message);
-    //         throw error;
-    //     } finally {
-    //         this.operationLocks.delete(sessionId);
-    //     }
-    // }
+            return { sessionId, mountpointId };
+
+        } catch (error) {
+            console.error(`[${this.nodeId}] Error destroying mountpoint ${sessionId}:`, error.message);
+            throw error;
+        } finally {
+            this.operationLocks.delete(sessionId);
+        }
+    }
 
     getMountpoint(sessionId) {
         return getMountpointInfo(this.mountpoints, sessionId);

@@ -81,14 +81,14 @@ export class InjectionNode extends BaseNode {
         // Distruggi tutte le sessioni attive
         const sessionIds = Array.from(this.sessions.keys());
         console.log(`[${this.nodeId}] Destroying ${sessionIds.length} active sessions...`);
-        // non funziona al momento
-        //for (const sessionId of sessionIds) {
-        //    try {
-        //        await this.destroySession(sessionId);
-        //    } catch (error) {
-        //        console.error(`[${this.nodeId}] Error destroying session ${sessionId}:`, error.message);
-        //    }
-        //}
+
+        for (const sessionId of sessionIds) {
+            try {
+                await this.destroySession(sessionId);
+            } catch (error) {
+                console.error(`[${this.nodeId}] Error destroying session ${sessionId}:`, error.message);
+            }
+        }
 
         // Stop WHIP server
         if (this.whipServer) {
@@ -200,63 +200,55 @@ export class InjectionNode extends BaseNode {
         }
     }
 
-    // problematica attualmente
-    // async destroySession(sessionId) {
-    //     // Check esistenza
-    //     if (!this.sessions.has(sessionId)) {
-    //         throw new Error(`Session ${sessionId} not found`);
-    //     }
-    //     // Lock
-    //     if (this.operationLocks.get(sessionId)) {
-    //         throw new Error(`Operation already in progress for session ${sessionId}`);
-    //     }
-    //     this.operationLocks.set(sessionId, true);
+    async destroySession(sessionId) {
+        // Check esistenza
+        if (!this.sessions.has(sessionId)) {
+            throw new Error(`Session ${sessionId} not found`);
+        }
+        // Lock
+        if (this.operationLocks.get(sessionId)) {
+            throw new Error(`Operation already in progress for session ${sessionId}`);
+        }
+        this.operationLocks.set(sessionId, true);
 
-    //     try {
-    //         console.log(`[${this.nodeId}] Destroying session: ${sessionId}`);
+        try {
+            console.log(`[${this.nodeId}] Destroying session: ${sessionId}`);
 
-    //         const session = this.sessions.get(sessionId);
-    //         const { roomId } = session;
+            const session = this.sessions.get(sessionId);
+            const { roomId, endpoint } = session;
 
-    //         // rimuovi da memoria
-    //         this.sessions.delete(sessionId);
+            // inattiva su Redis
+            await deactivateSessionInRedis(this.redis, this.nodeId, sessionId);
 
-    //         // inattiva su Redis
-    //         await deactivateSessionInRedis(this.redis, this.nodeId, sessionId);
+            // distruggi endpoint
+            try {
+                if (this.whipServer && endpoint) {
+                    this.whipServer.destroyEndpoint({ id: sessionId });
+                    console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} destroyed`);
+                }
+            } catch (error) {
+                console.error(`[${this.nodeId}] Error destroying WHIP endpoint:`, error.message);
+                // Non bloccare se endpoint già distrutto
+            }
 
-    //         // distruggi endpoint
-    //         try {
-    //             if (this.whipServer && endpoint) {
-    //                 this.whipServer.destroyEndpoint(sessionId);
-    //                 console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} destroyed`);
-    //             } else {
-    //                 console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} already destroyed or not exists`);
-    //             }
-    //         } catch (error) {
-    //             // Se l'endpoint è già distrutto, continua comunque
-    //             if (error.message.includes('Invalid endpoint ID')) {
-    //                 console.log(`[${this.nodeId}] WHIP endpoint ${sessionId} was already destroyed`);
-    //             } else {
-    //                 console.error(`[${this.nodeId}] Error destroying WHIP endpoint:`, error.message);
-    //                 // Non bloccare se endpoint già distrutto
-    //             }
-    //         }
+            // distruggi room
+            await destroyJanusRoom(this.janusVideoRoom, this.nodeId, roomId, this.roomSecret);
 
-    //         // distruggi room
-    //         await destroyJanusRoom(this.janusVideoRoom, this.nodeId, roomId, this.roomSecret);
+            // rimuovi da memoria
+            this.sessions.delete(sessionId);
 
-    //         console.log(`[${this.nodeId}] Session destroyed: ${sessionId}`);
+            console.log(`[${this.nodeId}] Session destroyed: ${sessionId}`);
 
-    //         return { sessionId };
+            return { sessionId };
 
-    //     } catch (error) {
-    //         console.error(`[${this.nodeId}] Error destroying session ${sessionId}:`, error.message);
-    //         throw error;
-    //     } finally {
-    //         // Unlock
-    //         this.operationLocks.delete(sessionId);
-    //     }
-    // }
+        } catch (error) {
+            console.error(`[${this.nodeId}] Error destroying session ${sessionId}:`, error.message);
+            throw error;
+        } finally {
+            // Unlock
+            this.operationLocks.delete(sessionId);
+        }
+    }
 
 
     getSession(sessionId) {
