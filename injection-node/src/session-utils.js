@@ -26,7 +26,6 @@ export async function deactivateSessionInRedis(redis, nodeId, sessionId) {
 
     // TTL 24 ore
     await redis.expire(`session:${sessionId}`, 86400);
-    // console.log(`Session ${sessionId} will expire in 24h`);
 
 }
 

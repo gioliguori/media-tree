@@ -1,5 +1,5 @@
 services:
-  # ============ INFRA ============
+  # REDIS
 
   redis:
     image: redis:7-alpine
@@ -14,7 +14,7 @@ services:
     networks:
       - media-tree
 
-  # ============ JANUS ============
+  # JANUS
 
   janus-videoroom:
     build:
@@ -66,7 +66,7 @@ services:
     profiles:
       - scale
 
-  # ============ INJECTION NODE ============
+  # INJECTION NODE
 
   injection-1:
     build:
@@ -102,7 +102,7 @@ services:
     networks:
       - media-tree
 
-  # ============ RELAY NODES ============
+  # RELAY NODES
 
   relay-1:
     build:
@@ -159,7 +159,7 @@ services:
     networks:
       - media-tree
 
-  # ============ EGRESS NODE ============
+  # EGRESS NODE
 
   egress-1:
     build:
@@ -239,7 +239,7 @@ services:
     profiles:
       - scale
 
-  # ============ WHIP CLIENT ============
+  # WHIP CLIENT
 
   # Broadcaster 1: SSRC 1111/2222 (in realtà possiamo mettere cio che vogliamo
   # tanto seguirà quelli in sessione di janus)

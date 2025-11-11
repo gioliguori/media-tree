@@ -29,7 +29,6 @@ export async function deactivateMountpointInRedis(redis, nodeId, mountpointId) {
 
     // TTL 24 ore
     await redis.expire(`mountpoint:${nodeId}:${mountpointId}`, 86400);
-    // console.log(`Mountpoint ${mountpointId} will expire in 24h`);
 }
 
 export function getMountpointInfo(mountpointsMap, sessionId) {

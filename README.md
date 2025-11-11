@@ -1,9 +1,23 @@
 # media-tree
 PROBLEMI 
+- Injection node
+    - nessun problema rilevante al momento
+- relay node (C)
+    - Nodejs crasha = tutto giù    [DA TESTARE]
+    - Nessun auto-restart
+    - Ogni tot lista destinazioni e confrontiamo con redis
+    - Mancano stats varie
+
+- Egress node 
+    - refactor in controlplane + dataplane (nodejs e C)
+    - mutex pero forse non servono con GMainLoop
+    - list con cJSON
+    - creazione pad ssrc funziona solo se mountpoint -> forwarding, se inviamo pacchetti prima di creare il mountpoint non funziona
+    - distruzione invece al contrario, se distruggiamo mountpoint mentre facciamo forwarding va in errore, bisogna prima stoppare il forwarder (o magari distruggere sessione videoroom) 
 
 
-IMPROVEMENTS
-- relay node (egress anche) funziona ma distrugge e ricrea pipeline, (usare multiudpsink (non esistono api in javascript, dobbiamo capire come fare)) 
-- azioni database forse hanno bisogno di transazioni, inoltre ora polling (forse meglio pub/sub, però devo ancora esplorare soluzione)
-- nodi non fanno recovery status se crashano (commento egress-node/src/EgressNode.js) (tenere conto anche di  port pool recovery)
-- cross node coordination?
+- Generali
+    - Non gestiamo le azioni di creazione/distruzione tramite transazioni
+    - facciamo polling su database ma conviene forse fare pub/sub
+    - nodi non fanno recovery dello stato
+    - approfondire GMainLoop

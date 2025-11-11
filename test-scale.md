@@ -76,20 +76,33 @@ curl -X POST http://localhost:7070/session/create \
   # List all sessions
 curl http://localhost:7070/sessions | jq
 
-docker exec redis redis-cli SMEMBERS sessions:active
-# Expected: test-chain
 
-# Check injection-1 sessions
-docker exec redis redis-cli SMEMBERS sessions:injection-1
-# Expected: test-chain
+### Crea Mountpoint su egress-1
+
+curl -X POST http://localhost:7073/mountpoint/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "test-scale",
+    "audioSsrc": 7777,
+    "videoSsrc": 8888
+  }' | jq
+
+# Expected:
+# {
+#   "sessionId": "test-scale",
+#   "mountpointId": 4001,
+#   "janusAudioPort": 6000,
+#   "janusVideoPort": 6001
+# }
+
 
 ### Start Broadcaster
 
 docker-compose -f docker-compose.test.yaml --profile test-scale up -d
 sleep 10
 
-# injection node log
-docker logs injection-1
+# Test viewer su egress-1
+open http://localhost:7073/?id=test-scale
 
 ## Verifica Flusso RTP
 
@@ -119,9 +132,6 @@ output:
 # tcpdump egress
 docker exec egress-1 apt-get update -qq && docker exec egress-1 apt-get install -y tcpdump
 
-# Verifica Pipeline Active
-curl http://localhost:7071/status | jq '.gstreamer'
-
 #  Test Egress INPUT Port 5002 
 echo "=== Egress INPUT Port 5002 (multiplexed) ==="
 docker exec egress-1 timeout 10 tcpdump -i eth0 -n 'udp port 5002' -vv -x -c 30 2>&1 | grep "0x0020:"
@@ -130,26 +140,6 @@ docker exec egress-1 timeout 10 tcpdump -i eth0 -n 'udp port 5002' -vv -x -c 30 
 echo "=== Egress INPUT Port 5004 (multiplexed) ==="
 docker exec egress-1 timeout 10 tcpdump -i eth0 -n 'udp port 5004' -vv -x -c 30 2>&1 | grep "0x0020:"
 
-### Crea Mountpoint su egress-1
-
-curl -X POST http://localhost:7073/mountpoint/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sessionId": "test-scale",
-    "audioSsrc": 7777,
-    "videoSsrc": 8888
-  }' | jq
-
-# Expected:
-# {
-#   "sessionId": "test-scale",
-#   "mountpointId": 4001,
-#   "janusAudioPort": 6000,
-#   "janusVideoPort": 6001
-# }
-
-# Test viewer su egress-1
-open http://localhost:7073/?id=test-scale
 
 ### SCALE-OUT: Add egress-2
 
@@ -162,52 +152,6 @@ sleep 10
 # Verifica egress-2 running
 curl http://localhost:7074/status | jq '{nodeId, nodeType, healthy}'
 # Expected: {"nodeId": "egress-2", "nodeType": "egress", "healthy": true}
-
-# Aggiungi egress-2 alla topologia
-docker exec redis redis-cli SADD children:relay-1 egress-2
-docker exec redis redis-cli SET parent:egress-2 relay-1
-
-sleep 35
-
-### Verifica Topologia Aggiornata
-
-curl http://localhost:7071/topology | jq '.children'
-# Expected: ["egress-1", "egress-2"]
-
-curl http://localhost:7074/topology | jq '.parent'
-# Expected: "relay-1"
-
-### Verifica Pipeline Rebuild su relay-1
-
-curl http://localhost:7071/status | jq '.gstreamer'
-# Expected:
-# {
-#   "audioRunning": true,
-#   "videoRunning": true,
-#   "audioRestarts": 2,  ← Rebuilt per aggiungere egress-2
-#   "videoRestarts": 2
-# }
-
-##  Verifica Egress Node 
-
-# tcpdump egress-2
-docker exec egress-2 apt-get update -qq && docker exec egress-2 apt-get install -y tcpdump
-
-# Verifica Pipeline Active
-curl http://localhost:7074/status | jq '.gstreamer'
-
-#  Test Egress INPUT Port 5002 
-echo "=== Egress INPUT Port 5002 (multiplexed) ==="
-docker exec egress-2 timeout 10 tcpdump -i eth0 -n 'udp port 5002' -vv -x -c 30 2>&1 | grep "0x0020:"
-
-#  Test Egress INPUT Port 5004
-echo "=== Egress INPUT Port 5004 (multiplexed) ==="
-docker exec egress-2 timeout 10 tcpdump -i eth0 -n 'udp port 5004' -vv -x -c 30 2>&1 | grep "0x0020:"
-
-echo "=== Verify SAME SSRC on both egress ==="
-docker exec egress-1 timeout 5 tcpdump -i eth0 -n 'udp port 5002' -vv -x -c 5 2>&1 | grep "0x0020:"
-docker exec egress-2 timeout 5 tcpdump -i eth0 -n 'udp port 5002' -vv -x -c 5 2>&1 | grep "0x0020:"
-# Expected: entrambi vedono SSRC 7777 (0x1E61)
 
 ### Crea Mountpoint su egress-2 per STESSA Sessione
 
@@ -227,38 +171,53 @@ curl -X POST http://localhost:7074/mountpoint/create \
 #   "janusVideoPort": 6001
 # }
 
-### Verifica Entrambi i Mountpoint Attivi
+# Aggiungi egress-2 alla topologia
+docker exec redis redis-cli SADD children:relay-1 egress-2
+docker exec redis redis-cli SET parent:egress-2 relay-1
 
-curl http://localhost:7073/mountpoints | jq '.count'  # 1
-curl http://localhost:7074/mountpoints | jq '.count'  # 1
+sleep 35
+
+### Verifica Topologia Aggiornata
+
+curl http://localhost:7071/topology | jq '.children'
+# Expected: ["egress-1", "egress-2"]
+
+curl http://localhost:7074/topology | jq '.parent'
+# Expected: "relay-1"
 
 ### Test Viewer su Entrambi gli Egress
 
 # Viewer su egress-1
 open http://localhost:7073/?id=test-scale
 
-# Viewer su egress-2 (STESSA sessione, streaming indipendente)
+# Viewer su egress-2
 open http://localhost:7074/?id=test-scale
 
+##  Verifica Egress Node 
+
+# tcpdump egress-2
+docker exec egress-2 apt-get update -qq && docker exec egress-2 apt-get install -y tcpdump
+
+#  Test Egress INPUT Port 5002 
+echo "=== Egress INPUT Port 5002 (multiplexed) ==="
+docker exec egress-2 timeout 10 tcpdump -i eth0 -n 'udp port 5002' -vv -x -c 30 2>&1 | grep "0x0020:"
+
+#  Test Egress INPUT Port 5004
+echo "=== Egress INPUT Port 5004 (multiplexed) ==="
+docker exec egress-2 timeout 10 tcpdump -i eth0 -n 'udp port 5004' -vv -x -c 30 2>&1 | grep "0x0020:"
+
+echo "=== Verify SAME SSRC on both egress ==="
+docker exec egress-1 timeout 5 tcpdump -i eth0 -n 'udp port 5002' -vv -x -c 5 2>&1 | grep "0x0020:"
+docker exec egress-2 timeout 5 tcpdump -i eth0 -n 'udp port 5002' -vv -x -c 5 2>&1 | grep "0x0020:"
+# Expected: entrambi vedono SSRC 7777 (0x1E61)
+
+
+### Verifica Entrambi i Mountpoint Attivi
+
+curl http://localhost:7073/mountpoints | jq '.count'  # 1
+curl http://localhost:7074/mountpoints | jq '.count'  # 1
+
 # Entrambi dovrebbero vedere lo stesso stream
-
-### 📊 Verifica Load Distribution
-
-echo "=== Pipeline stats relay-1 ==="
-curl http://localhost:7071/status | jq '.forwarding'
-# Expected:
-# {
-#   "childrenCount": 2,
-#   "children": ["egress-1", "egress-2"]
-# }
-
-echo "=== Mountpoints egress-1 ==="
-curl http://localhost:7073/mountpoints | jq
-
-echo "=== Mountpoints egress-2 ==="
-curl http://localhost:7074/mountpoints | jq
-
----
 
 ## 📉 Test 3.2: Scale-Down (Remove Egress)
 
@@ -290,17 +249,6 @@ curl http://localhost:7071/topology | jq '.children'
 curl http://localhost:7073/topology | jq '.parent'
 # Expected: null (egress-1 isolato)
 
-### Verifica Pipeline Rebuild su relay-1
-
-curl http://localhost:7071/status | jq '.gstreamer'
-# Expected:
-# {
-#   "audioRunning": true,
-#   "videoRunning": true,
-#   "audioRestarts": 3,  ← Rebuilt per rimuovere egress-1
-#   "videoRestarts": 3
-# }
-
 ### Verifica RTP Flow
 
 echo "=== Verify egress-1 NO longer receives RTP ==="
@@ -313,7 +261,7 @@ docker exec egress-2 timeout 5 tcpdump -i eth0 -n 'udp port 5002' -c 10 2>&1 | t
 
 ### Test Viewer
 
-# Viewer su egress-1 (dovrebbe fallire o freeze)
+# Viewer su egress-1 (freeze)
 open http://localhost:7073/?id=test-scale
 
 # Viewer su egress-2 (dovrebbe continuare a funzionare)
@@ -328,20 +276,6 @@ curl http://localhost:7073/mountpoint/test-scale| jq '.active'
 # egress-2 mountpoint continua a funzionare
 curl http://localhost:7074/mountpoint/test-scale | jq '.active'
 # Expected: true
-
-### 📊 Osservazioni
-
-echo "=== PROBLEMI OSSERVATI - SCALE-OUT ==="
-echo "1. Pipeline rebuild causa ~200ms packet loss"
-echo "2. Viewer su egress-1 vedono glitch durante rebuild"
-echo "3. 30s delay per topology convergence troppo alto"
-
-echo ""
-echo "=== PROBLEMI OSSERVATI - SCALE-DOWN ==="
-echo "1. egress-1 mountpoint NON auto-destroyed"
-echo "2. egress-1 pipeline continua a girare (waste resources)"
-echo "3. Viewer su egress-1 non notificati della disconnessione"
-echo "4. Nessun coordinamento tra topology e mountpoint lifecycle"
 
 ### Cleanup Completo
 

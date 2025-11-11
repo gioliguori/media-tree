@@ -22,17 +22,8 @@ export class InjectionNode extends BaseNode {
         this.janusSession = null;
         this.janusVideoRoom = null;
 
-        // OLD_Sessione
-        //this.currentSession = {
-        //    sessionId: null,
-        //    roomId: null,
-        //    recipient: null,
-        //    createdAt: null,
-        //    active: false
-        //};
-
-        // nuova sessione
-        this.sessions = new Map(); // sessionId → sessionData
+        // sessione
+        this.sessions = new Map(); // sessionId -> sessionData
         // sessionData = {
         //   roomId: 1234,
         //   audioSsrc: 1111,
@@ -113,7 +104,7 @@ export class InjectionNode extends BaseNode {
         console.log(`[${this.nodeId}] Injection node stopped`);
     }
 
-    // ============ SESSION MANAGEMENT ============
+    // SESSION MANAGEMENT
 
     async createSession(sessionId, roomId, audioSsrc, videoSsrc, recipients) {
 
@@ -136,7 +127,7 @@ export class InjectionNode extends BaseNode {
 
 
             // crea room su janus videoroom
-            await createJanusRoom(this.janusVideoRoom, this.nodeId, roomId, `Session ${sessionId}`, this.roomSecret);
+            await createJanusRoom(this.janusVideoRoom, roomId, `Session ${sessionId}`, this.roomSecret);
 
             if (!audioSsrc || !videoSsrc) {
                 throw new Error('Missing SSRC values');
@@ -259,13 +250,13 @@ export class InjectionNode extends BaseNode {
         return getAllSessionsInfo(this.sessions);
     }
 
-    // ============ TOPOLOGY ============
+    // TOPOLOGY
 
     async onChildrenChanged(added, removed) {
         // ancora non so 
     }
 
-    // ============ API ENDPOINTS ============
+    // API ENDPOINTS
 
     setupInjectionAPI() {
         // POST /session/create
