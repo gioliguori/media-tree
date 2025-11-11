@@ -9,7 +9,6 @@ PROBLEMI
     - Mancano stats varie
 
 - Egress node 
-    - GMainLoop ?? 
     - list con cJSON
     - creazione pad ssrc funziona solo se mountpoint -> forwarding, se inviamo pacchetti prima di creare il mountpoint non funziona
     - distruzione invece al contrario, se distruggiamo mountpoint mentre facciamo forwarding va in errore, bisogna prima stoppare il forwarder (o magari distruggere sessione videoroom) 
