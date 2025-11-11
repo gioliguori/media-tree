@@ -152,7 +152,7 @@ void on_audio_pad_added(GstElement *demux, guint ssrc, GstPad *pad, gpointer use
                  "async", FALSE,
                  NULL);
 
-    // Aggiungi al pipeline
+    // Aggiungi a pipeline
     gst_bin_add_many(GST_BIN(audio_pipeline), queue, sink, NULL);
 
     // Link: demux pad -> queue
@@ -487,7 +487,6 @@ void handle_remove(const char *sessionId) {
                 if (audio_demux && mapping->demuxPad) {
                     printf(" Clearing SSRC %d from audio demux\n", mapping->ssrc);
                     g_signal_emit_by_name(audio_demux, "clear-ssrc", (guint)mapping->ssrc);
-                    // NON fare unref del demuxPad - clear-ssrc lo gestisce!
                 }
 
                 mapping->queue = NULL;
@@ -542,7 +541,6 @@ void handle_remove(const char *sessionId) {
                 if (video_demux && mapping->demuxPad) {
                     printf(" Clearing SSRC %d from video demux\n", mapping->ssrc);
                     g_signal_emit_by_name(video_demux, "clear-ssrc", (guint)mapping->ssrc);
-                    // NON fare unref del demuxPad - clear-ssrc lo gestisce!
                 }
 
                 mapping->queue = NULL;
