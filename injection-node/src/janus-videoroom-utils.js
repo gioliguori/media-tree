@@ -13,7 +13,7 @@ export async function connectToJanusVideoroom(nodeId, janusConfig) {
         // api secret in janus.jcfg
         if (janusConfig.apiSecret) {
             connectionConfig.address[0].apisecret = janusConfig.apiSecret;
-            console.log(`[${nodeId}] Using Janus API secret for authentication`);
+            // console.log(`[${nodeId}] Using Janus API secret for authentication`);
         }
 
         const connection = await Janode.connect(connectionConfig);
@@ -54,10 +54,8 @@ export async function connectToJanusVideoroom(nodeId, janusConfig) {
     }
 }
 
-// nodeId lo passiamo solo per loggare non so se ha senso
-export async function createJanusRoom(videoRoom, nodeId, roomId, description, secret) {
+export async function createJanusRoom(videoRoom, roomId, description, secret) {
     try {
-        console.log(`[Janus:${nodeId}] Creating room ${roomId}...`);
 
         // alcuni parametri hardcodati (va bene cosi per il momento)
         const response = await videoRoom.create({
@@ -71,11 +69,8 @@ export async function createJanusRoom(videoRoom, nodeId, roomId, description, se
             record: false
             // audiocodec e videocodec: usa default Janus (opus/vp8)
         });
-
-        console.log(`[Janus:${nodeId}]  Room ${roomId} created successfully`);
         return response;
     } catch (error) {
-        console.error(`[Janus:${nodeId}] Failed to create room ${roomId}:`, error.message);
         throw error;
     }
 }

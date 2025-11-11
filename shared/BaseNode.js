@@ -23,14 +23,14 @@ export class BaseNode {
     //     videoPort: 5002               // Porta UDP per RTP video
     //   },
     //
-    //   // === REDIS (OBBLIGATORIO PER TUTTI I NODI) ===
+    //   // REDIS (OBBLIGATORIO PER TUTTI I NODI)
     //   redis: {
     //     host: 'redis',                 // Hostname Redis
     //     port: 6379,                    // Porta Redis
     //     password: 'pwd'       // Opzionale
     //   },
     //
-    //   // === JANUS (SPECIFICO PER TIPO DI NODO) ===
+    //   // JANUS (SPECIFICO PER TIPO DI NODO)
     //   janus: {
     //     // SOLO PER INJECTION NODE:
     //     videoroom: {
@@ -46,19 +46,19 @@ export class BaseNode {
     //       mountpointSecret: 'adminpwd'             // Secret per modificare mountpoint
     //     }
     //   }
-    //   // ============ WHIP SERVER (SOLO INJECTION NODE) ============
+    //   // WHIP SERVER (SOLO INJECTION NODE)
     //   whip: {
     //     basePath: '/whip',             // Base path per WHIP endpoints
     //     token: 'verysecret'           // Token autenticazione clients            
     //   },
     //
-    //   // ============ WHEP SERVER (SOLO EGRESS NODE) ============
+    //   // WHEP SERVER (SOLO EGRESS NODE)
     //   whep: {
     //     basePath: '/whep',             // Base path per WHEP endpoints
     //     token: 'verysecret'            // Token autenticazione viewer         
     //   },
     //
-    //   // ============ PORT POOL (SOLO EGRESS NODE) ============
+    //   // PORT POOL (SOLO EGRESS NODE)
     //   portPoolBase: 6000,              // Prima porta del pool
     //   portPoolSize: 100                // Numero porte disponibili
     // }
@@ -89,8 +89,6 @@ export class BaseNode {
   }
 
   async initialize() {
-    console.log(`[${this.nodeId}] Inizializing node ${this.nodeType}...`);
-
     await this.connectRedis(); // Connette a Redis
     await this.registerNode(); // Registra nodo in Redis
     this.setupBaseAPI();       // Configura API endpoints 
@@ -101,7 +99,7 @@ export class BaseNode {
 
   async start() {
     this.server = this.app.listen(this.port, () => {
-      console.log(`[${this.nodeId}] API in ascolto su porta :${this.port}`);
+      console.log(`[${this.nodeId}] API port : ${this.port}`);
     });
 
     this.startPolling();
@@ -109,12 +107,12 @@ export class BaseNode {
     await this.onStart();            // Hook per avvio specifico per ogni nodo
 
 
-    console.log(`[${this.nodeId}] starting node...`);
+    // console.log(`[${this.nodeId}] starting node...`);
   }
 
   async stop() {
     this.isStopping = true;
-    console.log(`[${this.nodeId}] Stopping node...`);
+    //console.log(`[${this.nodeId}] Stopping node...`);
 
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
@@ -140,7 +138,7 @@ export class BaseNode {
     });
 
     await this.redis.ping();
-    console.log(`[${this.nodeId}] Redis connected`);
+    //console.log(`[${this.nodeId}] Redis connected`);
 
     this.redis.on('error', (err) => {
       console.error(`[${this.nodeId}] Redis error:`, err.message);
@@ -150,7 +148,7 @@ export class BaseNode {
 
   async registerNode() {
     await this.redis.hset(`node:${this.nodeId}`, {          //  hset setta come hash redis e non come json 
-      id: this.nodeId,                                      //  dovrebbe essere un'azione atomica quindi piu performante (boh)
+      nodeId: this.nodeId,                                  //  dovrebbe essere un'azione atomica quindi piu performante (boh)
       type: this.nodeType,
       host: this.host,
       port: this.port,
@@ -171,7 +169,7 @@ export class BaseNode {
     // await this.redis.del(`parent:${this.nodeId}`);
   }
 
-  // ============ TOPOLOGY ============
+  // TOPOLOGY
 
   async updateTopology() {
     try {
@@ -239,7 +237,7 @@ export class BaseNode {
     return childrenInfo;
   }
 
-  // ============ POLLING ============
+  // POLLING
 
   startPolling(interval = 30000) {
     this.pollTimer = setInterval(async () => {
@@ -247,73 +245,14 @@ export class BaseNode {
       await this.refreshNodeTTL();
     }, interval);
 
-    console.log(`[${this.nodeId}] Polling started (${interval}ms)`);
+    //console.log(`[${this.nodeId}] Polling started (${interval}ms)`);
   }
 
   async refreshNodeTTL() {
     await this.redis.expire(`node:${this.nodeId}`, 60);
   }
 
-  // ============ GSTREAMER HELPER ============
-
-  //@param {string} 'audio' o 'video'
-  //@param {ChildProcess} Pipeline
-  //@param {Function} onRestart - Callback per auto-restart
-
-  _attachPipelineHandlers(type, process, onRestart) {
-    // stdout
-    process.stdout.on('data', (data) => {
-      const msg = data.toString().trim();
-      if (msg) {
-        console.log(`[${this.nodeId}] ${type} stdout: ${msg}`);
-      }
-    });
-
-    // stderr
-    process.stderr.on('data', (data) => {
-      const msg = data.toString().trim();
-
-      if (msg &&
-        !msg.includes('Setting pipeline to PAUSED') &&
-        !msg.includes('Setting pipeline to PLAYING') &&
-        !msg.includes('Prerolled') &&
-        !msg.includes('New clock')) {
-        console.log(`[${this.nodeId}] ${type} stderr: ${msg}`);
-      }
-    });
-
-    // close
-    process.on('close', (code) => {
-      this.pipelineHealth[type].running = false;
-      console.log(`[${this.nodeId}] ${type} pipeline exited with code ${code}`);
-
-      if (code !== 0) {
-        // Pipeline crash
-        const errorMsg = `${type} pipeline crashed with code ${code}`;
-        console.error(`[${this.nodeId}] ${errorMsg}`);
-        this.pipelineHealth[type].lastError = errorMsg;
-
-        // Auto-restart
-        if (!this.isStopping && onRestart) {
-          console.log(`[${this.nodeId}] Restarting ${type} pipeline in 5 seconds...`);
-          setTimeout(() => {
-            if (!this.isStopping) {
-              onRestart();
-            }
-          }, 5000);
-        }
-      }
-    });
-
-    // spawn error
-    process.on('error', (err) => {
-      console.error(`[${this.nodeId}] ${type} pipeline spawn error:`, err.message);
-      this.pipelineHealth[type].running = false;
-      this.pipelineHealth[type].lastError = err.message;
-    });
-  }
-
-  // ============ API ============
+  // API
 
   setupBaseAPI() {
     this.app.get('/status', async (req, res) => {

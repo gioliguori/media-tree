@@ -7,6 +7,10 @@ import { JanusWhepServer } from 'janus-whep-server';
 import { spawn } from 'child_process';
 import express from 'express';
 
+import net from 'net';                      // per socket unix
+import path from 'path';
+import fs from 'fs/promises';               // filesystem promise per check 
+
 export class EgressNode extends BaseNode {
     constructor(config) {
         super(config.nodeId, 'egress', config);
@@ -35,7 +39,7 @@ export class EgressNode extends BaseNode {
         );
 
         // Mountpoints attivi
-        this.mountpoints = new Map(); // sessionId → mountpointData
+        this.mountpoints = new Map(); // sessionId -> mountpointData
         // mountpointData = {
         //   sessionId: string,              // ID sessione upstream (da InjectionNode)
         //   mountpointId: number,           // ID mountpoint Janus (= roomId)
@@ -48,21 +52,32 @@ export class EgressNode extends BaseNode {
         //   createdAt: timestamp            
         // }
 
-        // GStreamer pipelines
-        this.audioPipeline = null;
-        this.videoPipeline = null;
 
-        // Pipeline health
-        this.pipelineHealth = {
-            audio: { running: false, restarts: 0, lastError: null },
-            video: { running: false, restarts: 0, lastError: null }
-        };
+        // Percorso socket Unix
+        this.socketPath = `/tmp/egress-forwarder-${this.nodeId}.sock`;
 
-        // Lock per operazioni PER SESSIONE (Map)
+
+        // process.cwd() = directory corrente (in Docker /app)
+        this.forwarderPath = path.join(process.cwd(), 'forwarder', 'egress-forwarder');
+
+
+        // Riferimenti processo C e socket
+        this.forwarderProcess = null;
+        this.forwarderSocket = null;
+        this.isForwarderReady = false;
+
+        // Health check processo C (PING ogni 30s)
+        this.healthCheckInterval = null;
+
+        // Map per tracciare comandi in attesa: commandId -> { cmd, resolve, reject, buffer }
+        this.pendingCommands = new Map();
+
+
+        // Counter ID comandi
+        this.commandId = 0;
+
+        // Lock per operazioni per sessione
         this.operationLocks = new Map();
-
-        // Lock per rebuild GLOBALE (boolean)
-        this.isRebuilding = false;
     }
 
     async onInitialize() {
@@ -96,11 +111,23 @@ export class EgressNode extends BaseNode {
         await this.whepServer.start();
 
         console.log(`[${this.nodeId}] WHEP server listening on ${this.whepBasePath}`);
-        console.log(`[${this.nodeId}] Egress node ready (no pipelines started yet)`);
+
+        // AVVIA PROCESSO C
+        await this.startForwarder();
+
+        // PING ogni 30s
+        this.startHealthCheck();
+        console.log(`[${this.nodeId}] Egress node ready`);
     }
 
     async onStop() {
         console.log(`[${this.nodeId}] Stopping egress node...`);
+
+        // Ferma health check
+        if (this.healthCheckInterval) {
+            clearInterval(this.healthCheckInterval);
+            this.healthCheckInterval = null;
+        }
 
         // Distruggi tutti i mountpoint 
         const sessionIds = Array.from(this.mountpoints.keys());
@@ -114,8 +141,25 @@ export class EgressNode extends BaseNode {
             }
         }
 
-        // Stop GStreamer pipelines
-        this.stopPipelines();
+        // Chiudi socket
+        if (this.forwarderSocket) {
+            try {
+                // Prova a inviare SHUTDOWN al forwarder (best effort)
+                await this.sendCommand('SHUTDOWN');
+            } catch (err) {
+                console.error(`[${this.nodeId}] Error sending SHUTDOWN:`, err.message);
+            }
+
+            // Chiudi la connessione socket
+            this.forwarderSocket.destroy();
+            this.forwarderSocket = null;
+        }
+
+        // Termina processo C
+        if (this.forwarderProcess) {
+            this.forwarderProcess.kill('SIGTERM');
+            this.forwarderProcess = null;
+        }
 
         // Stop WHEP server
         if (this.whepServer) {
@@ -140,7 +184,251 @@ export class EgressNode extends BaseNode {
         console.log(`[${this.nodeId}] Egress node stopped`);
     }
 
-    // ============ MOUNTPOINT MANAGEMENT ============
+    //  FORWARDER C
+
+    async startForwarder() {
+        console.log(`[${this.nodeId}] Starting forwarder...`);
+        console.log(`[${this.nodeId}] Socket: ${this.socketPath}`);
+        console.log(`[${this.nodeId}] Ports: audio=${this.rtp.audioPort} video=${this.rtp.videoPort}`);
+
+        // Spawn processo C
+        // Argomenti: <nodeId> <audioPort> <videoPort> <destinationHost>
+        this.forwarderProcess = spawn(this.forwarderPath, [
+            this.nodeId,                           // argv[1]
+            String(this.rtp.audioPort),            // argv[2]
+            String(this.rtp.videoPort),            // argv[3]
+            this.rtpDestinationHost                // argv[4]
+        ], {
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        // Stdout del processo C
+        this.forwarderProcess.stdout.on('data', (data) => {
+            const msg = data.toString().trim();
+            if (msg) {
+                console.log(`[${this.nodeId}] [C] ${msg}`);
+            }
+        });
+
+        // Stderr del processo C
+        this.forwarderProcess.stderr.on('data', (data) => {
+            const msg = data.toString().trim();
+            if (msg) {
+                console.error(`[${this.nodeId}] [C ERROR] ${msg}`);
+            }
+        });
+
+        // Gestione exit processo C
+        this.forwarderProcess.on('exit', (code, signal) => {
+            console.error(`[${this.nodeId}] Forwarder exited: code=${code} signal=${signal}`);
+            this.isForwarderReady = false;
+
+            // TODO: auto-restart se non in shutdown
+        });
+
+        // Errore spawn
+        this.forwarderProcess.on('error', (err) => {
+            console.error(`[${this.nodeId}] Failed to spawn forwarder:`, err.message);
+            this.isForwarderReady = false;
+        });
+
+        // Aspetta il socket
+        await this.waitForSocket();
+
+        // Connetti
+        await this.connectToSocket();
+
+        this.isForwarderReady = true;
+
+        // PING di verifica
+        const response = await this.sendCommand('PING');
+        if (response !== 'PONG') {
+            throw new Error(`Unexpected PING response: ${response}`);
+        }
+
+        console.log(`[${this.nodeId}] Forwarder ready`);
+    }
+
+    // Controlla ogni 100ms se il file socket esiste, max 10 secondi
+    async waitForSocket() {
+        const maxWait = 10000;       // 10 secondi
+        const checkInterval = 100;   // Controlla ogni 100ms
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < maxWait) {
+            try {
+                // fs.access() lancia errore se file non esiste
+                await fs.access(this.socketPath);
+                return;
+            } catch (err) {
+                // Socket non ancora pronto, aspetta 100ms
+                await new Promise(resolve => setTimeout(resolve, checkInterval));
+            }
+        }
+
+        throw new Error(`Socket timeout: ${this.socketPath} not created after ${maxWait}ms`);
+    }
+
+    // Ritorna Promise che si risolve quando connessione è stabilita
+    async connectToSocket() {
+        return new Promise((resolve, reject) => {
+            // Crea connessione socket Unix
+            this.forwarderSocket = net.createConnection(this.socketPath);
+
+            // Connessione stabilita
+            this.forwarderSocket.on('connect', () => {
+                console.log(`[${this.nodeId}] Socket connected`);
+                resolve();
+            });
+
+            // Errore connessione
+            this.forwarderSocket.on('error', (err) => {
+                console.error(`[${this.nodeId}] Socket error:`, err.message);
+                reject(err);
+            });
+
+            // Socket chiuso (processo C fallito o disconnect)
+            this.forwarderSocket.on('close', () => {
+                console.log(`[${this.nodeId}] Socket closed`);
+                this.isForwarderReady = false;
+            });
+
+            // Setup handler per leggere risposte dal processo C
+            this.setupSocketDataHandler();
+
+            // Timeout 10 secondi
+            setTimeout(() => {
+                reject(new Error('Socket connection timeout'));
+            }, 10000);
+        });
+    }
+
+    // Accumula caratteri fino a '\n', poi processa linea completa
+    setupSocketDataHandler() {
+        // Buffer per accumulare dati parziali
+        let buffer = '';
+
+        // Chiamato ogni volta che arrivano dati dal socket
+        this.forwarderSocket.on('data', (data) => {
+            buffer += data.toString();
+
+            // Cerca righe complete (terminate da '\n')
+            let newlineIndex;
+            while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                // Estrai riga completa (senza '\n')
+                const line = buffer.substring(0, newlineIndex);
+
+                // Rimuovi riga dal buffer
+                buffer = buffer.substring(newlineIndex + 1);
+
+                // Processa la riga (risposta dal processo C)
+                this.handleSocketResponse(line);
+            }
+            // Dati parziali verranno processati al prossimo 'data' event
+        });
+    }
+
+    handleSocketResponse(line) {
+        if (!line) return;
+
+        // Prendi primo comando in attesa
+        const firstEntry = this.pendingCommands.entries().next().value;
+
+        if (!firstEntry) {
+            console.warn(`[${this.nodeId}] Unexpected response: ${line}`);
+            return;
+        }
+
+        const [id, pending] = firstEntry;  // [0, { cmd, resolve, reject }]
+
+        // Gestisci risposta
+
+        // Risposte semplici: OK, PONG, BYE
+        if (line === 'OK' || line === 'PONG' || line === 'BYE') {
+            // Rimuovi dalla lista pending
+            this.pendingCommands.delete(id);
+            // Risolvi la Promise
+            pending.resolve(line);
+        }
+        // Risposta multiriga
+        else if (line === 'END') {
+            this.pendingCommands.delete(id);
+            // Restituisci buffer accumulato
+            pending.resolve(pending.buffer ? pending.buffer.join('\n') : '');
+        }
+        // Risposta errore
+        else if (line.startsWith('ERROR')) {
+            this.pendingCommands.delete(id);
+            pending.reject(new Error(line));
+        }
+        // Accumula righe in buffer (per risposte multilinea)
+        else {
+            if (!pending.buffer) pending.buffer = [];
+            pending.buffer.push(line);
+        }
+    }
+
+    // @param {string} cmd - Comando (es: "PING", "ADD ...")
+    async sendCommand(cmd) {
+        if (!this.isForwarderReady) {
+            throw new Error('Forwarder not ready');
+        }
+
+        // Crea Promise che verrà risolta quando arriva risposta
+        return new Promise((resolve, reject) => {
+            const id = this.commandId++;
+
+            // Timeout: se risposta non arriva entro 5s, rigetta
+            const timeout = setTimeout(() => {
+                this.pendingCommands.delete(id);
+                reject(new Error(`Command timeout: ${cmd}`));
+            }, 5000);
+
+            // Quando arriva risposta, handleSocketResponse() chiama resolve/reject
+            this.pendingCommands.set(id, {
+                cmd,
+                resolve: (value) => {
+                    clearTimeout(timeout);  // Cancella timeout
+                    resolve(value);         // Risolvi Promise
+                },
+                reject: (err) => {
+                    clearTimeout(timeout);
+                    reject(err);
+                }
+            });
+
+            // Invia il comando
+            this.forwarderSocket.write(`${cmd}\n`);
+        });
+    }
+
+    // Health check: PING ogni 30s
+    startHealthCheck() {
+        console.log(`[${this.nodeId}] Starting health check`);
+
+        this.healthCheckInterval = setInterval(async () => {
+            try {
+                // Invia PING
+                const response = await this.sendCommand('PING');
+
+                // Verifica risposta
+                if (response !== 'PONG') {
+                    console.warn(`[${this.nodeId}] Unexpected PING response: ${response}`);
+                }
+
+            } catch (err) {
+                // PING fallito
+                console.error(`[${this.nodeId}] Health check failed:`, err.message);
+
+                // Setta flag a false
+                this.isForwarderReady = false;
+
+                // TODO: auto-restart
+            }
+        }, 30000);  // 30 secondi
+    }
+
+    // MOUNTPOINT MANAGEMENT
 
     async createMountpoint(sessionId, audioSsrc, videoSsrc) {
         // check duplicati
@@ -176,7 +464,7 @@ export class EgressNode extends BaseNode {
             await createJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId, audioPort, videoPort, this.mountpointSecret);
 
             // Crea WHEP endpoint
-            console.log(`Session ID : ${sessionId}`)
+            // console.log(`Session ID : ${sessionId}`)
             const endpoint = this.whepServer.createEndpoint({
                 id: sessionId,
                 mountpoint: mountpointId,
@@ -209,11 +497,31 @@ export class EgressNode extends BaseNode {
                 createdAt
             });
 
-            console.log(`[${this.nodeId}] Mountpoint created: ${sessionId}`);
-            console.log(`[${this.nodeId}] WHEP endpoint: ${this.whepBasePath}/endpoint/${sessionId}`);
+            // console.log(`[${this.nodeId}] Mountpoint created: ${sessionId}`);
+            // console.log(`[${this.nodeId}] WHEP endpoint: ${this.whepBasePath}/endpoint/${sessionId}`);
 
-            // Rebuild pipelines con nuovo mountpoint
-            await this.rebuildPipelines();
+
+            // INVIA COMANDO ADD AL PROCESSO C
+            try {
+                // Formato: ADD <sessionId> <audioSsrc> <videoSsrc> <audioPort> <videoPort>
+                const command = `ADD ${sessionId} ${audioSsrc} ${videoSsrc} ${audioPort} ${videoPort}`;
+                const response = await this.sendCommand(command);
+
+                if (response !== 'OK') {
+                    throw new Error(`ADD failed: ${response}`);
+                }
+
+                console.log(`[${this.nodeId}] ADD command sent to forwarder`);
+            } catch (err) {
+                console.error(`[${this.nodeId}] Failed to send ADD command:`, err.message);
+
+                // Rollback: rimuovi mountpoint
+                this.mountpoints.delete(sessionId);
+                this.portPool.release(audioPort, videoPort);
+                await destroyJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId);
+
+                throw new Error(`Failed to configure forwarder: ${err.message}`);
+            }
 
             return {
                 sessionId,
@@ -222,6 +530,8 @@ export class EgressNode extends BaseNode {
                 janusAudioPort: audioPort,
                 janusVideoPort: videoPort
             };
+        } catch (error) {
+            throw error;
         } finally {
             this.operationLocks.delete(sessionId);
         }
@@ -244,35 +554,57 @@ export class EgressNode extends BaseNode {
             const mountpoint = this.mountpoints.get(sessionId);
             const { mountpointId, janusAudioPort, janusVideoPort, endpoint } = mountpoint;
 
-            // Rilascia porte al pool
-            this.portPool.release(janusAudioPort, janusVideoPort);
-            console.log(`[${this.nodeId}] Released ports ${janusAudioPort}, ${janusVideoPort} to pool`);
+            // inattivo
+            mountpoint.active = false;
 
-            // rimuove dopo 24 ore
-            await deactivateMountpointInRedis(this.redis, this.nodeId, mountpointId);
-
-            // distruggi endpoint
+            // INVIA REMOVE AL PROCESSO C
             try {
-                if (this.whepServer && endpoint) {
-                    this.whepServer.destroyEndpoint({ id: sessionId });
-                    console.log(`[${this.nodeId}] WHEP endpoint ${sessionId} destroyed`);
+                // Formato: REMOVE <sessionId>
+                const command = `REMOVE ${sessionId}`;
+                const response = await this.sendCommand(command);
+
+                if (response !== 'OK') {
+                    console.warn(`[${this.nodeId}] REMOVE failed: ${response}`);
                 }
-            } catch (error) {
-                console.error(`[${this.nodeId}] Error destroying WHEP endpoint:`, error.message);
-                // Non bloccare - continua con cleanup
+
+                console.log(`[${this.nodeId}] REMOVE command sent to forwarder`);
+            } catch (err) {
+                console.error(`[${this.nodeId}] Failed to send REMOVE command:`, err.message);
             }
 
-            await destroyJanusMountpoint(this.janusStreaming, mountpointId, this.mountpointSecret);
+            // distruggi endpoint
 
-            // memoria locale
+            if (this.whepServer && endpoint) {
+                try {
+                    this.whepServer.destroyEndpoint({ id: sessionId });
+                    console.log(`[${this.nodeId}] WHEP endpoint ${sessionId} destroyed`);
+                } catch (error) {
+                    console.error(`[${this.nodeId}] Error destroying WHEP endpoint:`, error.message);
+                    // Non bloccare - continua con cleanup
+                }
+            }
+
+
+            // Distruggi mountpoint Janus
+            try {
+                await destroyJanusMountpoint(this.janusStreaming, mountpoint.mountpointId, this.mountpointSecret);
+            } catch (err) {
+                console.error(`[${this.nodeId}] Error destroying Janus mountpoint:`, err.message);
+            }
+
+            // Rilascia porte
+            this.portPool.release(mountpoint.janusAudioPort, mountpoint.janusVideoPort);
+
+            // Rimuovi da memoria
             this.mountpoints.delete(sessionId);
 
-            console.log(`[${this.nodeId}] Mountpoint destroyed: ${sessionId}`);
+            // Deactivate in Redis
+            // rimuove dopo 24 ore
+            await deactivateMountpointInRedis(this.redis, this.nodeId, sessionId);
 
-            // Rebuild pipelines senza questo mountpoint
-            await this.rebuildPipelines();
+            this.operationLocks.delete(sessionId);
 
-            return { sessionId, mountpointId };
+            return { sessionId, destroyed: true };
 
         } catch (error) {
             console.error(`[${this.nodeId}] Error destroying mountpoint ${sessionId}:`, error.message);
@@ -290,155 +622,23 @@ export class EgressNode extends BaseNode {
         return getAllMountpointsInfo(this.mountpoints);
     }
 
-    // ============ GSTREAMER PIPELINE MANAGEMENT ============
 
-    async rebuildPipelines() {
-        // lock
-        if (this.isRebuilding) {
-            console.log(`[${this.nodeId}] Rebuild already in progress`);
-            return;
-        }
-        this.isRebuilding = true;
-
+    async listMountpoints() {
+        // Chiede al forwarder C la lista dei mapping
+        // Risposta formato:
+        // audio:sessionId:ssrc:port
+        // video:sessionId:ssrc:port
+        // END
         try {
-            console.log(`[${this.nodeId}] Rebuilding GStreamer pipelines...`);
-
-            // Stop pipeline correnti
-            this.stopPipelines();
-
-            // Leggi mountpoint attivi dalla memoria, per il momento funziona, se però crasha nodo
-            // bisogna prenderli da redis (TODO), -> aggiungere in mem, ricreare endpoints, riallocare porte...
-            // magari quando parte il nodo, facciamo chiamata a vuoto però risolve
-            const activeMountpoints = Array.from(this.mountpoints.values())
-                .filter(item => item.active)
-                .map(item => ({
-                    mountpointId: item.mountpointId,
-                    audioSsrc: item.audioSsrc,
-                    videoSsrc: item.videoSsrc,
-                    janusAudioPort: item.janusAudioPort,
-                    janusVideoPort: item.janusVideoPort
-                }));
-
-            if (activeMountpoints.length === 0) {
-                console.log(`[${this.nodeId}] No active mountpoints, pipelines stopped`);
-                return;
-            }
-
-            console.log(`[${this.nodeId}] Starting pipelines for ${activeMountpoints.length} mountpoints`);
-
-            // Start nuove pipeline
-            this._startAudioPipeline(activeMountpoints);
-            this._startVideoPipeline(activeMountpoints);
-
-            console.log(`[${this.nodeId}] Pipelines rebuilt successfully`);
-
-        } catch (error) {
-            console.error(`[${this.nodeId}] Error rebuilding pipelines:`, error.message);
-            this.pipelineHealth.audio.lastError = error.message;
-            this.pipelineHealth.video.lastError = error.message;
-            throw error;
-        } finally {
-            this.isRebuilding = false;
+            const response = await this.sendCommand('LIST');
+            return response;
+        } catch (err) {
+            console.error(`[${this.nodeId}] Failed to list mountpoints:`, err.message);
+            return null;
         }
     }
 
-    stopPipelines() {
-        if (this.audioPipeline) {
-            try {
-                this.audioPipeline.kill('SIGTERM');
-                console.log(`[${this.nodeId}] Audio pipeline stopped`);
-            } catch (error) {
-                console.error(`[${this.nodeId}] Error stopping audio pipeline:`, error.message);
-            }
-            this.audioPipeline = null;
-            this.pipelineHealth.audio.running = false;
-        }
-
-        if (this.videoPipeline) {
-            try {
-                this.videoPipeline.kill('SIGTERM');
-                console.log(`[${this.nodeId}] Video pipeline stopped`);
-            } catch (error) {
-                console.error(`[${this.nodeId}] Error stopping video pipeline:`, error.message);
-            }
-            this.videoPipeline = null;
-            this.pipelineHealth.video.running = false;
-        }
-    }
-
-    _startAudioPipeline(mountpoints) {
-        // comando con rtpssrcdemux
-        // this.rtp.audioPort da base node
-        let cmd = `gst-launch-1.0 -v udpsrc port=${this.rtp.audioPort} caps="application/x-rtp,media=audio,encoding-name=OPUS,clock-rate=48000,payload=111" ! rtpssrcdemux name=demux_audio`; //  ! rtpjitterbuffer devo ancora capire se funziona
-
-        mountpoints.forEach(mp => {
-            cmd += ` demux_audio.src_${mp.audioSsrc} ! queue ! udpsink host=${this.rtpDestinationHost} port=${mp.janusAudioPort}`;
-        });
-
-        this.pipelineHealth.audio.restarts++;
-        console.log(`[${this.nodeId}] Starting audio pipeline #${this.pipelineHealth.audio.restarts})`);
-        // console.log(`[${this.nodeId}] Audio command: ${cmd}`);
-
-        this.audioPipeline = spawn('sh', ['-c', cmd]);
-
-        this.pipelineHealth.audio.running = true;
-        this.pipelineHealth.audio.lastError = null;
-
-        this._attachPipelineHandlers('audio', this.audioPipeline, () => {
-            // Callback per auto-restart
-            if (!this.isStopping && this.mountpoints.size > 0) {
-                const activeMountpoints = Array.from(this.mountpoints.values())
-                    .filter(item => item.active)
-                    .map(item => ({
-                        mountpointId: item.mountpointId,
-                        audioSsrc: item.audioSsrc,
-                        videoSsrc: item.videoSsrc,
-                        janusAudioPort: item.janusAudioPort,
-                        janusVideoPort: item.janusVideoPort
-                    }));
-
-                this._startAudioPipeline(activeMountpoints);
-            }
-        });
-    }
-
-    _startVideoPipeline(mountpoints) {
-        // Costruisci comando con rtpssrcdemux
-        // this.rtp.audioPort da base node
-        let cmd = `gst-launch-1.0 -v udpsrc port=${this.rtp.videoPort} caps="application/x-rtp,media=video,encoding-name=VP8,clock-rate=90000,payload=96" ! rtpssrcdemux name=demux_video`; //  ! rtpjitterbuffer
-
-        mountpoints.forEach(mp => {
-            cmd += ` demux_video.src_${mp.videoSsrc} ! queue ! udpsink host=${this.rtpDestinationHost} port=${mp.janusVideoPort}`;
-        });
-
-        this.pipelineHealth.video.restarts++;
-        console.log(`[${this.nodeId}] Starting video pipeline #${this.pipelineHealth.video.restarts})`);
-        // console.log(`[${this.nodeId}] Video command: ${cmd}`);
-
-        this.videoPipeline = spawn('sh', ['-c', cmd]);
-
-        this.pipelineHealth.video.running = true;
-        this.pipelineHealth.video.lastError = null;
-
-        this._attachPipelineHandlers('video', this.videoPipeline, () => {
-            // Callback per auto-restart
-            if (!this.isStopping && this.mountpoints.size > 0) {
-                const activeMountpoints = Array.from(this.mountpoints.values())
-                    .filter(item => item.active)
-                    .map(item => ({
-                        mountpointId: item.mountpointId,
-                        audioSsrc: item.audioSsrc,
-                        videoSsrc: item.videoSsrc,
-                        janusAudioPort: item.janusAudioPort,
-                        janusVideoPort: item.janusVideoPort
-                    }));
-
-                this._startVideoPipeline(activeMountpoints);
-            }
-        });
-    }
-
-    // ============ API ENDPOINTS ============
+    // API ENDPOINTS
 
     setupEgressAPI() {
         // POST /mountpoint/create
@@ -452,7 +652,7 @@ export class EgressNode extends BaseNode {
                     });
                 }
 
-                const result = await this.createMountpoint(sessionId, parseInt(audioSsrc), parseInt(videoSsrc), this.mountpointSecret);
+                const result = await this.createMountpoint(sessionId, parseInt(audioSsrc), parseInt(videoSsrc));
                 res.status(201).json(result);
             } catch (error) {
                 console.error(`[${this.nodeId}] Create mountpoint error:`, error.message);
@@ -503,30 +703,6 @@ export class EgressNode extends BaseNode {
             }
         });
 
-        // GET /pipelines (debug info)
-        this.app.get('/pipelines', (req, res) => {
-            try {
-                const activeCount = Array.from(this.mountpoints.values())
-                    .filter(item => item.active).length;
-                res.json({
-                    audio: {
-                        running: this.pipelineHealth.audio.running,
-                        restarts: this.pipelineHealth.audio.restarts,
-                        lastError: this.pipelineHealth.audio.lastError
-                    },
-                    video: {
-                        running: this.pipelineHealth.video.running,
-                        restarts: this.pipelineHealth.video.restarts,
-                        lastError: this.pipelineHealth.video.lastError
-                    },
-                    mountpointsActive: activeCount
-                });
-            } catch (error) {
-                console.error(`[${this.nodeId}] Get pipelines error:`, error.message);
-                res.status(500).json({ error: error.message });
-            }
-        });
-
         // GET /portpool (debug info)
         this.app.get('/portpool', (req, res) => {
             try {
@@ -536,12 +712,51 @@ export class EgressNode extends BaseNode {
                 res.status(500).json({ error: error.message });
             }
         });
+        // GET /forwarder
+        this.app.get('/forwarder', async (req, res) => {
+            try {
+                const activeCount = Array.from(this.mountpoints.values())
+                    .filter(item => item.active).length;
+
+                // Lista mapping dal processo C
+                let mappings = null;
+                if (this.isForwarderReady) {
+                    try {
+                        mappings = await this.listMountpoints();
+                    } catch (err) {
+                        console.error(`[${this.nodeId}] Failed to list mappings:`, err.message);
+                    }
+                }
+
+                res.json({
+                    running: this.isForwarderReady,
+                    processAlive: this.forwarderProcess !== null,
+                    socketConnected: this.forwarderSocket !== null,
+                    mountpointsActive: activeCount,
+                    mappings
+                });
+            } catch (error) {
+                console.error(`[${this.nodeId}] Get forwarder error:`, error.message);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
     }
 
     async getStatus() {
         const baseStatus = await super.getStatus();
         const activeCount = Array.from(this.mountpoints.values())
             .filter(item => item.active).length;
+        // Lista destinazioni (se forwarder ready)
+        let mappings = null;
+        try {
+            if (this.isForwarderReady) {
+                mappings = await this.listMountpoints();
+            }
+        } catch (err) {
+            console.error(`[${this.nodeId}] Failed to get mappings:`, err.message);
+        }
+
         return {
             ...baseStatus,
             janus: {
@@ -553,7 +768,12 @@ export class EgressNode extends BaseNode {
                 running: this.whepServer !== null,
                 basePath: this.whepBasePath
             },
-            gstreamer: this.pipelineHealth,
+            forwarder: {
+                running: this.isForwarderReady,
+                processAlive: this.forwarderProcess !== null,
+                socketConnected: this.forwarderSocket !== null,
+                mappings
+            },
             mountpoints: {
                 active: activeCount,
                 list: this.getAllMountpoints()

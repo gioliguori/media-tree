@@ -24,7 +24,7 @@ async function start() {
     try {
         await node.initialize();
         await node.start();
-        console.log(`RelayNode ${config.nodeId} running`);
+        // console.log(`RelayNode ${config.nodeId} running`);
     } catch (error) {
         console.error('Fatal error:', error);
         process.exit(1);

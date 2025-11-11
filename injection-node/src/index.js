@@ -35,11 +35,11 @@ const config = {
     }
 };
 
-// ============ AVVIO ============
+// AVVIO
 
 const node = new InjectionNode(config);
 async function start() {
-    console.log('🚀 Starting Injection Node...');
+    console.log(' Starting Injection Node...');
     console.log('Config:', JSON.stringify(config, null, 2));
 
     try {

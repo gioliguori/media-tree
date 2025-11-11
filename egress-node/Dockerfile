@@ -1,36 +1,50 @@
-FROM node:22
+FROM node:22-slim
 
 WORKDIR /app
 
-# Copia package files dall'egress-node
-COPY egress-node/package*.json ./
-
-# GStreamer
+# BUILD TOOLS + GSTREAMER
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Build tools per compilare C
+    gcc \
+    g++ \
+    make \
+    pkg-config \
+    python3 \
+    # GStreamer runtime
     gstreamer1.0-tools \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad \
-    gstreamer1.0-nice \
+    # GStreamer development
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
+    # Pulisci cache
     && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
-RUN npm install
+# COPY & BUILD C
+COPY egress-node/forwarder/ ./forwarder/
 
-# Copia shared BaseNode dalla root
+WORKDIR /app/forwarder
+RUN make
+RUN ls -lh egress-forwarder
+RUN chmod +x egress-forwarder
+
+# Torna alla working directory principale
+WORKDIR /app
+
 COPY shared/ ./shared/
 
-# Copia source code egress-node
+COPY egress-node/package*.json ./
+RUN npm install
+
 COPY egress-node/src/ ./src/
 
-# Copia html per testare
-COPY egress-node/web/ ./web/  
+COPY egress-node/web/ ./web/
 
-# Esponi porta API
-EXPOSE 7071
+# API port
+EXPOSE 7073
+# RTP input ports
+EXPOSE 5002/udp 5004/udp
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:7071/status', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1));"
-
-CMD ["npm", "start"]
+# START
+CMD ["node", "src/index.js"]

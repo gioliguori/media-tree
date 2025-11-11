@@ -13,7 +13,7 @@ export async function connectToJanusStreaming(nodeId, janusConfig) {
         // api secret in janus.jcfg
         if (janusConfig.apiSecret) {
             connectionConfig.address[0].apisecret = janusConfig.apiSecret;
-            console.log(`[${nodeId}] Using Janus API secret for authentication`);
+            // console.log(`[${nodeId}] Using Janus API secret for authentication`);
         }
 
         const connection = await Janode.connect(connectionConfig);

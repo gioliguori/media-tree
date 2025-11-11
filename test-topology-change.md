@@ -1,11 +1,9 @@
 
 ### TEST 2    Topology Change
-
-```bash
-
 injection-1 → relay-1 → relay-2 → egress-1
                     ↓ (remove relay-2)
 injection-1 → relay-1 → egress-1
+```bash
 
 ### Setup Iniziale
 docker-compose -f docker-compose.test.yaml down
@@ -79,15 +77,33 @@ curl -X POST http://localhost:7070/session/create \
 #   "janusVideoPort": 6001
 # }
 
-  # List all sessions
+
+# Crea mountpoint
+
+curl -X POST http://localhost:7073/mountpoint/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId": "test-chain",
+    "audioSsrc": 5555,
+    "videoSsrc": 6666
+  }' | jq
+
+# Expected output:
+# {
+#   "sessionId": "test-chain",
+#   "mountpointId": 3001,  (= roomId from Redis)
+#   "whepUrl": "/whep/endpoint/test-chain",
+#   "janusAudioPort": 6000,
+#   "janusVideoPort": 6002
+# }
+
+
+# List all sessions
 curl http://localhost:7070/sessions | jq
 
-docker exec redis redis-cli SMEMBERS sessions:active
-# Expected: test-chain
 
-# Check injection-1 sessions
-docker exec redis redis-cli SMEMBERS sessions:injection-1
-# Expected: test-chain
+# List Mountpoints
+curl http://localhost:7073/mountpoints | jq
 
 
 ### Start Broadcaster
@@ -95,8 +111,9 @@ docker exec redis redis-cli SMEMBERS sessions:injection-1
 docker-compose -f docker-compose.test.yaml --profile test-chain up -d
 sleep 10
 
-# injection node log
-docker logs injection-1
+
+# Test viewer
+open http://localhost:7073/?id=test-chain
 
 ## Verifica Flusso RTP
 
@@ -148,9 +165,6 @@ output:
 # tcpdump egress
 docker exec egress-1 apt-get update -qq && docker exec egress-1 apt-get install -y tcpdump
 
-# Verifica Pipeline Active
-curl http://localhost:7071/status | jq '.gstreamer'
-
 #  Test Egress INPUT Port 5002 
 echo "=== Egress INPUT Port 5002 (multiplexed) ==="
 docker exec egress-1 timeout 10 tcpdump -i eth0 -n 'udp port 5002' -vv -x -c 30 2>&1 | grep "0x0020:"
@@ -159,28 +173,6 @@ docker exec egress-1 timeout 10 tcpdump -i eth0 -n 'udp port 5002' -vv -x -c 30 
 echo "=== Egress INPUT Port 5004 (multiplexed) ==="
 docker exec egress-1 timeout 10 tcpdump -i eth0 -n 'udp port 5004' -vv -x -c 30 2>&1 | grep "0x0020:"
 
-# Crea mountpoint
-
-curl -X POST http://localhost:7073/mountpoint/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sessionId": "test-chain",
-    "audioSsrc": 5555,
-    "videoSsrc": 6666
-  }' | jq
-
-# Expected output:
-# {
-#   "sessionId": "test-chain",
-#   "mountpointId": 3001,  (= roomId from Redis)
-#   "whepUrl": "/whep/endpoint/test-chain",
-#   "janusAudioPort": 6000,
-#   "janusVideoPort": 6002
-# }
-
-
-# Test viewer funziona
-open http://localhost:7073/?id=test-chain
 
 ### 🔧 TOPOLOGY CHANGE: Remove relay-2
 
@@ -207,17 +199,8 @@ curl http://localhost:7073/topology | jq '.parent'
 curl http://localhost:7072/topology | jq
 # Expected: {parent: null, children: []} (relay-2 isolato)
 
-### Verifica Pipeline Rebuild
-
-# Controlla che relay-1 ha ricostruito pipeline
-curl http://localhost:7071/status | jq '.gstreamer'
-# Expected:
-# {
-#   "audioRunning": true,
-#   "videoRunning": true,
-#   "audioRestarts": 2,  ← Rebuilt dopo topology change
-#   "videoRestarts": 2
-# }
+# Test viewer
+open http://localhost:7073/?id=test-chain
 
 ### Verifica RTP Flow Dopo Change
 
@@ -230,9 +213,6 @@ docker exec egress-1 timeout 5 tcpdump -i eth0 -n 'udp port 5002' -c 10 2>&1 | t
 # relay-2 NON dovrebbe più ricevere
 docker exec relay-2 timeout 3 tcpdump -i eth0 -n 'udp port 5002' -c 10 2>&1 | tail -1
 # Expected: "0 packets captured"
-
-# Test viewer (dovrebbe ancora funzionare, ma probabilmente ha visto glitch)
-open http://localhost:7073/?id=test-chain
 
 ### Cleanup
 
