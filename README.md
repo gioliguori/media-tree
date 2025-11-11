@@ -3,7 +3,7 @@ PROBLEMI
 - Injection node
     - nessun problema rilevante al momento
 - relay node (C)
-    - Nodejs crasha = tutto giù    [DA TESTARE]
+    - Nodejs crasha = tutto giù
     - Nessun auto-restart
     - Ogni tot lista destinazioni e confrontiamo con redis
     - Mancano stats varie
