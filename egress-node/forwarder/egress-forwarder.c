@@ -7,6 +7,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <cjson/cJSON.h>
 #include <pthread.h>
 
 #define BUFFER_SIZE 256
@@ -337,7 +338,7 @@ int setup_pipelines(int audio_port, int video_port, const char *dest_host) {
     }
 
     // Avvia pipeline
-    gst_element_set_state(audio_pipeline, GST_STATE_PLAYING);
+    gst_element_set_state(audio_pipeline, GST_STATE_PAUSED);
 
     printf(" Audio pipeline ready (port %d) with dynamic demux\n", audio_port);
 
@@ -372,7 +373,7 @@ int setup_pipelines(int audio_port, int video_port, const char *dest_host) {
     }
 
     // Avvia pipeline
-    gst_element_set_state(video_pipeline, GST_STATE_PLAYING);
+    gst_element_set_state(video_pipeline, GST_STATE_PAUSED);
 
     printf(" Video pipeline ready (port %d) with dynamic demux\n", video_port);
     printf(" Pipelines PLAYING\n");
@@ -646,46 +647,52 @@ void *command_loop(void) {
         }
         // LIST
         else if (strcmp(buffer, "LIST") == 0) {
-            char response[4096];
-            int offset = 0;
-            // lock
+            // Crea oggetto JSON root
+            cJSON *root = cJSON_CreateObject();
+            cJSON *audio_array = cJSON_CreateArray();
+            cJSON *video_array = cJSON_CreateArray();
+
+            // Lock e aggiungi audio mappings
             pthread_mutex_lock(&audio_mutex);
-
-            offset += snprintf(response + offset, sizeof(response) - offset,
-                               "AUDIO_MAPPINGS: %d\n", audio_count);
-
-            for (int i = 0; i < audio_count && offset < (int)sizeof(response) - 200; i++) {
-                offset += snprintf(response + offset, sizeof(response) - offset,
-                                   "  [%d] %s: SSRC=%d -> port=%d %s\n",
-                                   i, audio_mappings[i].sessionId,
-                                   audio_mappings[i].ssrc,
-                                   audio_mappings[i].destinationPort,
-                                   audio_mappings[i].queue ? "(linked)" : "(waiting)");
+            for (int i = 0; i < audio_count; i++) {
+                cJSON *mapping = cJSON_CreateObject();
+                cJSON_AddStringToObject(mapping, "sessionId", audio_mappings[i].sessionId);
+                cJSON_AddNumberToObject(mapping, "ssrc", audio_mappings[i].ssrc);
+                cJSON_AddNumberToObject(mapping, "port", audio_mappings[i].destinationPort);
+                cJSON_AddBoolToObject(mapping, "linked", audio_mappings[i].queue != NULL);
+                cJSON_AddItemToArray(audio_array, mapping);
             }
-            // unlock
             pthread_mutex_unlock(&audio_mutex);
 
-            // lock
+            // Lock e aggiungi video mappings
             pthread_mutex_lock(&video_mutex);
-
-            offset += snprintf(response + offset, sizeof(response) - offset,
-                               "VIDEO_MAPPINGS: %d\n", video_count);
-
-            for (int i = 0; i < video_count && offset < (int)sizeof(response) - 200; i++) {
-                offset += snprintf(response + offset, sizeof(response) - offset,
-                                   "  [%d] %s: SSRC=%d -> port=%d %s\n",
-                                   i, video_mappings[i].sessionId,
-                                   video_mappings[i].ssrc,
-                                   video_mappings[i].destinationPort,
-                                   video_mappings[i].queue ? "(linked)" : "(waiting)");
+            for (int i = 0; i < video_count; i++) {
+                cJSON *mapping = cJSON_CreateObject();
+                cJSON_AddStringToObject(mapping, "sessionId", video_mappings[i].sessionId);
+                cJSON_AddNumberToObject(mapping, "ssrc", video_mappings[i].ssrc);
+                cJSON_AddNumberToObject(mapping, "port", video_mappings[i].destinationPort);
+                cJSON_AddBoolToObject(mapping, "linked", video_mappings[i].queue != NULL);
+                cJSON_AddItemToArray(video_array, mapping);
             }
-
-            // unlock
             pthread_mutex_unlock(&video_mutex);
 
-            offset += snprintf(response + offset, sizeof(response) - offset, "END\n");
+            // Aggiungi array al root
+            cJSON_AddItemToObject(root, "audio", audio_array);
+            cJSON_AddItemToObject(root, "video", video_array);
 
-            write(client_connection, response, strlen(response));
+            // Stringify e invia
+            char *json_string = cJSON_PrintUnformatted(root);
+            if (json_string) {
+                write(client_connection, json_string, strlen(json_string));
+                write(client_connection, "\n", 1);
+                write(client_connection, "END\n", 4);
+                free(json_string);
+            } else {
+                write(client_connection, "ERROR: JSON creation failed\n", 28);
+            }
+
+            // Cleanup
+            cJSON_Delete(root);
         }
         // SHUTDOWN
         else if (strcmp(buffer, "SHUTDOWN") == 0) {
@@ -693,6 +700,28 @@ void *command_loop(void) {
             printf(" Shutdown requested\n");
             cleanup_and_exit(0);
             return NULL;
+        } else if (strcmp(buffer, "PLAY") == 0) {
+            // Metti pipeline in PLAYING
+            if (audio_pipeline) {
+                GstStateChangeReturn ret = gst_element_set_state(audio_pipeline, GST_STATE_PLAYING);
+                if (ret == GST_STATE_CHANGE_FAILURE) {
+                    fprintf(stderr, " Failed to set audio pipeline to PLAYING\n");
+                    write(client_connection, "ERROR: Audio pipeline failed\n", 29);
+                    continue;
+                }
+                printf(" Audio pipeline -> PLAYING\n");
+            }
+
+            if (video_pipeline) {
+                GstStateChangeReturn ret = gst_element_set_state(video_pipeline, GST_STATE_PLAYING);
+                if (ret == GST_STATE_CHANGE_FAILURE) {
+                    fprintf(stderr, " Failed to set video pipeline to PLAYING\n");
+                    write(client_connection, "ERROR: Video pipeline failed\n", 29);
+                    continue;
+                }
+                printf(" Video pipeline -> PLAYING\n");
+            }
+            write(client_connection, "OK\n", 3);
         } else {
             write(client_connection, "ERROR: Invalid format\n", 22);
         }
