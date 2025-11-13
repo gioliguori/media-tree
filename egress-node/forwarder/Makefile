@@ -4,7 +4,7 @@ CC = gcc
 # $(shell pkg-config ...) = path include di GStreamer
 CFLAGS = -Wall -Wextra $(shell pkg-config --cflags gstreamer-1.0)
 # GStreamer + pthread per mutex
-LIBS = $(shell pkg-config --libs gstreamer-1.0 )  -lpthread
+LIBS = $(shell pkg-config --libs gstreamer-1.0 )  -lpthread -lcjson
 
 TARGET = egress-forwarder
 SRC = egress-forwarder.c

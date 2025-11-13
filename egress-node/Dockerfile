@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # GStreamer development
     libgstreamer1.0-dev \
     libgstreamer-plugins-base1.0-dev \
+    libcjson-dev \
     # Pulisci cache
     && rm -rf /var/lib/apt/lists/*
 
