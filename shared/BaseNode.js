@@ -284,7 +284,7 @@ export class BaseNode {
         if (parentId !== this.parent) {
           const oldParent = this.parent;
           this.parent = parentId;
-          console.log(`[${this.nodeId}] Parent changed: ${oldParent} → ${parentId}`);
+          console.log(`[${this.nodeId}] Parent changed: ${oldParent} -> ${parentId}`);
 
           await this.onParentChanged(oldParent, parentId);
         }
