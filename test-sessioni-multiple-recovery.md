@@ -56,12 +56,35 @@ curl http://localhost:7073/status | jq '{nodeId, nodeType, healthy}'
 docker exec redis redis-cli SADD children:injection-1 relay-1
 docker exec redis redis-cli SET parent:relay-1 injection-1
 
-# relay-1 → egress-1
+docker exec redis redis-cli PUBLISH topology:injection-1 '{
+  "type":"child-added",
+  "nodeId":"injection-1",
+  "childId":"relay-1"
+}'
+
+docker exec redis redis-cli PUBLISH topology:relay-1 '{
+  "type":"parent-changed",
+  "nodeId":"relay-1",
+  "newParent":"injection-1"
+}'
+
+# relay-1 -> egress-1
 docker exec redis redis-cli SADD children:relay-1 egress-1
 docker exec redis redis-cli SET parent:egress-1 relay-1
 
-# polling cycle (30 seconds)
-sleep 35
+docker exec redis redis-cli PUBLISH topology:relay-1 '{
+  "type":"child-added",
+  "nodeId":"relay-1",
+  "childId":"egress-1"
+}'
+
+docker exec redis redis-cli PUBLISH topology:egress-1 '{
+  "type":"parent-changed",
+  "nodeId":"egress-1",
+  "newParent":"relay-1"
+}'
+
+# polling cycle (30 seconds) sleep 35     non serve piu
 
 # Verifica topologia
 curl http://localhost:7070/topology | jq '.children'  # ["relay-1"]
@@ -72,71 +95,49 @@ curl http://localhost:7073/topology | jq '.parent'    # "relay-1"
 ## Sessione 1 (broadcaster-1)
 
 # Session 1 roomId 2001
-curl -X POST http://localhost:7070/session/create \
+curl -X POST http://localhost:7070/session \
   -H "Content-Type: application/json" \
   -d '{
     "sessionId": "broadcaster-1",
     "roomId": 2001,
     "audioSsrc": 1111,
-    "videoSsrc": 2222,
-    "recipients": [
-      {"host": "relay-1", "audioPort": 5002, "videoPort": 5004}
-    ]
-  }' | jq
-
-# Expected output:
-# 
-# {
-#   "sessionId": "broadcaster-1",
-#   "endpoint": "/whip/endpoint/broadcaster-1",
-#   "roomId": 1234,
-#   "audioSsrc": 1111,
-#   "videoSsrc": 2222,
-#   "recipients": [...]
-# }
-
-
-# Crea Mountpoint sull'Egress
-
-curl -X POST http://localhost:7073/mountpoint/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sessionId": "broadcaster-1",
-    "audioSsrc": 1111,
     "videoSsrc": 2222
   }' | jq
 
+
 # Expected output:
 # {
+#   "success": true,
 #   "sessionId": "broadcaster-1",
-#   "mountpointId": 2001,
-#   "whepUrl": "/whep/endpoint/broadcaster-1",
-#   "janusAudioPort": 6000,
-#   "janusVideoPort": 6001
+#   "treeId": "injection-1",
+#   "roomId": 2001,
+#   "audioSsrc": 1111,
+#   "videoSsrc": 2222,
+#   "endpoint": "/whip/endpoint/broadcaster-1"
 # }
 
-# Cosa succede:
-# - Janus VideoRoom crea room 2001
-# - Injection node configura RTP forwarding verso relay-1:5002/5004
-# - MA nessun RTP fluisce ancora (broadcaster non ancora connesso)
-# - Janus Streaming crea mountpoint 2001 (ascolta su porte 6000/6001)
-# - Egress forwarder registra mapping: SSRC 1111 → porta 6000, SSRC 2222 → porta 6001
-# - WHEP endpoint creato e pronto per viewer
-# - Demux in attesa di RTP
+# Step 2: Pubblica evento per creare mountpoint automaticamente
+docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{
+  "type": "session-created",
+  "sessionId": "broadcaster-1",
+  "treeId": "injection-1"
+}'
+
+sleep 2
+
+# Verifica mountpoint creato automaticamente dall'evento
+curl http://localhost:7073/mountpoint/broadcaster-1 | jq
 
 ## Sessione 2 (broadcaster-2)
 
 # Session 2 roomId 2002
-curl -X POST http://localhost:7070/session/create \
+curl -X POST http://localhost:7070/session \
   -H "Content-Type: application/json" \
   -d '{
     "sessionId": "broadcaster-2",
     "roomId": 2002,
     "audioSsrc": 3333,
-    "videoSsrc": 4444,
-    "recipients": [
-      {"host": "relay-1", "audioPort": 5002, "videoPort": 5004}
-    ]
+    "videoSsrc": 4444
   }' | jq
 
 # Expected output:
@@ -150,23 +151,16 @@ curl -X POST http://localhost:7070/session/create \
 #   "recipients": [...]
 # }
 
-### Step 2: Crea Mountpoint
+# Pubblica evento
+docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{
+  "type": "session-created",
+  "sessionId": "broadcaster-2",
+  "treeId": "injection-1"
+}'
 
-curl -X POST http://localhost:7073/mountpoint/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sessionId": "broadcaster-2",
-    "audioSsrc": 3333,
-    "videoSsrc": 4444
-  }' | jq
-
-# Expected:
-# {
-#   "sessionId": "broadcaster-2",
-#   "mountpointId": 2002,
-#   "janusAudioPort": 6002,
-#   "janusVideoPort": 6003
-# }
+sleep 2
+# Verifica mountpoint creato
+curl http://localhost:7073/mountpoint/broadcaster-2 | jq
 
 # Verify Session and mountpoints
 
@@ -314,19 +308,87 @@ curl http://localhost:7073/portpool | jq
 #   "nextUnused": 6004
 # }
 
+# Injection Node Recovery
+echo "=== Testing Injection Node Recovery ==="
+
+docker-compose -f docker-compose.test.yaml restart injection-1
+sleep 15
+
+# Verifica recovery injection
+curl http://localhost:7070/status | jq '{nodeId, healthy, sessions}'
+curl http://localhost:7070/sessions | jq
+
+# Expected: 2 sessioni recuperate (broadcaster-1, broadcaster-2)
+# Ma broadcaster disconnessi
+
+# RIAVVIA broadcaster per riconnessione
+docker-compose -f docker-compose.test.yaml --profile broadcaster up -d
+
+# Ora verifica stream
+open http://localhost:7073/?id=broadcaster-1
+open http://localhost:7073/?id=broadcaster-2
+
+# TEST 2: Relay Node Recovery  
+echo "=== Testing Relay Node Recovery ==="
+
+docker-compose -f docker-compose.test.yaml restart relay-1
+sleep 15
+
+# Verifica recovery relay
+curl http://localhost:7071/status | jq '{nodeId, healthy, forwarder}'
+
+open http://localhost:7073/?id=broadcaster-1
+open http://localhost:7073/?id=broadcaster-2
+# Expected: Stream ancora visibile dopo qualche secondo di freeze
+
+# TEST 3: Egress Node Recovery
+echo "=== Testing Egress Node Recovery ==="
+
+docker-compose -f docker-compose.test.yaml restart egress-1
+sleep 15
+
+# Verifica recovery egress
+curl http://localhost:7073/status | jq '{nodeId, healthy, mountpoints, forwarder}'
+curl http://localhost:7073/mountpoints | jq
+
+# Expected: 2 mountpoints recuperati
+
+# ricaricare la pagina
+open http://localhost:7073/?id=broadcaster-1
+open http://localhost:7073/?id=broadcaster-2
+---
+
+# Test crash del solo processo C
+per testare :  
+    docker exec -it egress-1 sh
+    ps aux | grep egress-forwarder
+    kill -9 processo (18 di solito) 
+
+# Expected: Forwarder C riparte e si sincronizza
+
 ##### Cleanup
 
 # Stop broadcaster
 docker-compose -f docker-compose.test.yaml --profile broadcaster down
 
-# Destroy mountpoint
-curl -X POST http://localhost:7073/mountpoint/broadcaster-1/destroy
-curl -X POST http://localhost:7073/mountpoint/broadcaster-2/destroy
-
 # Destroy session
 curl -X POST http://localhost:7070/session/broadcaster-1/destroy
 curl -X POST http://localhost:7070/session/broadcaster-2/destroy
 
+# Pubblica eventi session-destroyed
+docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{
+  "type": "session-destroyed",
+  "sessionId": "broadcaster-1",
+  "treeId": "injection-1"
+}'
+
+docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{
+  "type": "session-destroyed",
+  "sessionId": "broadcaster-2",
+  "treeId": "injection-1"
+}'
+
+sleep 2
 # Flush Redis
 docker exec redis redis-cli FLUSHALL
 

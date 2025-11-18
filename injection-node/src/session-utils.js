@@ -1,8 +1,9 @@
-export async function saveSessionToRedis(redis, nodeId, sessionData) {
+export async function saveSessionToRedis(redis, treeId, nodeId, sessionData) {
     const { sessionId, roomId, audioSsrc, videoSsrc, recipients, createdAt } = sessionData;
 
     await redis.hset(`session:${sessionId}`, {
         sessionId,
+        treeId,
         roomId: String(roomId),
         audioSsrc: String(audioSsrc),
         videoSsrc: String(videoSsrc),
@@ -13,15 +14,15 @@ export async function saveSessionToRedis(redis, nodeId, sessionData) {
         updatedAt: String(createdAt)
     });
 
-    await redis.sadd(`sessions:${nodeId}`, sessionId);
+    await redis.sadd(`sessions:${treeId}`, sessionId);
     await redis.sadd('sessions:active', sessionId);
 }
 
-export async function deactivateSessionInRedis(redis, nodeId, sessionId) {
+export async function deactivateSessionInRedis(redis, treeId, sessionId) {
     await redis.hset(`session:${sessionId}`, 'active', 'false');
     await redis.hset(`session:${sessionId}`, 'updatedAt', String(Date.now()));
 
-    await redis.srem(`sessions:${nodeId}`, sessionId);
+    await redis.srem(`sessions:${treeId}`, sessionId);
     await redis.srem('sessions:active', sessionId);
 
     // TTL 24 ore
@@ -35,6 +36,7 @@ export function getSessionInfo(sessionsMap, sessionId) {
 
     return {
         sessionId: session.sessionId,
+        treeId: session.treeId,
         roomId: session.roomId,
         audioSsrc: session.audioSsrc,
         videoSsrc: session.videoSsrc,
@@ -50,6 +52,7 @@ export function getAllSessionsInfo(sessionsMap) {
     for (const [sessionId, session] of sessionsMap.entries()) {
         sessions.push({
             sessionId: session.sessionId,
+            treeId: session.treeId,
             roomId: session.roomId,
             audioSsrc: session.audioSsrc,
             videoSsrc: session.videoSsrc,

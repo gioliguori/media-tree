@@ -77,6 +77,38 @@ export class PortPool {
 
         this.stats.totalReleases++;
     }
+    // Marca porte come allocate durante recovery
+    markAsAllocated(audioPort, videoPort) {
+        // Validazione range
+        if (audioPort < this.base || audioPort >= this.max) {
+            throw new Error(`Audio port ${audioPort} out of range`);
+        }
+        if (videoPort < this.base || videoPort >= this.max) {
+            throw new Error(`Video port ${videoPort} out of range`);
+        }
+
+        // Se già allocate, skip
+        if (this.allocated.has(audioPort) && this.allocated.has(videoPort)) {
+            console.warn(`[PortPool] Ports  already allocated`);
+            return;
+        }
+
+        // Rimuovi da available
+        this.available = this.available.filter(p => p !== audioPort && p !== videoPort);
+
+        // Marca come allocate
+        this.allocated.add(audioPort);
+        this.allocated.add(videoPort);
+
+        // Aggiorna nextUnused
+        const maxPort = Math.max(audioPort, videoPort);
+        if (maxPort >= this.nextUnused) {
+            this.nextUnused = maxPort + 1;
+        }
+
+        // Statistiche
+        this.stats.totalAllocations++;
+    }
 
     // Verifica se una porta è allocata
     isAllocated(port) {
