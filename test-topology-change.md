@@ -36,16 +36,50 @@ curl http://localhost:7073/status | jq '{nodeId, nodeType, healthy}'
 docker exec redis redis-cli SADD children:injection-1 relay-1
 docker exec redis redis-cli SET parent:relay-1 injection-1
 
+docker exec redis redis-cli PUBLISH topology:injection-1 '{
+  "type":"child-added",
+  "nodeId":"injection-1",
+  "childId":"relay-1"
+}'
+
+docker exec redis redis-cli PUBLISH topology:relay-1 '{
+  "type":"parent-changed",
+  "nodeId":"relay-1",
+  "newParent":"injection-1"
+}'
+
+
 # relay-1 → relay-2
 docker exec redis redis-cli SADD children:relay-1 relay-2
 docker exec redis redis-cli SET parent:relay-2 relay-1
+
+docker exec redis redis-cli PUBLISH topology:relay-1 '{
+  "type":"child-added",
+  "nodeId":"relay-1",
+  "childId":"relay-2"
+}'
+
+docker exec redis redis-cli PUBLISH topology:relay-2 '{
+  "type":"parent-changed",
+  "nodeId":"relay-2",
+  "newParent":"relay-1"
+}'
 
 # relay-2 → egress-1
 docker exec redis redis-cli SADD children:relay-2 egress-1
 docker exec redis redis-cli SET parent:egress-1 relay-2
 
-# Attendi polling cycle
-sleep 35
+docker exec redis redis-cli PUBLISH topology:relay-2 '{
+  "type":"child-added",
+  "nodeId":"relay-2",
+  "childId":"egress-1"
+}'
+
+docker exec redis redis-cli PUBLISH topology:egress-1 '{
+  "type":"parent-changed",
+  "nodeId":"egress-1",
+  "newParent":"relay-2"
+}'
 
 # Verifica topologia
 curl http://localhost:7070/topology | jq '.children'  # ["relay-1"]
@@ -56,51 +90,27 @@ curl http://localhost:7073/topology | jq '.parent'    # "relay-2"
 ### Crea Sessione e Mountpoint
 
 # Crea sessione
-curl -X POST http://localhost:7070/session/create \
+curl -X POST http://localhost:7070/session \
   -H "Content-Type: application/json" \
   -d '{
     "sessionId": "test-chain",
     "roomId": 3001,
     "audioSsrc": 5555,
-    "videoSsrc": 6666,
-    "recipients": [
-      {"host": "relay-1", "audioPort": 5002, "videoPort": 5004}
-    ]
-  }' | jq
-
-# Expected output:
-# {
-#   "sessionId": "test-chain",
-#   "mountpointId": 3001,
-#   "whepUrl": "/whep/endpoint/test-chain",
-#   "janusAudioPort": 6000,
-#   "janusVideoPort": 6001
-# }
-
-
-# Crea mountpoint
-
-curl -X POST http://localhost:7073/mountpoint/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sessionId": "test-chain",
-    "audioSsrc": 5555,
     "videoSsrc": 6666
   }' | jq
 
-# Expected output:
-# {
-#   "sessionId": "test-chain",
-#   "mountpointId": 3001,  (= roomId from Redis)
-#   "whepUrl": "/whep/endpoint/test-chain",
-#   "janusAudioPort": 6000,
-#   "janusVideoPort": 6002
-# }
+# Pubblica evento per creare mountpoint
+docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{
+  "type":"session-created",
+  "sessionId":"test-chain",
+  "treeId":"injection-1"
+}'
 
+# Verifica mountpoint creato automaticamente
+curl http://localhost:7073/mountpoint/test-chain | jq
 
 # List all sessions
 curl http://localhost:7070/sessions | jq
-
 
 # List Mountpoints
 curl http://localhost:7073/mountpoints | jq
@@ -182,11 +192,33 @@ echo "=== Removing relay-2 from chain ==="
 docker exec redis redis-cli SREM children:relay-1 relay-2
 docker exec redis redis-cli DEL parent:relay-2
 
+docker exec redis redis-cli PUBLISH topology:relay-1 '{
+  "type":"child-removed",
+  "nodeId":"relay-1",
+  "childId":"relay-2"
+}'
+
+docker exec redis redis-cli PUBLISH topology:relay-2 '{
+  "type":"parent-changed",
+  "nodeId":"relay-2",
+  "newParent":null
+}'
+
 # Collega relay-1 direttamente a egress-1
 docker exec redis redis-cli SADD children:relay-1 egress-1
 docker exec redis redis-cli SET parent:egress-1 relay-1
 
-sleep 35
+docker exec redis redis-cli PUBLISH topology:relay-1 '{
+  "type":"child-added",
+  "nodeId":"relay-1",
+  "childId":"egress-1"
+}'
+
+docker exec redis redis-cli PUBLISH topology:egress-1 '{
+  "type":"parent-changed",
+  "nodeId":"egress-1",
+  "newParent":"relay-1"
+}'
 
 ### Verifica Topologia Aggiornata
 

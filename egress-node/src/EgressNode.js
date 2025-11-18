@@ -97,8 +97,11 @@ export class EgressNode extends BaseNode {
         // AVVIA PROCESSO C
         await this.forwarder.startForwarder();
 
+        // necessaria quando aggiungiamo un nodo a un albero con sessioni attive 
+        await this.discoverExistingSessions();
+        // a questo punto con discoverExistingSessions() syncForwarder() potrebbe essere ridondante 
+        // await this.forwarder.syncForwarder();
         // paused -> playing, altrimenti problemi quando facciamo recovery 
-        await this.forwarder.syncForwarder();
         await this.forwarder.startPipelines();
 
         // PING
@@ -189,8 +192,42 @@ export class EgressNode extends BaseNode {
     }
 
     // MOUNTPOINT MANAGEMENT
+    async onSessionCreated(event) {
+        const { sessionId, treeId } = event;
 
-    async createMountpoint(sessionId, audioSsrc, videoSsrc) {
+        // Verifica tree
+        if (treeId !== this.treeId) {
+            console.warn(`[${this.nodeId}] Session event for wrong tree: ${treeId}`);
+            return;
+        }
+
+        // console.log(`[${this.nodeId}] Received session-created event for ${sessionId}`);
+
+        try {
+            await this.createMountpoint(sessionId);
+        } catch (error) {
+            console.error(`[${this.nodeId}] Failed to create mountpoint`, error.message);
+        }
+    }
+
+    async onSessionDestroyed(event) {
+        const { sessionId, treeId } = event;
+
+        // Verifica tree
+        if (treeId !== this.treeId) {
+            return;
+        }
+
+        // console.log(`[${this.nodeId}] Received session-destroyed event for ${sessionId}`);
+
+        try {
+            await this.destroyMountpoint(sessionId);
+        } catch (error) {
+            console.error(`[${this.nodeId}] Failed to destroy mountpoint`, error.message);
+        }
+    }
+
+    async createMountpoint(sessionId) {
         // check duplicati
         if (this.mountpoints.has(sessionId)) {
             throw new Error(`Mountpoint for session ${sessionId} already exists`);
@@ -204,8 +241,6 @@ export class EgressNode extends BaseNode {
 
         try {
             console.log(`[${this.nodeId}] Creating mountpoint for session: ${sessionId}`);
-            console.log(`[${this.nodeId}] Audio SSRC: ${audioSsrc}`);
-            console.log(`[${this.nodeId}] Video SSRC: ${videoSsrc}`);
 
             // Leggi roomId da Redis (mountpointId = roomId)
             const sessionData = await this.redis.hgetall(`session:${sessionId}`);
@@ -214,7 +249,9 @@ export class EgressNode extends BaseNode {
             }
 
             const mountpointId = parseInt(sessionData.roomId);
-            console.log(`[${this.nodeId}] Mountpoint ID: ${mountpointId} (from roomId)`);
+            const audioSsrc = parseInt(sessionData.audioSsrc);
+            const videoSsrc = parseInt(sessionData.videoSsrc);
+            //console.log(`[${this.nodeId}] Mountpoint ID: ${mountpointId}`);
 
             // Alloca porte dal pool
             const { audioPort, videoPort } = this.portPool.allocate();
@@ -247,7 +284,7 @@ export class EgressNode extends BaseNode {
             });
 
             // Salva su Redis
-            await saveMountpointToRedis(this.redis, this.nodeId, {
+            await saveMountpointToRedis(this.redis, this.treeId, this.nodeId, {
                 sessionId,
                 mountpointId,
                 audioSsrc,
@@ -347,20 +384,20 @@ export class EgressNode extends BaseNode {
 
             // Distruggi mountpoint Janus
             try {
-                await destroyJanusMountpoint(this.janusStreaming, mountpoint.mountpointId, this.mountpointSecret);
+                await destroyJanusMountpoint(this.janusStreaming, mountpointId, this.mountpointSecret);
             } catch (err) {
                 console.error(`[${this.nodeId}] Error destroying Janus mountpoint:`, err.message);
             }
 
             // Rilascia porte
-            this.portPool.release(mountpoint.janusAudioPort, mountpoint.janusVideoPort);
+            this.portPool.release(janusAudioPort, janusVideoPort);
 
             // Rimuovi da memoria
             this.mountpoints.delete(sessionId);
 
             // Deactivate in Redis
             // rimuove dopo 24 ore
-            await deactivateMountpointInRedis(this.redis, this.nodeId, sessionId);
+            await deactivateMountpointInRedis(this.redis, this.treeId, this.nodeId, sessionId);
 
             this.operationLocks.delete(sessionId);
 
@@ -382,38 +419,158 @@ export class EgressNode extends BaseNode {
         return getAllMountpointsInfo(this.mountpoints);
     }
 
+    async discoverExistingSessions() {
+        if (!this.treeId) return;
+
+        // console.log(`[${this.nodeId}] Discovering existing sessions for tree ${this.treeId}`);
+
+        const sessionIds = await this.redis.smembers(`sessions:${this.treeId}`);
+
+        if (sessionIds.length === 0) {
+            console.log(`[${this.nodeId}] No existing sessions found`);
+            return;
+        }
+
+        // console.log(`[${this.nodeId}] Found ${sessionIds.length} existing sessions`);
+
+        for (const sessionId of sessionIds) {
+            const sessionData = await this.redis.hgetall(`session:${sessionId}`);
+
+            if (sessionData.active !== 'true') {
+                console.log(`[${this.nodeId}] Skipping inactive session ${sessionId}`);
+                continue;
+            }
+
+            // CHECK: mountpoint già esisteva per questo nodo?
+            const mountpointId = parseInt(sessionData.roomId);
+            const existingMountpoint = await this.redis.hgetall(`mountpoint:${this.nodeId}:${sessionId}`);
+
+            try {
+                if (existingMountpoint && existingMountpoint.active === 'true') {
+                    // RECOVERY
+                    console.log(`[${this.nodeId}] Recovering mountpoint for session ${sessionId}`);
+                    await this.recoverMountpoint(sessionId, existingMountpoint);
+                } else {
+                    // mountpoint nuovo
+                    console.log(`[${this.nodeId}] Creating new mountpoint for session ${sessionId}`);
+                    await this.createMountpoint(sessionId);
+                }
+            } catch (err) {
+                console.error(`[${this.nodeId}] Failed to handle mountpoint for ${sessionId}:`, err.message);
+            }
+        }
+
+        console.log(`[${this.nodeId}] Discovery complete`);
+    }
+
+
+    async recoverMountpoint(sessionId, mountpointData) {
+        if (this.operationLocks.get(sessionId)) {
+            throw new Error(`Operation already in progress for session ${sessionId}`);
+        }
+        this.operationLocks.set(sessionId, true);
+
+        try {
+            // console.log(`[${this.nodeId}] Recovering mountpoint for session: ${sessionId}`);
+
+            const mountpointId = parseInt(mountpointData.mountpointId);
+            const audioSsrc = parseInt(mountpointData.audioSsrc);
+            const videoSsrc = parseInt(mountpointData.videoSsrc);
+            const audioPort = parseInt(mountpointData.janusAudioPort);
+            const videoPort = parseInt(mountpointData.janusVideoPort);
+
+            // console.log(`[${this.nodeId}] Reusing existing ports: ${audioPort}, ${videoPort}`);
+
+            // mountpoint Janus già esiste
+            // porte allocate
+            this.portPool.markAsAllocated(audioPort, videoPort);
+
+            try {
+                await createJanusMountpoint(
+                    this.janusStreaming,
+                    this.nodeId,
+                    mountpointId,
+                    audioPort,
+                    videoPort,
+                    this.mountpointSecret
+                );
+                console.log(`[${this.nodeId}] Mountpoint ${mountpointId} created on Janus`);
+            } catch (err) {
+                // ignora errore
+                if (err.message && err.message.includes('already exists')) {
+                    console.log(`[${this.nodeId}] Mountpoint ${mountpointId} already exists on Janus`);
+                } else {
+                    this.portPool.release(audioPort, videoPort);
+                    throw err;
+                }
+            }
+
+            // Ricrea solo WHEP endpoint
+            const endpoint = this.whepServer.createEndpoint({
+                id: sessionId,
+                mountpoint: mountpointId,
+                token: this.whepToken
+            });
+
+            // sovrascrivi in memoria
+            this.mountpoints.set(sessionId, {
+                sessionId,
+                mountpointId,
+                audioSsrc,
+                videoSsrc,
+                janusAudioPort: audioPort,
+                janusVideoPort: videoPort,
+                endpoint,
+                active: true,
+                createdAt: parseInt(mountpointData.createdAt)
+            });
+
+            // ricrea mapping nel forwarder C
+            const command = `ADD ${sessionId} ${audioSsrc} ${videoSsrc} ${audioPort} ${videoPort}`;
+            const response = await this.forwarder.sendCommand(command);
+
+            if (response !== 'OK') {
+                throw new Error(`ADD failed during recovery: ${response}`);
+            }
+
+            console.log(`[${this.nodeId}] Mountpoint recovered successfully`);
+        } finally {
+            this.operationLocks.delete(sessionId);
+        }
+    }
+
     // API ENDPOINTS
     setupEgressAPI() {
         // POST /mountpoint/create
-        this.app.post('/mountpoint/create', async (req, res) => {
-            try {
-                const { sessionId, audioSsrc, videoSsrc } = req.body;
-
-                if (!sessionId || !audioSsrc || !videoSsrc) {
-                    return res.status(400).json({
-                        error: 'Missing fields: sessionId, audioSsrc, videoSsrc'
-                    });
-                }
-
-                const result = await this.createMountpoint(sessionId, parseInt(audioSsrc), parseInt(videoSsrc));
-                res.status(201).json(result);
-            } catch (error) {
-                console.error(`[${this.nodeId}] Create mountpoint error:`, error.message);
-                res.status(500).json({ error: error.message });
-            }
-        });
+        //this.app.post('/mountpoint/create', async (req, res) => {
+        //    try {
+        //        const { sessionId, audioSsrc, videoSsrc } = req.body;
+        //
+        //        if (!sessionId || !audioSsrc || !videoSsrc) {
+        //            return res.status(400).json({
+        //                error: 'Missing fields: sessionId, audioSsrc, videoSsrc'
+        //            });
+        //        }
+        //
+        //        const result = await this.createMountpoint(sessionId, parseInt(audioSsrc), parseInt(videoSsrc));
+        //        res.status(201).json(result);
+        //    } catch (error) {
+        //        console.error(`[${this.nodeId}] Create mountpoint error:`, error.message);
+        //        res.status(500).json({ error: error.message });
+        //    }
+        //});
 
         // POST /mountpoint/:sessionId/destroy
-        this.app.post('/mountpoint/:sessionId/destroy', async (req, res) => {
-            try {
-                const { sessionId } = req.params;
-                const result = await this.destroyMountpoint(sessionId);
-                res.json({ message: 'Mountpoint destroyed', ...result });
-            } catch (error) {
-                console.error(`[${this.nodeId}] Destroy mountpoint error:`, error.message);
-                res.status(500).json({ error: error.message });
-            }
-        });
+        //this.app.post('/mountpoint/:sessionId/destroy', async (req, res) => {
+        //    try {
+        //        const { sessionId } = req.params;
+        //        const result = await this.destroyMountpoint(sessionId);
+        //        res.json({ message: 'Mountpoint destroyed', ...result });
+        //    } catch (error) {
+        //        console.error(`[${this.nodeId}] Destroy mountpoint error:`, error.message);
+        //        res.status(500).json({ error: error.message });
+        //    }
+        //});
 
         // GET /mountpoint/:sessionId
         this.app.get('/mountpoint/:sessionId', (req, res) => {
@@ -463,7 +620,7 @@ export class EgressNode extends BaseNode {
 
                 // Lista mapping dal processo C
                 let mappings = null;
-                if (tthis.forwarder.isReady()) {
+                if (this.forwarder.isReady()) {
                     try {
                         mappings = await this.forwarder.listMountpoints();
                     } catch (err) {

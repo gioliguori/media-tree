@@ -39,64 +39,63 @@ curl http://localhost:7073/status | jq '{nodeId, nodeType, healthy}'
 docker exec redis redis-cli SADD children:injection-1 relay-1
 docker exec redis redis-cli SET parent:relay-1 injection-1
 
+docker exec redis redis-cli PUBLISH topology:injection-1 '{
+  "type":"child-added",
+  "nodeId":"injection-1",
+  "childId":"relay-1"
+}'
+
+docker exec redis redis-cli PUBLISH topology:relay-1 '{
+  "type":"parent-changed",
+  "nodeId":"relay-1",
+  "newParent":"injection-1"
+}'
+
 # relay-1 → egress-1
 docker exec redis redis-cli SADD children:relay-1 egress-1
 docker exec redis redis-cli SET parent:egress-1 relay-1
 
-sleep 35
+docker exec redis redis-cli PUBLISH topology:relay-1 '{
+  "type":"child-added",
+  "nodeId":"relay-1",
+  "childId":"egress-1"
+}'
+
+docker exec redis redis-cli PUBLISH topology:egress-1 '{
+  "type":"parent-changed",
+  "nodeId":"egress-1",
+  "newParent":"relay-1"
+}'
 
 # Verifica topologia base
 curl http://localhost:7070/topology | jq '.children'  # ["relay-1"]
 curl http://localhost:7071/topology | jq              # {parent: "injection-1", children: ["egress-1"]}
 curl http://localhost:7073/topology | jq '.parent'    # "relay-1"
 
-### Crea Sessione
-
-curl -X POST http://localhost:7070/session/create \
+# Crea sessione
+curl -X POST http://localhost:7070/session \
   -H "Content-Type: application/json" \
   -d '{
     "sessionId": "test-scale",
     "roomId": 4001,
     "audioSsrc": 7777,
-    "videoSsrc": 8888,
-    "recipients": [
-      {"host": "relay-1", "audioPort": 5002, "videoPort": 5004}
-    ]
-  }' | jq
-
-# Expected output:
-# {
-#   "sessionId": "test-scale",
-#   "mountpointId": 4001,
-#   "whepUrl": "/whep/endpoint/test-chain",
-#   "janusAudioPort": 6000,
-#   "janusVideoPort": 6001
-# }
-
-  # List all sessions
-curl http://localhost:7070/sessions | jq
-
-
-### Crea Mountpoint su egress-1
-
-curl -X POST http://localhost:7073/mountpoint/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sessionId": "test-scale",
-    "audioSsrc": 7777,
     "videoSsrc": 8888
   }' | jq
 
-# Expected:
-# {
-#   "sessionId": "test-scale",
-#   "mountpointId": 4001,
-#   "janusAudioPort": 6000,
-#   "janusVideoPort": 6001
-# }
+# Pubblica evento per creare mountpoint
+docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{
+  "type":"session-created",
+  "sessionId":"test-scale",
+  "treeId":"injection-1"
+}'
 
+sleep 2
 
-### Start Broadcaster
+# Verifica mountpoint creato automaticamente su egress-1
+curl http://localhost:7073/mountpoint/test-scale | jq
+
+  # List all sessions
+curl http://localhost:7070/sessions | jq
 
 docker-compose -f docker-compose.test.yaml --profile test-scale up -d
 sleep 10
@@ -153,29 +152,28 @@ sleep 10
 curl http://localhost:7074/status | jq '{nodeId, nodeType, healthy}'
 # Expected: {"nodeId": "egress-2", "nodeType": "egress", "healthy": true}
 
-### Crea Mountpoint su egress-2 per STESSA Sessione
 
-curl -X POST http://localhost:7074/mountpoint/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sessionId": "test-scale",
-    "audioSsrc": 7777,
-    "videoSsrc": 8888
-  }' | jq
-
-# Expected:
-# {
-#   "sessionId": "test-scale",
-#   "mountpointId": 4001,
-#   "janusAudioPort": 6000,
-#   "janusVideoPort": 6001
-# }
-
+# Verifica mountpoint creato automaticamente su egress-2
+# creato in automatico perche appartiene all'albero
+curl http://localhost:7074/mountpoint/test-scale | jq
 # Aggiungi egress-2 alla topologia
 docker exec redis redis-cli SADD children:relay-1 egress-2
 docker exec redis redis-cli SET parent:egress-2 relay-1
 
-sleep 35
+docker exec redis redis-cli PUBLISH topology:relay-1 '{
+  "type":"child-added",
+  "nodeId":"relay-1",
+  "childId":"egress-2"
+}'
+
+docker exec redis redis-cli PUBLISH topology:egress-2 '{
+  "type":"parent-changed",
+  "nodeId":"egress-2",
+  "newParent":"relay-1"
+}'
+
+sleep 2
+
 
 ### Verifica Topologia Aggiornata
 
@@ -219,18 +217,15 @@ curl http://localhost:7074/mountpoints | jq '.count'  # 1
 
 # Entrambi dovrebbero vedere lo stesso stream
 
-## 📉 Test 3.2: Scale-Down (Remove Egress)
+## Test 3.2: Scale-Down (Remove Egress)
 
 ### Scenario
 
-injection-1 → relay-1 → [egress-1, egress-2]
-                    ↓ (remove egress-1)
+injection-1 → relay-1 →[egress-1, egress-2]
+                    ↓(remove egress-1)
 injection-1 → relay-1 → egress-2
 
-
-Continua dal test precedente (non fare cleanup).
-
-### 🔧 SCALE-DOWN: Remove egress-1
+### SCALE-DOWN: Remove egress-1
 
 echo "=== Removing egress-1 from topology ==="
 
@@ -238,17 +233,38 @@ echo "=== Removing egress-1 from topology ==="
 docker exec redis redis-cli SREM children:relay-1 egress-1
 docker exec redis redis-cli DEL parent:egress-1
 
-echo "Waiting for polling cycle (30s)..."
-sleep 35
+docker exec redis redis-cli PUBLISH topology:relay-1 '{
+  "type":"child-removed",
+  "nodeId":"relay-1",
+  "childId":"egress-1"
+}'
+
+docker exec redis redis-cli PUBLISH topology:egress-1 '{
+  "type":"parent-changed",
+  "nodeId":"egress-1",
+  "newParent":null
+}'
+
 
 ### Verifica Topologia Aggiornata
 
 curl http://localhost:7071/topology | jq '.children'
 # Expected: ["egress-2"]
 
+
 curl http://localhost:7073/topology | jq '.parent'
 # Expected: null (egress-1 isolato)
 
+
+### distruggi mountpoint su egress-1
+
+docker exec redis redis-cli PUBLISH sessions:node:egress-1 '{
+  "type":"session-destroyed",
+  "sessionId":"test-scale",
+  "treeId":"injection-1"
+}'
+
+curl http://localhost:7073/mountpoint/test-scale | jq
 ### Verifica RTP Flow
 
 echo "=== Verify egress-1 NO longer receives RTP ==="
@@ -282,19 +298,24 @@ curl http://localhost:7074/mountpoint/test-scale | jq '.active'
 # Stop broadcaster
 docker-compose -f docker-compose.test.yaml --profile scale down
 
-# Destroy mountpoints manualmente
-curl -X POST http://localhost:7073/mountpoint/test-scale/destroy
-curl -X POST http://localhost:7074/mountpoint/test-scale/destroy
-
 # Destroy session
 curl -X POST http://localhost:7070/session/test-scale/destroy
+
+# Pubblica evento session-destroyed
+docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{
+  "type":"session-destroyed",
+  "sessionId":"test-scale",
+  "treeId":"injection-1"
+}'
+
+sleep 2
 
 # Flush Redis
 docker exec redis redis-cli FLUSHALL
 
 # Stop tutto
 docker-compose -f docker-compose.test.yaml down
-docker-compose -f docker-compose.test.yaml --profile scale down
+docker-compose -f docker-compose.test.yaml --profile test-scale down
 
 
 

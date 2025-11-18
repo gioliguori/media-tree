@@ -63,6 +63,9 @@ export class InjectionNode extends BaseNode {
         console.log(`[${this.nodeId}] Starting WHIP server...`);
         await this.whipServer.start();
         console.log(`[${this.nodeId}] WHIP server listening on ${this.whipBasePath}`);
+
+        await this.discoverExistingSessions();
+
         console.log(`[${this.nodeId}] Injection node ready`);
     }
 
@@ -166,7 +169,7 @@ export class InjectionNode extends BaseNode {
             });
 
             // salva su Redis
-            await saveSessionToRedis(this.redis, this.nodeId, {
+            await saveSessionToRedis(this.redis, this.treeId, this.nodeId, {
                 sessionId,
                 roomId,
                 audioSsrc,
@@ -209,7 +212,7 @@ export class InjectionNode extends BaseNode {
             const { roomId, endpoint } = session;
 
             // inattiva su Redis
-            await deactivateSessionInRedis(this.redis, this.nodeId, sessionId);
+            await deactivateSessionInRedis(this.redis, this.treeId, sessionId);
 
             // distruggi endpoint
             try {
@@ -250,37 +253,156 @@ export class InjectionNode extends BaseNode {
         return getAllSessionsInfo(this.sessions);
     }
 
+    async discoverExistingSessions() {
+        console.log(`[${this.nodeId}] Discovering existing sessions from Redis...`);
+
+        try {
+            const sessionIds = await this.redis.smembers(`sessions:${this.treeId}`);
+
+            if (sessionIds.length === 0) {
+                console.log(`[${this.nodeId}] No existing sessions found`);
+                return;
+            }
+
+            console.log(`[${this.nodeId}] Found ${sessionIds.length} sessions in Redis`);
+
+            for (const sessionId of sessionIds) {
+                // legge da Redis
+                const sessionData = await this.redis.hgetall(`session:${sessionId}`);
+
+                if (!sessionData || Object.keys(sessionData).length === 0) {
+                    console.warn(`[${this.nodeId}] Session ${sessionId} not found in Redis`);
+                    continue;
+                }
+
+                try {
+                    await this.recoverSession(sessionId, sessionData);
+                } catch (err) {
+                    console.error(`[${this.nodeId}] Failed to recover session ${sessionId}:`, err.message);
+                }
+            }
+
+            console.log(`[${this.nodeId}] Session recovery completed`);
+        } catch (error) {
+            console.error(`[${this.nodeId}] Error during session discovery:`, error.message);
+            throw error;
+        }
+    }
+
+    async recoverSession(sessionId, sessionData) {
+        if (this.operationLocks.get(sessionId)) {
+            throw new Error(`Operation already in progress for session ${sessionId}`);
+        }
+        this.operationLocks.set(sessionId, true);
+
+        try {
+            console.log(`[${this.nodeId}] Recovering session: ${sessionId}`);
+            const roomId = parseInt(sessionData.roomId);
+            const audioSsrc = parseInt(sessionData.audioSsrc);
+            const videoSsrc = parseInt(sessionData.videoSsrc);
+
+            // Recipients da topologia corrente (recuperata in BaseNode.updateTopology())
+            const recipients = await this.getRecipientsFromTopology();
+
+            console.log(`[${this.nodeId}] Session data: room=${roomId}, audio=${audioSsrc}, video=${videoSsrc}`);
+
+            // Try-create Janus room (potrebbe già esistere)
+            try {
+                await createJanusRoom(
+                    this.janusVideoRoom,
+                    roomId,
+                    `Session ${sessionId}`,
+                    this.roomSecret
+                );
+                console.log(`[${this.nodeId}] Room ${roomId} created on Janus`);
+            } catch (err) {
+                if (err.message && err.message.includes('already exists')) {
+                    console.log(`[${this.nodeId}] Room ${roomId} already exists on Janus, reusing it`);
+                } else {
+                    throw err;
+                }
+            }
+
+            // Ricrea WHIP endpoint
+            const endpoint = this.whipServer.createEndpoint({
+                id: sessionId,
+                token: this.whipToken,
+                customize: (settings) => {
+                    settings.room = roomId;
+                    settings.secret = this.roomSecret;
+                    settings.label = `Publisher ${sessionId}`;
+
+                    settings.recipients = recipients.map(item => ({
+                        host: item.host,
+                        audioPort: item.audioPort,
+                        audioSsrc: audioSsrc,
+                        videoPort: item.videoPort,
+                        videoSsrc: videoSsrc,
+                        videoRtcpPort: item.videoPort + 1
+                    }));
+                }
+            });
+
+            // salva memoria
+            this.sessions.set(sessionId, {
+                sessionId,
+                roomId,
+                audioSsrc,
+                videoSsrc,
+                recipients,
+                endpoint,
+                active: true,
+                createdAt: parseInt(sessionData.createdAt)
+            });
+
+            console.log(`[${this.nodeId}] Session ${sessionId} recovered successfully`);
+        } finally {
+            this.operationLocks.delete(sessionId);
+        }
+    }
     // TOPOLOGY
 
     async onChildrenChanged(added, removed) {
-        // ancora non so 
+        // recipients statici
     }
 
     // API ENDPOINTS
 
     setupInjectionAPI() {
         // POST /session/create
-        this.app.post('/session/create', async (req, res) => {
+        this.app.post('/session', async (req, res) => {
             try {
-                const { sessionId, roomId, audioSsrc, videoSsrc, recipients } = req.body;
+                const { sessionId, roomId, audioSsrc, videoSsrc } = req.body;
 
-                if (!sessionId || !roomId || !audioSsrc || !videoSsrc || !recipients) {
+                if (!sessionId || !roomId || !audioSsrc || !videoSsrc) {
                     return res.status(400).json({
-                        error: 'Missing fields: sessionId, roomId, audioSsrc, videoSsrc, recipients'
+                        error: 'Missing fields: sessionId, roomId, audioSsrc, videoSsrc'
                     });
                 }
 
-                if (!Array.isArray(recipients) || recipients.length === 0) {
-                    return res.status(400).json({
-                        error: 'recipients must be a non-empty array'
-                    });
-                }
+                // prendiamo direttamente da redis (non inviamo pià nella POST)
+                const recipients = await this.getRecipientsFromTopology();
 
                 const result = await this.createSession(sessionId, roomId, audioSsrc, videoSsrc, recipients);
-                res.status(201).json(result);
+
+                // Risponde al Controller
+                res.status(201).json({
+                    success: true,
+                    sessionId: result.sessionId,
+                    treeId: this.treeId,
+                    roomId: result.roomId,
+                    audioSsrc: result.audioSsrc,
+                    videoSsrc: result.videoSsrc,
+                    endpoint: result.endpoint
+                });
+
+
             } catch (error) {
                 console.error(`[${this.nodeId}] Create session error:`, error.message);
-                res.status(500).json({ error: error.message });
+                res.status(500).json({
+                    success: false,
+                    error: error.message
+                });
             }
         });
 
@@ -326,6 +448,23 @@ export class InjectionNode extends BaseNode {
                 res.status(500).json({ error: error.message });
             }
         });
+    }
+
+    async getRecipientsFromTopology() {
+        const recipients = [];
+
+        for (const childId of this.children) {
+            const childInfo = await this.getNodeInfo(childId);
+            if (childInfo) {
+                recipients.push({
+                    host: childInfo.host,
+                    audioPort: parseInt(childInfo.audioPort),
+                    videoPort: parseInt(childInfo.videoPort)
+                });
+            }
+        }
+
+        return recipients;
     }
 
     async getStatus() {

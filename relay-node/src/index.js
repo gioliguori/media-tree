@@ -5,6 +5,7 @@ const config = {
     nodeType: 'relay',
     host: process.env.NODE_HOST || 'relay-1',
     port: parseInt(process.env.API_PORT) || 7070,
+    treeId: process.env.TREE_ID,
 
     rtp: {
         audioPort: parseInt(process.env.RTP_AUDIO_PORT) || 5002,
