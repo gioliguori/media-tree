@@ -17,7 +17,7 @@ export async function saveMountpointToRedis(redis, treeId, nodeId, mountpointDat
     });
 
     await redis.sadd(`mountpoints:${treeId}`, `${nodeId}:${sessionId}`);
-    await redis.sadd('mountpoints:active', `${nodeId}:${sessionId}`);
+    await redis.sadd(`mountpoints:node:${nodeId}`, sessionId);
 }
 
 export async function deactivateMountpointInRedis(redis, treeId, nodeId, sessionId) {
@@ -26,7 +26,7 @@ export async function deactivateMountpointInRedis(redis, treeId, nodeId, session
     await redis.hset(`mountpoint:${nodeId}:${sessionId}`, 'updatedAt', String(Date.now()));
 
     await redis.srem(`mountpoints:${treeId}`, `${nodeId}:${sessionId}`);
-    await redis.srem('mountpoints:active', `${nodeId}:${sessionId}`);
+    await redis.srem(`mountpoints:node:${nodeId}`, sessionId);
 
     // TTL 24 ore
     await redis.expire(`mountpoint:${nodeId}:${sessionId}`, 86400);

@@ -179,7 +179,7 @@ export class BaseNode {
     // Subscribe a canali topology
     const channels = [
       `topology:${this.nodeId}`,
-      'topology:global'
+      `topology:${this.treeId}`,
     ];
 
     if (this.nodeType === 'injection' || this.nodeType === 'egress') {
@@ -209,6 +209,7 @@ export class BaseNode {
     await this.redis.hset(`node:${this.nodeId}`, {          //  hset setta come hash redis e non come json 
       nodeId: this.nodeId,                                  //  dovrebbe essere un'azione atomica quindi piu performante (boh)
       type: this.nodeType,
+      treeId: this.treeId,
       host: this.host,
       port: this.port,
       audioPort: this.rtp.audioPort,

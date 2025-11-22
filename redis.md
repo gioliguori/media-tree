@@ -1,26 +1,24 @@
-
-┌─────────────────────┬──────────────────────────────────┐
-│ CHI                 │ COSA SCRIVE SU REDIS             │
-├─────────────────────┼──────────────────────────────────┤
-│ Controller          │ parent:{nodeId}                  │
-│                     │ children:{nodeId}                │
-│                     │ (topologia)                      │
-├─────────────────────┼──────────────────────────────────┤
-│ BaseNode (tutti)    │ node:{nodeId}                    │
-│                     │ nodes:{nodeType}                 │ non lo fa
-│                     │ (self-registration)              │
-├─────────────────────┼──────────────────────────────────┤
-│ InjectionNode       │ session:{sessionId}              │ non lo fa 
-│                     │ sessions:{nodeId}                │ non lo fa
-│                     │ sessions:active                  │ non lo fa
-│                     │ (session ownership)              │
-├─────────────────────┼──────────────────────────────────┤
-│ EgressNode          │ mountpoint:{egressId}:{mpId}     │ non lo fa
-│                     │ mountpoints:{egressId}           │ non lo fa
-│                     │ (mountpoint ownership)           │
-├─────────────────────┼──────────────────────────────────┤
-│ RelayNode           │ (nulla! solo forward)            │
-└─────────────────────┴──────────────────────────────────┘
+┌─────────────────────┬──────────────────────────────────────────────┐
+│ CHI                 │ COSA SCRIVE SU REDIS                         │
+├─────────────────────┼──────────────────────────────────────────────┤
+│ Controller          │ parent:{nodeId}                              │
+│                     │ children:{nodeId}                            │
+│                     │ (topologia)                                  │
+├─────────────────────┼──────────────────────────────────────────────┤
+│ BaseNode (tutti)    │ node:{nodeId}                                │
+│                     │ nodes:{nodeType}                             │
+│                     │ (self-registration)                          │
+├─────────────────────┼──────────────────────────────────────────────┤
+│ InjectionNode       │ session:{sessionId}                          │ 
+│                     │ sessions:{treeId}                            │
+│                     │ (session data + tree index)                  │
+├─────────────────────┼──────────────────────────────────────────────┤
+│ EgressNode          │ mountpoint:{nodeId}:{sessionId}              │
+│                     │ mountpoints:{treeId}                         │
+│                     │ mountpoints:node:{nodeId}                    │
+├─────────────────────┼──────────────────────────────────────────────┤
+│ RelayNode           │ (nulla! solo forward)                        │
+└─────────────────────┴──────────────────────────────────────────────┘
 
 ═══════════════════════════════════════════════════════════════════
 REDIS KEYS - COMPLETE STRUCTURE
@@ -28,17 +26,23 @@ REDIS KEYS - COMPLETE STRUCTURE
 
 1. TOPOLOGIA ALBERO
    parent:{nodeId}                    STRING   → parentNodeId
-   children:{nodeId}                  SET      → {childId1, childId2}
+   children:{nodeId}                  SET      → {childId1, childId2, ...}
 
 2. REGISTRY NODI
-   node:{nodeId}                      HASH     → {nodeType, host, port, ...}
-   nodes:{nodeType}                   SET      → {nodeId1, nodeId2}
+   node:{nodeId}                      HASH     → {nodeId, nodeType, treeId, host, port, 
+                                                  audioPort, videoPort, status, createdAt}
+   nodes:{nodeType}                   SET      → {nodeId1, nodeId2, ...}
 
-3. SESSIONI BROADCAST
-   session:{sessionId}                HASH     → {sessionId, roomId, audioSsrc, videoSsrc, injectionNodeId, ...}
-   sessions:{nodeId}                  SET      → {sessionId1, sessionId2}
-   sessions:active                    SET      → {sessionId1, sessionId2}
+3. SESSIONI BROADCAST (INJECTION NODE)
+   session:{sessionId}                HASH     → {sessionId, treeId, roomId, audioSsrc, 
+                                                  videoSsrc, recipients, injectionNodeId, 
+                                                  active, createdAt, updatedAt}
+   sessions:{treeId}                  SET      → {sessionId1, sessionId2, ...}
 
 4. MOUNTPOINT (EGRESS NODES)
-   mountpoint:{egressNodeId}:{mountpointId}   HASH → {sessionId, mountpointId, audioSsrc, videoSsrc, ...}
-   mountpoints:{egressNodeId}                 SET  → {mountpointId1, mountpointId2}
+   mountpoint:{nodeId}:{sessionId}    HASH     → {sessionId, treeId, mountpointId, 
+                                                  audioSsrc, videoSsrc, janusAudioPort, 
+                                                  janusVideoPort, egressNodeId, active, 
+                                                  createdAt, updatedAt}
+   mountpoints:{treeId}               SET      → {nodeId:sessionId, ...}
+   mountpoints:node:{nodeId}          SET      → {sessionId1, sessionId2, ...}

@@ -18,7 +18,7 @@ services:
 
   janus-videoroom:
     build:
-      context: ./janus-videoroom
+      context: ../janus-videoroom
       dockerfile: Dockerfile
     container_name: janus-videoroom
     ports:
@@ -26,7 +26,7 @@ services:
       - "8188:8188" # WebSocket
       - "20000-20050:20000-20050/udp" # WebRTC
     volumes:
-      - ./janus-videoroom/config:/opt/janus/etc/janus:ro
+      - ../janus-videoroom/config:/opt/janus/etc/janus:ro
     environment:
       - JANUS_LOG_LEVEL=4
     networks:
@@ -34,7 +34,7 @@ services:
 
   janus-streaming-1:
     build:
-      context: ./janus-streaming
+      context: ../janus-streaming
       dockerfile: Dockerfile
     container_name: janus-streaming-1
     ports:
@@ -42,7 +42,7 @@ services:
       - "8189:8188" # WebSocket
       - "20051-20150:20051-20150/udp" # WebRTC
     volumes:
-      - ./janus-streaming/config:/opt/janus/etc/janus:ro
+      - ../janus-streaming/config:/opt/janus/etc/janus:ro
     environment:
       - JANUS_LOG_LEVEL=4
     networks:
@@ -50,7 +50,7 @@ services:
 
   janus-streaming-2:
     build:
-      context: ./janus-streaming
+      context: ../janus-streaming
       dockerfile: Dockerfile
     container_name: janus-streaming-2
     ports:
@@ -58,7 +58,7 @@ services:
       - "8190:8188" # WebSocket
       - "20151-20200:20101-20150/udp" # WebRTC
     volumes:
-      - ./janus-streaming/config:/opt/janus/etc/janus:ro
+      - ../janus-streaming/config:/opt/janus/etc/janus:ro
     environment:
       - JANUS_LOG_LEVEL=4
     networks:
@@ -70,7 +70,7 @@ services:
 
   injection-1:
     build:
-      context: .
+      context: ..
       dockerfile: injection-node/Dockerfile
     container_name: injection-1
     ports:
@@ -106,7 +106,7 @@ services:
 
   relay-1:
     build:
-      context: .
+      context: ..
       dockerfile: relay-node/Dockerfile
     container_name: relay-1
     ports:
@@ -133,7 +133,7 @@ services:
 
   relay-2:
     build:
-      context: .
+      context: ..
       dockerfile: relay-node/Dockerfile
     container_name: relay-2
     ports:
@@ -165,7 +165,7 @@ services:
 
   egress-1:
     build:
-      context: .
+      context: ..
       dockerfile: egress-node/Dockerfile
     container_name: egress-1
     ports:
@@ -203,7 +203,7 @@ services:
 
   egress-2:
     build:
-      context: .
+      context: ..
       dockerfile: egress-node/Dockerfile
     container_name: egress-2
     ports:
@@ -247,7 +247,7 @@ services:
   # tanto seguirà quelli in sessione di janus)
   whip-client-1:
     build:
-      context: ./simple-whip-client
+      context: ../simple-whip-client
       dockerfile: Dockerfile
     container_name: whip-client-1
     environment:
@@ -270,7 +270,7 @@ services:
   # tanto seguirà quelli in sessione di janus)
   whip-client-2:
     build:
-      context: ./simple-whip-client
+      context: ../simple-whip-client
       dockerfile: Dockerfile
     container_name: whip-client-2
     environment:
@@ -293,7 +293,7 @@ services:
   # Test Chain: SSRC 5555/6666
   whip-client-chain:
     build:
-      context: ./simple-whip-client
+      context: ../simple-whip-client
       dockerfile: Dockerfile
     container_name: whip-client-chain
     environment:
@@ -312,7 +312,7 @@ services:
   #   Test Scale: SSRC 7777/8888
   whip-client-scale:
     build:
-      context: ./simple-whip-client
+      context: ../simple-whip-client
       dockerfile: Dockerfile
     container_name: whip-client-scale
     environment:

@@ -242,7 +242,7 @@ export class EgressNode extends BaseNode {
         try {
             console.log(`[${this.nodeId}] Creating mountpoint for session: ${sessionId}`);
 
-            // Leggi roomId da Redis (mountpointId = roomId)
+            // Leggi info da Redis (mountpointId = roomId)    
             const sessionData = await this.redis.hgetall(`session:${sessionId}`);
             if (!sessionData || !sessionData.roomId) {
                 throw new Error(`Session ${sessionId} not found in Redis`);
