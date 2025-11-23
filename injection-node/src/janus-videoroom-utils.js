@@ -66,8 +66,11 @@ export async function createJanusRoom(videoRoom, roomId, description, secret) {
             bitrate: 2048000,
             fir_freq: 10,
             permanent: false,
-            record: false
+            record: false,
             // audiocodec e videocodec: usa default Janus (opus/vp8)
+            audiocodec: 'opus',
+            videocodec: 'h264',
+            h264_profile: '42e01f'
         });
         return response;
     } catch (error) {

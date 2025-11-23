@@ -83,8 +83,8 @@ export async function createJanusMountpoint(streaming, nodeId, mountpointId, aud
                     mid: '1',
                     port: videoPort,
                     pt: 96,
-                    codec: 'vp8',
-                    rtpmap: 'VP8/90000'
+                    codec: 'h264',
+                    rtpmap: 'h264/90000'
                 }
             ]
         });
