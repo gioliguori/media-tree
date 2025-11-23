@@ -14,7 +14,7 @@ general: {
 	#log_to_stdout = false					# Whether the Janus output should be written
 											# to stdout or not (default=true)
 	#log_to_file = "/path/to/janus.log"		# Whether to use a log file or not
-	debug_level = 4							# Debug/logging level, valid values are 0-7
+	debug_level = 7							# Debug/logging level, valid values are 0-7
 	#debug_timestamps = true				# Whether to show a timestamp for each log line
 	#debug_colors = false					# Whether colors should be disabled in the log
 	#debug_locks = true						# Whether to enable debugging of locks (very verbose!)
@@ -227,7 +227,7 @@ media: {
 	#ipv6 = true
 	#ipv6_linklocal = true
 	#min_nack_queue = 500
-	#rtp_port_range = "20000-40000"
+	rtp_port_range = "20000-20050"
 	#dtls_mtu = 1200
 	#no_media_timer = 1
 	#slowlink_threshold = 4
@@ -326,8 +326,8 @@ nat: {
 	# Multiple public IP addresses can be specified as a comma separated list
 	# if the Janus is deployed in a DMZ between two 1-1 NAT for internal and
 	# external users.
-	#nat_1_1_mapping = "1.2.3.4"
-	#keep_private_host = true
+	nat_1_1_mapping = "192.168.1.16"
+	keep_private_host = false
 
 	# You can configure a TURN server in two different ways: specifying a
 	# statically configured TURN server, and thus provide the address of the
