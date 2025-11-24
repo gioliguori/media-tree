@@ -1,0 +1,44 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: "media-tree"
+
+scrape_configs:
+  - job_name: "node-exporter"
+    static_configs:
+      # Injection nodes
+      - targets: ["node-exporter-injection-1:9100"]
+        labels:
+          node_id: "injection-1"
+          node_type: "injection"
+          tree_id: "tree-1"
+
+      # Relay nodes
+      - targets: ["node-exporter-relay-1:9100"]
+        labels:
+          node_id: "relay-1"
+          node_type: "relay"
+          tree_id: "tree-1"
+
+      - targets: ["node-exporter-relay-2:9100"]
+        labels:
+          node_id: "relay-2"
+          node_type: "relay"
+          tree_id: "tree-1"
+
+      # Egress nodes
+      - targets: ["node-exporter-egress-1:9100"]
+        labels:
+          node_id: "egress-1"
+          node_type: "egress"
+          tree_id: "tree-1"
+
+      - targets: ["node-exporter-egress-2:9100"]
+        labels:
+          node_id: "egress-2"
+          node_type: "egress"
+          tree_id: "tree-1"
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

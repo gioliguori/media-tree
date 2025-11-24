@@ -23,12 +23,12 @@ echo "--- BUILD ---"
 docker-compose -f docker-compose.test.yaml build
 
 echo "--- AVVIO INFRASTRUTTURA BASE ---"
-docker-compose -f docker-compose.test.yaml up -d redis janus-videoroom janus-streaming-1
+docker-compose -f docker-compose.test.yaml up -d redis janus-videoroom janus-streaming-1 prometheus grafana
 sleep 5
 docker exec redis redis-cli FLUSHALL
 
 echo "--- START NODI ---"
-docker-compose -f docker-compose.test.yaml up -d injection-1 relay-1 egress-1
+docker-compose -f docker-compose.test.yaml up -d injection-1 relay-1 egress-1 node-exporter-injection-1
 sleep 10
 
 echo "--- VERIFICA NODI ---"

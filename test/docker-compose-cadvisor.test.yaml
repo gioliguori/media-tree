@@ -367,101 +367,22 @@ services:
       - prometheus
     networks:
       - media-tree
-
-  # node_exporter per injection-1
-  node-exporter-injection-1:
-    image: prom/node-exporter:v1.7.0
-    container_name: node-exporter-injection-1
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: cadvisor
     restart: unless-stopped
     ports:
-      - "9100:9100"
-    command:
-      - "--path.procfs=/host/proc"
-      - "--path.sysfs=/host/sys"
-      - "--path.rootfs=/rootfs"
+      - "8080:8080"
     volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
       - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
     networks:
       - media-tree
-
-  # node_exporter per relay-1
-  node-exporter-relay-1:
-    image: prom/node-exporter:v1.7.0
-    container_name: node-exporter-relay-1
-    restart: unless-stopped
-    ports:
-      - "9101:9100"
-    command:
-      - "--path.procfs=/host/proc"
-      - "--path.sysfs=/host/sys"
-      - "--path.rootfs=/rootfs"
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    networks:
-      - media-tree
-
-  # node_exporter per relay-2
-  node-exporter-relay-2:
-    image: prom/node-exporter:v1.7.0
-    container_name: node-exporter-relay-2
-    restart: unless-stopped
-    ports:
-      - "9102:9100"
-    command:
-      - "--path.procfs=/host/proc"
-      - "--path.sysfs=/host/sys"
-      - "--path.rootfs=/rootfs"
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    networks:
-      - media-tree
-    profiles:
-      - test-chain
-
-  # node_exporter per egress-1
-  node-exporter-egress-1:
-    image: prom/node-exporter:v1.7.0
-    container_name: node-exporter-egress-1
-    restart: unless-stopped
-    ports:
-      - "9103:9100"
-    command:
-      - "--path.procfs=/host/proc"
-      - "--path.sysfs=/host/sys"
-      - "--path.rootfs=/rootfs"
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    networks:
-      - media-tree
-
-  # node_exporter per egress-2
-  node-exporter-egress-2:
-    image: prom/node-exporter:v1.7.0
-    container_name: node-exporter-egress-2
-    restart: unless-stopped
-    ports:
-      - "9104:9100"
-    command:
-      - "--path.procfs=/host/proc"
-      - "--path.sysfs=/host/sys"
-      - "--path.rootfs=/rootfs"
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    networks:
-      - media-tree
-    profiles:
-      - scale
-
+      
 volumes:
   prometheus-data:
   grafana-data:

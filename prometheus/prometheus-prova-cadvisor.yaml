@@ -1,0 +1,30 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # cAdvisor
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    
+    metric_relabel_configs:
+      - source_labels: [name]
+        regex: '/(injection-.*|relay-.*|egress-.*|whim-client-.*)'
+        action: keep
+      - source_labels: [name]
+        regex: '/(.+)'
+        target_label: 'name'
+        replacement: '${1}'
+      - source_labels: [name]
+        regex: 'injection-.*'
+        target_label: 'node_type'
+        replacement: 'injection'
+      - source_labels: [name]
+        regex: 'relay-.*'
+        target_label: 'node_type'
+        replacement: 'relay'
+      - source_labels: [name]
+        regex: 'egress-.*'
+        target_label: 'node_type'
+        replacement: 'egress'
