@@ -63,7 +63,7 @@ curl -X POST http://localhost:7070/session \
 pause
 
 echo "--- PUBBLICA EVENTO session-created ---"
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-created","sessionId":"test-scale","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree:tree-1 '{"type":"session-created","sessionId":"test-scale","treeId":"tree-1"}'
 sleep 2
 
 echo "--- VERIFICA MOUNTPOINT su egress-1 ---"
@@ -140,7 +140,7 @@ curl http://localhost:7073/topology | jq '.parent'
 pause
 
 echo "--- DISTRUGGI MOUNTPOINT egress-1 ---"
-docker exec redis redis-cli PUBLISH sessions:node:egress-1 '{"type":"session-destroyed","sessionId":"test-scale","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:node:egress-1 '{"type":"session-destroyed","sessionId":"test-scale","treeId":"tree-1"}'
 sleep 2
 
 pause
@@ -172,7 +172,7 @@ echo ""
 
 curl -X POST http://localhost:7070/session/test-scale/destroy
 
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-destroyed","sessionId":"test-scale","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree:tree-1 '{"type":"session-destroyed","sessionId":"test-scale","treeId":"tree-1"}'
 echo ""
 sleep 2
 

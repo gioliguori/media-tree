@@ -16,7 +16,7 @@ export class BaseNode {
     //   nodeType: 'injection',           // injection | relay | egress
     //   host: 'injection-1',             // Hostname/IP del nodo
     //   port: 7070,                      // Porta API REST
-    //   treeId: injection-1              // Un nodo di ingresso per ogni albero, a questo punto lo utilizziamo come id del tree 
+    //   treeId: injection-1              // ID dell'albero a cui appartiene il nodo
     //
     //   // === RTP PORTS ===
     //   rtp: {
@@ -59,7 +59,7 @@ export class BaseNode {
     //     token: 'verysecret'            // Token autenticazione viewer         
     //   },
 
-    this.treeId = config.treeId || (nodeType === 'injection' ? nodeId : null);
+    this.treeId = config.treeId;
     this.host = config.host || 'localhost';
     this.port = config.port || 7070;
 
@@ -214,14 +214,20 @@ export class BaseNode {
     });
 
     await this.redis.expire(`node:${this.nodeId}`, 600);
-
-    console.log(`[${this.nodeId}] Registered`);
+    // Registra nodo nel tree
+    const setKey = `tree:${this.treeId}:${this.nodeType}`; // injection, relay, egress
+    await this.redis.sadd(setKey, this.nodeId);
+    console.log(`[${this.nodeId}] Registered in tree ${this.treeId} (${setKey})`);
   }
 
   async unregisterNode() {
     await this.redis.del(`node:${this.nodeId}`);
-    // await this.redis.del(`children:${this.nodeId}`); // forse dovrebbe farlo il controller questo
-    // await this.redis.del(`parent:${this.nodeId}`);
+
+    // Rimuovi dal tree
+    const setKey = `tree:${this.treeId}:${this.nodeType}s`;
+    await this.redis.srem(setKey, this.nodeId);
+
+    console.log(`[${this.nodeId}] Unregistered from tree ${this.treeId}`);
   }
 
   // TOPOLOGY

@@ -79,7 +79,7 @@ curl -X POST http://localhost:7070/session \
   -d '{"sessionId": "test-chain", "roomId": 3001, "audioSsrc": 5555, "videoSsrc": 6666}' | jq
 
 echo "--- PUBBLICA EVENTO session-created ---"
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-created","sessionId":"test-chain","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree:tree-1 '{"type":"session-created","sessionId":"test-chain","treeId":"tree-1"}'
 sleep 2
 
 echo "--- VERIFICA MOUNTPOINT egress-1 ---"
@@ -156,7 +156,7 @@ echo ""
 
 curl -X POST http://localhost:7070/session/test-chain/destroy
 
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-destroyed","sessionId":"test-chain","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree:tree-1 '{"type":"session-destroyed","sessionId":"test-chain","treeId":"tree-1"}'
 sleep 2
 
 docker exec redis redis-cli FLUSHALL

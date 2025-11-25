@@ -69,7 +69,7 @@ curl -X POST http://localhost:7070/session \
   -d '{"sessionId": "broadcaster-1", "roomId": 2001, "audioSsrc": 1111, "videoSsrc": 2222}' | jq
 
 echo "--- PUBBLICA EVENTO session-created ---"
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-created","sessionId":"broadcaster-1","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree:tree-1 '{"type":"session-created","sessionId":"broadcaster-1","treeId":"tree-1"}'
 sleep 2
 
 echo "--- VERIFICA MOUNTPOINT broadcaster-1 ---"
@@ -89,7 +89,7 @@ curl -X POST http://localhost:7070/session \
   -d '{"sessionId": "broadcaster-2", "roomId": 2002, "audioSsrc": 3333, "videoSsrc": 4444}' | jq
 
 echo "--- PUBBLICA EVENTO session-created ---"
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-created","sessionId":"broadcaster-2","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree:tree-1 '{"type":"session-created","sessionId":"broadcaster-2","treeId":"tree-1"}'
 sleep 2
 
 echo "--- VERIFICA MOUNTPOINT broadcaster-2 ---"
@@ -203,8 +203,8 @@ echo ""
 curl -X POST http://localhost:7070/session/broadcaster-1/destroy
 curl -X POST http://localhost:7070/session/broadcaster-2/destroy
 
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-destroyed","sessionId":"broadcaster-1","treeId":"injection-1"}'
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-destroyed","sessionId":"broadcaster-2","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree:tree-1 '{"type":"session-destroyed","sessionId":"broadcaster-1","treeId":"tree-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree:tree-1 '{"type":"session-destroyed","sessionId":"broadcaster-2","treeId":"tree-1"}'
 sleep 2
 
 docker exec redis redis-cli FLUSHALL
