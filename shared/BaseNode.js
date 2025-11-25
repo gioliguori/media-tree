@@ -16,7 +16,7 @@ export class BaseNode {
     //   nodeType: 'injection',           // injection | relay | egress
     //   host: 'injection-1',             // Hostname/IP del nodo
     //   port: 7070,                      // Porta API REST
-    //   treeId: injection-1              // Un nodo di ingresso per ogni albero, a questo punto lo utilizziamo come id del tree 
+    //   treeId: injection-1              // ID dell'albero a cui appartiene il nodo
     //
     //   // === RTP PORTS ===
     //   rtp: {
@@ -59,7 +59,7 @@ export class BaseNode {
     //     token: 'verysecret'            // Token autenticazione viewer         
     //   },
 
-    this.treeId = config.treeId || (nodeType === 'injection' ? nodeId : null);
+    this.treeId = config.treeId;
     this.host = config.host || 'localhost';
     this.port = config.port || 7070;
 
@@ -173,15 +173,15 @@ export class BaseNode {
   async setupPubSub() {
     // Subscribe a canali topology
     const channels = [
-      `topology:${this.nodeId}`,
-      `topology:${this.treeId}`,
+      `topology:${this.treeId}:${this.nodeId}`,  // eventi specifici nodo
+      `topology:${this.treeId}`,                  // eventi globali tree
     ];
 
     if (this.nodeType === 'injection' || this.nodeType === 'egress') {
-      channels.push(`sessions:node:${this.nodeId}`);
+      channels.push(`sessions:${this.treeId}:${this.nodeId}`);
     }
     if (this.nodeType === 'egress') {
-      channels.push(`sessions:tree:${this.treeId}`);
+      channels.push(`sessions:${this.treeId}`);
     }
 
     await this.subscriber.subscribe(...channels);
@@ -201,7 +201,7 @@ export class BaseNode {
   }
 
   async registerNode() {
-    await this.redis.hset(`node:${this.nodeId}`, {          //  hset setta come hash redis e non come json 
+    await this.redis.hset(`tree:${this.treeId}:node:${this.nodeId}`, {          //  hset setta come hash redis e non come json 
       nodeId: this.nodeId,                                  //  dovrebbe essere un'azione atomica quindi piu performante (boh)
       type: this.nodeType,
       treeId: this.treeId,
@@ -213,15 +213,21 @@ export class BaseNode {
       created: Date.now()
     });
 
-    await this.redis.expire(`node:${this.nodeId}`, 600);
-
-    console.log(`[${this.nodeId}] Registered`);
+    await this.redis.expire(`tree:${this.treeId}:node:${this.nodeId}`, 600);
+    // Registra nodo nel tree
+    const setKey = `tree:${this.treeId}:${this.nodeType}`; // injection, relay, egress
+    await this.redis.sadd(setKey, this.nodeId);
+    console.log(`[${this.nodeId}] Registered in tree ${this.treeId} (${setKey})`);
   }
 
   async unregisterNode() {
-    await this.redis.del(`node:${this.nodeId}`);
-    // await this.redis.del(`children:${this.nodeId}`); // forse dovrebbe farlo il controller questo
-    // await this.redis.del(`parent:${this.nodeId}`);
+    await this.redis.del(`tree:${this.treeId}:node:${this.nodeId}`);
+
+    // Rimuovi dal tree
+    const setKey = `tree:${this.treeId}:${this.nodeType}s`;
+    await this.redis.srem(setKey, this.nodeId);
+
+    console.log(`[${this.nodeId}] Unregistered from tree ${this.treeId}`);
   }
 
   // TOPOLOGY
@@ -276,7 +282,7 @@ export class BaseNode {
     try {
       // relay/egress
       if (this.nodeType !== 'injection') {
-        const parentId = await this.redis.get(`parent:${this.nodeId}`);  // get e non hget per il controller farà solo set visto che è una stringa unica
+        const parentId = await this.redis.get(`tree:${this.treeId}:parent:${this.nodeId}`);  // get e non hget per il controller farà solo set visto che è una stringa unica
         if (parentId !== this.parent) {
           const oldParent = this.parent;
           this.parent = parentId;
@@ -288,7 +294,7 @@ export class BaseNode {
 
       // injection/relay
       if (this.nodeType !== 'egress') {
-        const newChildren = await this.redis.smembers(`children:${this.nodeId}`);   // smember = dammi il set di membri.
+        const newChildren = await this.redis.smembers(`tree:${this.treeId}:children:${this.nodeId}`);   // smember = dammi il set di membri.
 
         const currentSet = new Set(this.children);
         const newSet = new Set(newChildren);
@@ -400,7 +406,7 @@ export class BaseNode {
   }
 
   async getNodeInfo(nodeId) {
-    const data = await this.redis.hgetall(`node:${nodeId}`);
+    const data = await this.redis.hgetall(`tree:${this.treeId}:node:${nodeId}`);
     if (!data || Object.keys(data).length === 0) return null;
 
     return {
@@ -440,7 +446,7 @@ export class BaseNode {
   }
 
   async refreshNodeTTL() {
-    await this.redis.expire(`node:${this.nodeId}`, 600);
+    await this.redis.expire(`tree:${this.treeId}:node:${this.nodeId}`, 600);
   }
 
   async periodicSync() {
@@ -450,11 +456,11 @@ export class BaseNode {
       let redisChildren = [];
 
       if (this.nodeType !== 'injection') {
-        redisParent = await this.redis.get(`parent:${this.nodeId}`);
+        redisParent = await this.redis.get(`tree:${this.treeId}:parent:${this.nodeId}`);
       }
 
       if (this.nodeType !== 'egress') {
-        redisChildren = await this.redis.smembers(`children:${this.nodeId}`);
+        redisChildren = await this.redis.smembers(`tree:${this.treeId}:children:${this.nodeId}`);
       }
 
       // Confronta con cache locale

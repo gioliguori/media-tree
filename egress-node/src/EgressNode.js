@@ -243,7 +243,7 @@ export class EgressNode extends BaseNode {
             console.log(`[${this.nodeId}] Creating mountpoint for session: ${sessionId}`);
 
             // Leggi info da Redis (mountpointId = roomId)    
-            const sessionData = await this.redis.hgetall(`session:${sessionId}`);
+            const sessionData = await this.redis.hgetall(`tree:${this.treeId}:session:${sessionId}`);
             if (!sessionData || !sessionData.roomId) {
                 throw new Error(`Session ${sessionId} not found in Redis`);
             }
@@ -436,7 +436,7 @@ export class EgressNode extends BaseNode {
         // console.log(`[${this.nodeId}] Found ${sessionIds.length} existing sessions`);
 
         for (const sessionId of sessionIds) {
-            const sessionData = await this.redis.hgetall(`session:${sessionId}`);
+            const sessionData = await this.redis.hgetall(`tree:${this.treeId}:session:${sessionId}`);
 
             if (sessionData.active !== 'true') {
                 console.log(`[${this.nodeId}] Skipping inactive session ${sessionId}`);
@@ -445,7 +445,7 @@ export class EgressNode extends BaseNode {
 
             // CHECK: mountpoint già esisteva per questo nodo?
             const mountpointId = parseInt(sessionData.roomId);
-            const existingMountpoint = await this.redis.hgetall(`mountpoint:${this.nodeId}:${sessionId}`);
+            const existingMountpoint = await this.redis.hgetall(`tree:${this.treeId}:mountpoint:${this.nodeId}:${sessionId}`);
 
             try {
                 if (existingMountpoint && existingMountpoint.active === 'true') {

@@ -37,18 +37,18 @@ curl http://localhost:7071/status | jq '{nodeId, nodeType, healthy}'
 curl http://localhost:7073/status | jq '{nodeId, nodeType, healthy}'
 
 echo "--- CONFIGURAZIONE TOPOLOGIA: injection-1 -> relay-1 ---"
-docker exec redis redis-cli SADD children:injection-1 relay-1
-docker exec redis redis-cli SET parent:relay-1 injection-1
+docker exec redis redis-cli SADD tree:tree-1:children:injection-1 relay-1
+docker exec redis redis-cli SET tree:tree-1:parent:relay-1 injection-1
 
-docker exec redis redis-cli PUBLISH topology:injection-1 '{"type":"child-added","nodeId":"injection-1","childId":"relay-1"}'
-docker exec redis redis-cli PUBLISH topology:relay-1 '{"type":"parent-changed","nodeId":"relay-1","newParent":"injection-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:injection-1 '{"type":"child-added","nodeId":"injection-1","childId":"relay-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:relay-1 '{"type":"parent-changed","nodeId":"relay-1","newParent":"injection-1"}'
 
 echo "--- CONFIGURAZIONE TOPOLOGIA: relay-1 -> egress-1 ---"
-docker exec redis redis-cli SADD children:relay-1 egress-1
-docker exec redis redis-cli SET parent:egress-1 relay-1
+docker exec redis redis-cli SADD tree:tree-1:children:relay-1 egress-1
+docker exec redis redis-cli SET tree:tree-1:parent:egress-1 relay-1
 
-docker exec redis redis-cli PUBLISH topology:relay-1 '{"type":"child-added","nodeId":"relay-1","childId":"egress-1"}'
-docker exec redis redis-cli PUBLISH topology:egress-1 '{"type":"parent-changed","nodeId":"egress-1","newParent":"relay-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:relay-1 '{"type":"child-added","nodeId":"relay-1","childId":"egress-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:egress-1 '{"type":"parent-changed","nodeId":"egress-1","newParent":"relay-1"}'
 
 echo "--- VERIFICA TOPOLOGIA ---"
 curl http://localhost:7070/topology | jq '.children'
@@ -69,7 +69,7 @@ curl -X POST http://localhost:7070/session \
   -d '{"sessionId": "broadcaster-1", "roomId": 2001, "audioSsrc": 1111, "videoSsrc": 2222}' | jq
 
 echo "--- PUBBLICA EVENTO session-created ---"
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-created","sessionId":"broadcaster-1","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree-1 '{"type":"session-created","sessionId":"broadcaster-1","treeId":"tree-1"}'
 sleep 2
 
 echo "--- VERIFICA MOUNTPOINT broadcaster-1 ---"
@@ -89,7 +89,7 @@ curl -X POST http://localhost:7070/session \
   -d '{"sessionId": "broadcaster-2", "roomId": 2002, "audioSsrc": 3333, "videoSsrc": 4444}' | jq
 
 echo "--- PUBBLICA EVENTO session-created ---"
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-created","sessionId":"broadcaster-2","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree-1 '{"type":"session-created","sessionId":"broadcaster-2","treeId":"tree-1"}'
 sleep 2
 
 echo "--- VERIFICA MOUNTPOINT broadcaster-2 ---"
@@ -203,8 +203,8 @@ echo ""
 curl -X POST http://localhost:7070/session/broadcaster-1/destroy
 curl -X POST http://localhost:7070/session/broadcaster-2/destroy
 
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-destroyed","sessionId":"broadcaster-1","treeId":"injection-1"}'
-docker exec redis redis-cli PUBLISH sessions:tree:injection-1 '{"type":"session-destroyed","sessionId":"broadcaster-2","treeId":"injection-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree-1 '{"type":"session-destroyed","sessionId":"broadcaster-1","treeId":"tree-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree-1 '{"type":"session-destroyed","sessionId":"broadcaster-2","treeId":"tree-1"}'
 sleep 2
 
 docker exec redis redis-cli FLUSHALL
