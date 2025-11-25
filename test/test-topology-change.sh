@@ -38,25 +38,25 @@ curl http://localhost:7072/status | jq '{nodeId, nodeType, healthy}'
 curl http://localhost:7073/status | jq '{nodeId, nodeType, healthy}'
 
 echo "--- CONFIGURAZIONE TOPOLOGIA: injection-1 -> relay-1 ---"
-docker exec redis redis-cli SADD children:injection-1 relay-1
-docker exec redis redis-cli SET parent:relay-1 injection-1
+docker exec redis redis-cli SADD tree:tree-1:children:injection-1 relay-1
+docker exec redis redis-cli SET tree:tree-1:parent:relay-1 injection-1
 
-docker exec redis redis-cli PUBLISH topology:injection-1 '{"type":"child-added","nodeId":"injection-1","childId":"relay-1"}'
-docker exec redis redis-cli PUBLISH topology:relay-1 '{"type":"parent-changed","nodeId":"relay-1","newParent":"injection-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:injection-1 '{"type":"child-added","nodeId":"injection-1","childId":"relay-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:relay-1 '{"type":"parent-changed","nodeId":"relay-1","newParent":"injection-1"}'
 
 echo "--- CONFIGURAZIONE TOPOLOGIA: relay-1 -> relay-2 ---"
-docker exec redis redis-cli SADD children:relay-1 relay-2
-docker exec redis redis-cli SET parent:relay-2 relay-1
+docker exec redis redis-cli SADD tree:tree-1:children:relay-1 relay-2
+docker exec redis redis-cli SET tree:tree-1:parent:relay-2 relay-1
 
-docker exec redis redis-cli PUBLISH topology:relay-1 '{"type":"child-added","nodeId":"relay-1","childId":"relay-2"}'
-docker exec redis redis-cli PUBLISH topology:relay-2 '{"type":"parent-changed","nodeId":"relay-2","newParent":"relay-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:relay-1 '{"type":"child-added","nodeId":"relay-1","childId":"relay-2"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:relay-2 '{"type":"parent-changed","nodeId":"relay-2","newParent":"relay-1"}'
 
 echo "--- CONFIGURAZIONE TOPOLOGIA: relay-2 -> egress-1 ---"
-docker exec redis redis-cli SADD children:relay-2 egress-1
-docker exec redis redis-cli SET parent:egress-1 relay-2
+docker exec redis redis-cli SADD tree:tree-1:children:relay-2 egress-1
+docker exec redis redis-cli SET tree:tree-1:parent:egress-1 relay-2
 
-docker exec redis redis-cli PUBLISH topology:relay-2 '{"type":"child-added","nodeId":"relay-2","childId":"egress-1"}'
-docker exec redis redis-cli PUBLISH topology:egress-1 '{"type":"parent-changed","nodeId":"egress-1","newParent":"relay-2"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:relay-2 '{"type":"child-added","nodeId":"relay-2","childId":"egress-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:egress-1 '{"type":"parent-changed","nodeId":"egress-1","newParent":"relay-2"}'
 
 echo "--- VERIFICA TOPOLOGIA COMPLETA ---"
 echo "injection-1:"
@@ -79,7 +79,7 @@ curl -X POST http://localhost:7070/session \
   -d '{"sessionId": "test-chain", "roomId": 3001, "audioSsrc": 5555, "videoSsrc": 6666}' | jq
 
 echo "--- PUBBLICA EVENTO session-created ---"
-docker exec redis redis-cli PUBLISH sessions:tree:tree-1 '{"type":"session-created","sessionId":"test-chain","treeId":"tree-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree-1 '{"type":"session-created","sessionId":"test-chain","treeId":"tree-1"}'
 sleep 2
 
 echo "--- VERIFICA MOUNTPOINT egress-1 ---"
@@ -108,18 +108,18 @@ echo "DOPO:  injection-1 -> relay-1 -> egress-1"
 echo ""
 
 echo "--- RIMUOVI relay-2 dalla topologia ---"
-docker exec redis redis-cli SREM children:relay-1 relay-2
-docker exec redis redis-cli DEL parent:relay-2
+docker exec redis redis-cli SREM tree:tree-1:children:relay-1 relay-2
+docker exec redis redis-cli DEL tree:tree-1:parent:relay-2
 
-docker exec redis redis-cli PUBLISH topology:relay-1 '{"type":"child-removed","nodeId":"relay-1","childId":"relay-2"}'
-docker exec redis redis-cli PUBLISH topology:relay-2 '{"type":"parent-changed","nodeId":"relay-2","newParent":null}'
+docker exec redis redis-cli PUBLISH topology:tree-1:relay-1 '{"type":"child-removed","nodeId":"relay-1","childId":"relay-2"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:relay-2 '{"type":"parent-changed","nodeId":"relay-2","newParent":null}'
 
 echo "--- COLLEGA relay-1 direttamente a egress-1 ---"
-docker exec redis redis-cli SADD children:relay-1 egress-1
-docker exec redis redis-cli SET parent:egress-1 relay-1
+docker exec redis redis-cli SADD tree:tree-1:children:relay-1 egress-1
+docker exec redis redis-cli SET tree:tree-1:parent:egress-1 relay-1
 
-docker exec redis redis-cli PUBLISH topology:relay-1 '{"type":"child-added","nodeId":"relay-1","childId":"egress-1"}'
-docker exec redis redis-cli PUBLISH topology:egress-1 '{"type":"parent-changed","nodeId":"egress-1","newParent":"relay-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:relay-1 '{"type":"child-added","nodeId":"relay-1","childId":"egress-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:egress-1 '{"type":"parent-changed","nodeId":"egress-1","newParent":"relay-1"}'
 
 echo "--- VERIFICA TOPOLOGIA AGGIORNATA ---"
 echo "relay-1 (dovrebbe avere egress-1 come child):"
@@ -156,7 +156,7 @@ echo ""
 
 curl -X POST http://localhost:7070/session/test-chain/destroy
 
-docker exec redis redis-cli PUBLISH sessions:tree:tree-1 '{"type":"session-destroyed","sessionId":"test-chain","treeId":"tree-1"}'
+docker exec redis redis-cli PUBLISH sessions:tree-1 '{"type":"session-destroyed","sessionId":"test-chain","treeId":"tree-1"}'
 sleep 2
 
 docker exec redis redis-cli FLUSHALL

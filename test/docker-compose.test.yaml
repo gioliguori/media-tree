@@ -79,7 +79,7 @@ services:
       - NODE_ID=injection-1
       - NODE_HOST=injection-1
       - API_PORT=7070
-
+      - TREE_ID=tree-1
       # RTP ports (for Redis registration only)
       - RTP_AUDIO_PORT=5000
       - RTP_VIDEO_PORT=5002

@@ -268,7 +268,7 @@ export class InjectionNode extends BaseNode {
 
             for (const sessionId of sessionIds) {
                 // legge da Redis
-                const sessionData = await this.redis.hgetall(`session:${sessionId}`);
+                const sessionData = await this.redis.hgetall(`tree:${this.treeId}:session:${sessionId}`);
 
                 if (!sessionData || Object.keys(sessionData).length === 0) {
                     console.warn(`[${this.nodeId}] Session ${sessionId} not found in Redis`);

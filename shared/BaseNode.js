@@ -173,15 +173,15 @@ export class BaseNode {
   async setupPubSub() {
     // Subscribe a canali topology
     const channels = [
-      `topology:${this.nodeId}`,
-      `topology:${this.treeId}`,
+      `topology:${this.treeId}:${this.nodeId}`,  // eventi specifici nodo
+      `topology:${this.treeId}`,                  // eventi globali tree
     ];
 
     if (this.nodeType === 'injection' || this.nodeType === 'egress') {
-      channels.push(`sessions:node:${this.nodeId}`);
+      channels.push(`sessions:${this.treeId}:${this.nodeId}`);
     }
     if (this.nodeType === 'egress') {
-      channels.push(`sessions:tree:${this.treeId}`);
+      channels.push(`sessions:${this.treeId}`);
     }
 
     await this.subscriber.subscribe(...channels);
@@ -201,7 +201,7 @@ export class BaseNode {
   }
 
   async registerNode() {
-    await this.redis.hset(`node:${this.nodeId}`, {          //  hset setta come hash redis e non come json 
+    await this.redis.hset(`tree:${this.treeId}:node:${this.nodeId}`, {          //  hset setta come hash redis e non come json 
       nodeId: this.nodeId,                                  //  dovrebbe essere un'azione atomica quindi piu performante (boh)
       type: this.nodeType,
       treeId: this.treeId,
@@ -213,7 +213,7 @@ export class BaseNode {
       created: Date.now()
     });
 
-    await this.redis.expire(`node:${this.nodeId}`, 600);
+    await this.redis.expire(`tree:${this.treeId}:node:${this.nodeId}`, 600);
     // Registra nodo nel tree
     const setKey = `tree:${this.treeId}:${this.nodeType}`; // injection, relay, egress
     await this.redis.sadd(setKey, this.nodeId);
@@ -221,7 +221,7 @@ export class BaseNode {
   }
 
   async unregisterNode() {
-    await this.redis.del(`node:${this.nodeId}`);
+    await this.redis.del(`tree:${this.treeId}:node:${this.nodeId}`);
 
     // Rimuovi dal tree
     const setKey = `tree:${this.treeId}:${this.nodeType}s`;
@@ -282,7 +282,7 @@ export class BaseNode {
     try {
       // relay/egress
       if (this.nodeType !== 'injection') {
-        const parentId = await this.redis.get(`parent:${this.nodeId}`);  // get e non hget per il controller farà solo set visto che è una stringa unica
+        const parentId = await this.redis.get(`tree:${this.treeId}:parent:${this.nodeId}`);  // get e non hget per il controller farà solo set visto che è una stringa unica
         if (parentId !== this.parent) {
           const oldParent = this.parent;
           this.parent = parentId;
@@ -294,7 +294,7 @@ export class BaseNode {
 
       // injection/relay
       if (this.nodeType !== 'egress') {
-        const newChildren = await this.redis.smembers(`children:${this.nodeId}`);   // smember = dammi il set di membri.
+        const newChildren = await this.redis.smembers(`tree:${this.treeId}:children:${this.nodeId}`);   // smember = dammi il set di membri.
 
         const currentSet = new Set(this.children);
         const newSet = new Set(newChildren);
@@ -406,7 +406,7 @@ export class BaseNode {
   }
 
   async getNodeInfo(nodeId) {
-    const data = await this.redis.hgetall(`node:${nodeId}`);
+    const data = await this.redis.hgetall(`tree:${this.treeId}:node:${nodeId}`);
     if (!data || Object.keys(data).length === 0) return null;
 
     return {
@@ -446,7 +446,7 @@ export class BaseNode {
   }
 
   async refreshNodeTTL() {
-    await this.redis.expire(`node:${this.nodeId}`, 600);
+    await this.redis.expire(`tree:${this.treeId}:node:${this.nodeId}`, 600);
   }
 
   async periodicSync() {
@@ -456,11 +456,11 @@ export class BaseNode {
       let redisChildren = [];
 
       if (this.nodeType !== 'injection') {
-        redisParent = await this.redis.get(`parent:${this.nodeId}`);
+        redisParent = await this.redis.get(`tree:${this.treeId}:parent:${this.nodeId}`);
       }
 
       if (this.nodeType !== 'egress') {
-        redisChildren = await this.redis.smembers(`children:${this.nodeId}`);
+        redisChildren = await this.redis.smembers(`tree:${this.treeId}:children:${this.nodeId}`);
       }
 
       // Confronta con cache locale

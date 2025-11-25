@@ -1,7 +1,7 @@
 export async function saveSessionToRedis(redis, treeId, nodeId, sessionData) {
     const { sessionId, roomId, audioSsrc, videoSsrc, recipients, createdAt } = sessionData;
 
-    await redis.hset(`session:${sessionId}`, {
+    await redis.hset(`tree:${treeId}:session:${sessionId}`, {
         sessionId,
         treeId,
         roomId: String(roomId),
@@ -18,13 +18,13 @@ export async function saveSessionToRedis(redis, treeId, nodeId, sessionData) {
 }
 
 export async function deactivateSessionInRedis(redis, treeId, sessionId) {
-    await redis.hset(`session:${sessionId}`, 'active', 'false');
-    await redis.hset(`session:${sessionId}`, 'updatedAt', String(Date.now()));
+    await redis.hset(`tree:${treeId}:session:${sessionId}`, 'active', 'false');
+    await redis.hset(`tree:${treeId}:session:${sessionId}`, 'updatedAt', String(Date.now()));
 
     await redis.srem(`sessions:${treeId}`, sessionId);
 
     // TTL 24 ore
-    await redis.expire(`session:${sessionId}`, 86400);
+    await redis.expire(`tree:${treeId}:session:${sessionId}`, 86400);
 
 }
 
