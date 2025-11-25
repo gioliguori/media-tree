@@ -13,8 +13,8 @@ const config = {
         videoPort: parseInt(process.env.RTP_VIDEO_PORT) || 5004
     },
     // port pool
-    portPoolBase: parseInt(process.env.PORT_POOL_BASE) || 6000,
-    portPoolSize: parseInt(process.env.PORT_POOL_SIZE) || 1000,
+    // portPoolBase: parseInt(process.env.PORT_POOL_BASE) || 6000,
+    // portPoolSize: parseInt(process.env.PORT_POOL_SIZE) || 1000,
 
     // Redis config
     redis: {
