@@ -1,5 +1,5 @@
 import { BaseNode } from '../shared/BaseNode.js';
-import { PortPool } from '../shared/PortPool.js';
+//import { PortPool } from '../shared/PortPool.js';
 import { saveMountpointToRedis, deactivateMountpointInRedis, getMountpointInfo, getAllMountpointsInfo } from './mountpoint-utils.js';
 import { connectToJanusStreaming, createJanusMountpoint, destroyJanusMountpoint } from './janus-streaming-utils.js';
 import { EgressForwarderManager } from './EgressForwarderManager.js';
@@ -29,10 +29,10 @@ export class EgressNode extends BaseNode {
         // console.log(`[${this.nodeId}] RTP destination host: ${this.rtpDestinationHost}`);
 
         // PortPool per allocare porte OUTPUT verso Janus
-        this.portPool = new PortPool(
-            config.portPoolBase || 6000,
-            config.portPoolSize || 100
-        );
+        //this.portPool = new PortPool(
+        //    config.portPoolBase || 6000,
+        //    config.portPoolSize || 100
+        //);
 
         // Mountpoints attivi
         this.mountpoints = new Map(); // sessionId -> mountpointData
@@ -41,8 +41,8 @@ export class EgressNode extends BaseNode {
         //   mountpointId: number,           // ID mountpoint Janus (= roomId)
         //   audioSsrc: number,              // SSRC audio per demux
         //   videoSsrc: number,              // SSRC video per demux
-        //   janusAudioPort: number,         // Porta allocata dal PortPool per audio
-        //   janusVideoPort: number,         // Porta allocata dal PortPool per video
+        //   janusAudioPort: number,         // Porta allocata per audio
+        //   janusVideoPort: number,         // Porta allocata per video
         //   endpoint: whepEndpoint,         // Oggetto WHEP endpoint per viewers
         //   active: boolean,                
         //   createdAt: timestamp            
@@ -254,12 +254,16 @@ export class EgressNode extends BaseNode {
             //console.log(`[${this.nodeId}] Mountpoint ID: ${mountpointId}`);
 
             // Alloca porte dal pool
-            const { audioPort, videoPort } = this.portPool.allocate();
-            console.log(`[${this.nodeId}] Allocated ports - Audio: ${audioPort}, Video: ${videoPort}`);
+            //const { audioPort, videoPort } = this.portPool.allocate();
+            //console.log(`[${this.nodeId}] Allocated ports - Audio: ${audioPort}, Video: ${videoPort}`);
 
             // Crea mountpoint su Janus Streaming
-            await createJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId, audioPort, videoPort, this.mountpointSecret);
+            const janusResponse = await createJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId, this.mountpointSecret);
 
+            const audioPort = janusResponse.allocatedPorts.audio;
+            const videoPort = janusResponse.allocatedPorts.video;
+
+            console.log(`[${this.nodeId}] Janus allocated: audio=${audioPort}, video=${videoPort}`);
             // Crea WHEP endpoint
             // console.log(`Session ID : ${sessionId}`)
             const endpoint = this.whepServer.createEndpoint({
@@ -267,8 +271,6 @@ export class EgressNode extends BaseNode {
                 mountpoint: mountpointId,
                 token: this.whepToken
             });
-
-            const createdAt = Date.now();
 
             // Salva in memoria
             this.mountpoints.set(sessionId, {
@@ -280,7 +282,7 @@ export class EgressNode extends BaseNode {
                 janusVideoPort: videoPort,
                 endpoint,
                 active: true,
-                createdAt
+                createdAt: Date.now()
             });
 
             // Salva su Redis
@@ -291,7 +293,7 @@ export class EgressNode extends BaseNode {
                 videoSsrc,
                 janusAudioPort: audioPort,
                 janusVideoPort: videoPort,
-                createdAt
+                createdAt: Date.now()
             });
 
             // console.log(`[${this.nodeId}] Mountpoint created: ${sessionId}`);
@@ -314,7 +316,7 @@ export class EgressNode extends BaseNode {
 
                 // Rollback: rimuovi mountpoint
                 this.mountpoints.delete(sessionId);
-                this.portPool.release(audioPort, videoPort);
+                // this.portPool.release(audioPort, videoPort);
                 await destroyJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId);
 
                 throw new Error(`Failed to configure forwarder: ${err.message}`);
@@ -390,7 +392,7 @@ export class EgressNode extends BaseNode {
             }
 
             // Rilascia porte
-            this.portPool.release(janusAudioPort, janusVideoPort);
+            // this.portPool.release(janusAudioPort, janusVideoPort);
 
             // Rimuovi da memoria
             this.mountpoints.delete(sessionId);
@@ -476,36 +478,42 @@ export class EgressNode extends BaseNode {
             const mountpointId = parseInt(mountpointData.mountpointId);
             const audioSsrc = parseInt(mountpointData.audioSsrc);
             const videoSsrc = parseInt(mountpointData.videoSsrc);
-            const audioPort = parseInt(mountpointData.janusAudioPort);
-            const videoPort = parseInt(mountpointData.janusVideoPort);
+
+            // janus quasi sicuramente assegnerà porte nuove
+            let audioPort = parseInt(mountpointData.janusAudioPort);
+            let videoPort = parseInt(mountpointData.janusVideoPort);
 
             // console.log(`[${this.nodeId}] Reusing existing ports: ${audioPort}, ${videoPort}`);
 
             // mountpoint Janus già esiste
             // porte allocate
-            this.portPool.markAsAllocated(audioPort, videoPort);
+            // this.portPool.markAsAllocated(audioPort, videoPort);
 
+            let mountpointCreated = false;
             try {
-                await createJanusMountpoint(
+                const janusResponse = await createJanusMountpoint(
                     this.janusStreaming,
                     this.nodeId,
                     mountpointId,
-                    audioPort,
-                    videoPort,
                     this.mountpointSecret
                 );
+
+                audioPort = janusResponse.allocatedPorts.audio;
+                videoPort = janusResponse.allocatedPorts.video;
+                mountpointCreated = true;
+
                 console.log(`[${this.nodeId}] Mountpoint ${mountpointId} created on Janus`);
             } catch (err) {
                 // ignora errore
                 if (err.message && err.message.includes('already exists')) {
                     console.log(`[${this.nodeId}] Mountpoint ${mountpointId} already exists on Janus`);
                 } else {
-                    this.portPool.release(audioPort, videoPort);
+                    // this.portPool.release(audioPort, videoPort);
                     throw err;
                 }
             }
 
-            // Ricrea solo WHEP endpoint
+            // Ricrea WHEP endpoint
             const endpoint = this.whepServer.createEndpoint({
                 id: sessionId,
                 mountpoint: mountpointId,
@@ -513,8 +521,9 @@ export class EgressNode extends BaseNode {
             });
 
             // sovrascrivi in memoria
-            this.mountpoints.set(sessionId, {
+            const mountpoint = {
                 sessionId,
+                treeId: this.treeId,
                 mountpointId,
                 audioSsrc,
                 videoSsrc,
@@ -522,8 +531,15 @@ export class EgressNode extends BaseNode {
                 janusVideoPort: videoPort,
                 endpoint,
                 active: true,
-                createdAt: parseInt(mountpointData.createdAt)
-            });
+                createdAt: parseInt(mountpointData.createdAt) || Date.now()
+            };
+
+            this.mountpoints.set(sessionId, mountpoint);
+
+            // Aggiorna Redis
+            if (mountpointCreated) {
+                await saveMountpointToRedis(this.redis, this.treeId, this.nodeId, mountpoint);
+            }
 
             // ricrea mapping nel forwarder C
             const command = `ADD ${sessionId} ${audioSsrc} ${videoSsrc} ${audioPort} ${videoPort}`;
@@ -604,14 +620,14 @@ export class EgressNode extends BaseNode {
         });
 
         // GET /portpool
-        this.app.get('/portpool', (req, res) => {
-            try {
-                res.json(this.portPool.getStats());
-            } catch (error) {
-                console.error(`[${this.nodeId}] Get portpool error:`, error.message);
-                res.status(500).json({ error: error.message });
-            }
-        });
+        // this.app.get('/portpool', (req, res) => {
+        //     try {
+        //         res.json(this.portPool.getStats());
+        //     } catch (error) {
+        //         console.error(`[${this.nodeId}] Get portpool error:`, error.message);
+        //         res.status(500).json({ error: error.message });
+        //     }
+        // });
         // GET /forwarder
         this.app.get('/forwarder', async (req, res) => {
             try {
@@ -679,8 +695,8 @@ export class EgressNode extends BaseNode {
             mountpoints: {
                 active: activeCount,
                 list: this.getAllMountpoints()
-            },
-            portPool: this.portPool.getStats()
+            }
+            // portPool: this.portPool.getStats()
         };
     }
 }

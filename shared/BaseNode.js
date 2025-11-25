@@ -58,11 +58,6 @@ export class BaseNode {
     //     basePath: '/whep',             // Base path per WHEP endpoints
     //     token: 'verysecret'            // Token autenticazione viewer         
     //   },
-    //
-    //   // PORT POOL (SOLO EGRESS NODE)
-    //   portPoolBase: 6000,              // Prima porta del pool
-    //   portPoolSize: 100                // Numero porte disponibili
-    // }
 
     this.treeId = config.treeId || (nodeType === 'injection' ? nodeId : null);
     this.host = config.host || 'localhost';
