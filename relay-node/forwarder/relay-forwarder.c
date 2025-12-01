@@ -395,7 +395,7 @@ void on_audio_pad_added(GstElement *demux, guint ssrc, GstPad *pad, gpointer use
     SessionRoute *session = find_session_by_audio_ssrc((int)ssrc);
 
     if (!session) {
-        printf("No route configured for audio SSRC %u - pad dangling\n", ssrc);
+        printf(" Audio SSRC %u not registered - attaching temporary FAKESINK\n", ssrc);
 
         // Collega temporaneamente a fakesink per evitare NOT_LINKED
         GstElement *fakesink = gst_element_factory_make("fakesink", NULL);
@@ -406,10 +406,10 @@ void on_audio_pad_added(GstElement *demux, guint ssrc, GstPad *pad, gpointer use
 
         gst_bin_add(GST_BIN(audio_pipeline), fakesink);
 
-        GstPad *sink_pad = gst_element_get_static_pad(fakesink, "sink");
+        GstPad *sinkPad = gst_element_get_static_pad(fakesink, "sink");
         // collega il pad di rtpssrcdemux al sink
-        gst_pad_link(pad, sink_pad);
-        gst_object_unref(sink_pad);
+        gst_pad_link(pad, sinkPad);
+        gst_object_unref(sinkPad);
 
         gst_element_sync_state_with_parent(fakesink);
         gst_element_set_state(fakesink, GST_STATE_PLAYING);
@@ -455,7 +455,7 @@ void on_video_pad_added(GstElement *demux, guint ssrc, GstPad *pad, gpointer use
     SessionRoute *session = find_session_by_video_ssrc((int)ssrc);
 
     if (!session) {
-        printf("No route configured for video SSRC %u - pad dangling\n", ssrc);
+        printf(" Video SSRC %u not registered - attaching temporary FAKESINK\n", ssrc);
         // Collega temporaneamente a fakesink per evitare NOT_LINKED
         GstElement *fakesink = gst_element_factory_make("fakesink", NULL);
         g_object_set(fakesink,
@@ -465,9 +465,9 @@ void on_video_pad_added(GstElement *demux, guint ssrc, GstPad *pad, gpointer use
 
         gst_bin_add(GST_BIN(video_pipeline), fakesink);
 
-        GstPad *sink_pad = gst_element_get_static_pad(fakesink, "sink");
-        gst_pad_link(pad, sink_pad);
-        gst_object_unref(sink_pad);
+        GstPad *sinkPad = gst_element_get_static_pad(fakesink, "sink");
+        gst_pad_link(pad, sinkPad);
+        gst_object_unref(sinkPad);
 
         gst_element_sync_state_with_parent(fakesink);
         gst_element_set_state(fakesink, GST_STATE_PLAYING);
@@ -616,13 +616,14 @@ void handle_add_session(const char *sessionId, int audioSsrc, int videoSsrc) {
         // Rimuovi fakesink se presente
         GstElement *fakesink = g_object_get_data(G_OBJECT(existingAudioPad), "dangling-fakesink");
         if (fakesink) {
-            GstPad *sink_pad = gst_element_get_static_pad(fakesink, "sink");
-            gst_pad_unlink(existingAudioPad, sink_pad);
-            gst_object_unref(sink_pad);
+            GstPad *sinkPad = gst_element_get_static_pad(fakesink, "sink");
+            gst_pad_unlink(existingAudioPad, sinkPad);
+            gst_object_unref(sinkPad);
 
             gst_element_set_state(fakesink, GST_STATE_NULL);
             gst_bin_remove(GST_BIN(audio_pipeline), fakesink);
             g_object_set_data(G_OBJECT(existingAudioPad), "dangling-fakesink", NULL);
+            gst_object_unref(existingAudioPad);
         }
 
         session->audioDemuxPad = existingAudioPad;
@@ -635,13 +636,14 @@ void handle_add_session(const char *sessionId, int audioSsrc, int videoSsrc) {
         // Rimuovi fakesink se presente
         GstElement *fakesink = g_object_get_data(G_OBJECT(existingVideoPad), "dangling-fakesink");
         if (fakesink) {
-            GstPad *sink_pad = gst_element_get_static_pad(fakesink, "sink");
-            gst_pad_unlink(existingVideoPad, sink_pad);
-            gst_object_unref(sink_pad);
+            GstPad *sinkPad = gst_element_get_static_pad(fakesink, "sink");
+            gst_pad_unlink(existingVideoPad, sinkPad);
+            gst_object_unref(sinkPad);
 
             gst_element_set_state(fakesink, GST_STATE_NULL);
             gst_bin_remove(GST_BIN(video_pipeline), fakesink);
             g_object_set_data(G_OBJECT(existingVideoPad), "dangling-fakesink", NULL);
+            gst_object_unref(existingVideoPad);
         }
 
         session->videoDemuxPad = existingVideoPad;

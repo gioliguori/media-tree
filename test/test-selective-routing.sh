@@ -386,14 +386,14 @@ docker exec redis redis-cli PUBLISH sessions:tree-1:relay-1 '{
 }' 
 sleep 2
 
-echo "--- CONTROLLER session-destroyed su egress-2 ---"
-docker exec redis redis-cli PUBLISH sessions:tree-1:egress-2 '{
-  "type": "session-destroyed",
-  "sessionId": "broadcaster-3",
-  "treeId": "tree-1"
-}'
-
-sleep 2
+#echo "--- CONTROLLER session-destroyed su egress-2 ---"
+#docker exec redis redis-cli PUBLISH sessions:tree-1:egress-2 '{
+#  "type": "session-destroyed",
+#  "sessionId": "broadcaster-3",
+#  "treeId": "tree-1"
+#}'
+#
+#sleep 2
 
 echo "--- VERIFICA STATO RELAY-1 ---"
 curl -s http://localhost:7071/status | jq '.forwarder.sessions.sessions[] | select(.sessionId == "broadcaster-3")'
@@ -421,24 +421,19 @@ docker exec redis redis-cli PUBLISH sessions:tree-1:relay-1 '{
   "type": "route-added",
   "sessionId": "broadcaster-3",
   "treeId": "tree-1",
-  "route": {
-    "targetId": "egress-2",
-    "host": "egress-2",
-    "audioPort": 5002,
-    "videoPort": 5004
-  }
+  "targetId": "egress-2"
 }'
 
 sleep 2
 
-echo "--- CONTROLLER session-created su egress-2 ---"
-docker exec redis redis-cli PUBLISH sessions:tree-1:egress-2 '{
-  "type": "session-created",
-  "sessionId": "broadcaster-3",
-  "audioSsrc": 5555,
-  "videoSsrc": 6666,
-  "treeId": "tree-1"
-}'
+#echo "--- CONTROLLER session-created su egress-2 ---"
+#docker exec redis redis-cli PUBLISH sessions:tree-1:egress-2 '{
+#  "type": "session-created",
+#  "sessionId": "broadcaster-3",
+#  "audioSsrc": 5555,
+#  "videoSsrc": 6666,
+#  "treeId": "tree-1"
+#}'
 
 sleep 2
 

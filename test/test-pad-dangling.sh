@@ -4,9 +4,10 @@
 # Scenario:
 # Configurazione Topologia base
 # Crea Sessione su INJECTION
-# Crea Sessione su EGRESS (perché non supporta ancora il dangling)
 # Avvia BROADCASTER -> Flusso RTP arriva al Relay (che non ha config) -> Pad Dangling
 # Configura RELAY (Late Configuration) -> Deve recuperare i pad esistenti
+# Flusso arriva a egress che non trova mapping (pad dangling)
+# Configurazione Egress (Session Created) -> RECOVERY.
 
 # Funzione per pausa
 pause() {
@@ -84,17 +85,6 @@ curl -s -X POST http://localhost:7070/session \
 
 sleep 1
 
-echo "--- CONTROLLER Configura Egress-1 ---"
-docker exec redis redis-cli PUBLISH sessions:tree-1:egress-1 '{
-  "type": "session-created",
-  "sessionId": "pad-dangling",
-  "audioSsrc": 5555,
-  "videoSsrc": 6666,
-  "treeId": "tree-1"
-}'
-
-sleep 2
-
 echo ""
 echo "FASE 2: AVVIO BROADCASTER (RTP FLOW)"
 echo ""
@@ -142,6 +132,20 @@ curl -s http://localhost:7071/status | jq '.forwarder.sessions'
 
 echo ""
 echo "'audioTeeReady' e 'videoTeeReady' devono essere true."
+
+pause
+
+echo "--- CONTROLLER Configura Egress-1 ---"
+docker exec redis redis-cli PUBLISH sessions:tree-1:egress-1 '{
+  "type": "session-created",
+  "sessionId": "pad-dangling",
+  "audioSsrc": 5555,
+  "videoSsrc": 6666,
+  "treeId": "tree-1"
+}'
+
+sleep 2
+
 
 echo ""
 echo "--- Mountpoint Egress-1 ---"
