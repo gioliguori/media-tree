@@ -29,14 +29,21 @@ export class RelayForwarderManager {
         // Counter ID comandi
         this.commandId = 0;
 
-        // Callback per sync state con destinations
-        this.syncCallback = config.syncCallback || null;
+        // Callback per recovery
+        this.forwarderRecoveryCallback = config.forwarderRecoveryCallback || null;
     }
 
     async startForwarder() {
         console.log(`[${this.nodeId}] Starting forwarder...`);
         console.log(`[${this.nodeId}] Socket: ${this.socketPath}`);
         console.log(`[${this.nodeId}] Ports: audio=${this.rtpAudioPort} video=${this.rtpVideoPort}`);
+
+
+        try {
+            await fs.unlink(this.socketPath);
+        } catch (err) {
+            // Ignora errore (primo avvio o shutdown pulito)
+        }
 
         // spawn (path dell'eseguibile, [argomenti], opzioni) 
         this.forwarderProcess = spawn(this.forwarderPath, [
@@ -243,7 +250,6 @@ export class RelayForwarderManager {
         }
     }
 
-    // @param {string} cmd - Comando (es: "PING", "ADD relay-2 5002 5004")
     async sendCommand(cmd) {
         if (!this.isForwarderReady) {
             throw new Error('Forwarder not ready');
@@ -277,73 +283,96 @@ export class RelayForwarderManager {
         });
     }
 
-    async syncForwarder() {
-        // Sincronizza stato in memoria con forwarder C
-        // console.log(`[${this.nodeId}] Syncing with forwarder...`);
+    /**
+     * Aggiungi una session al forwarder
+     * @param {string} sessionId - ID della session (es: "broadcaster-1")
+     * @param {number} audioSsrc - SSRC audio (es: 1111)
+     * @param {number} videoSsrc - SSRC video (es: 2222)
+     */
+    async addSession(sessionId, audioSsrc, videoSsrc) {
+        const cmd = `ADD_SESSION ${sessionId} ${audioSsrc} ${videoSsrc}`;
+        console.log(`[${this.nodeId}] Adding session: ${sessionId} (audio=${audioSsrc}, video=${videoSsrc})`);
 
-        try {
-            // Ottieni stato attuale dal forwarder
-            const forwarderState = await this.listDestinations();
-            if (!forwarderState) {
-                console.error(`[${this.nodeId}] Cannot sync: forwarder LIST failed`);
-                return;
-            }
-            // Parse delle destinazioni dal forwarder
-            // Formato: "AUDIO: host1:port1,host2:port2\nVIDEO: host1:port1,host2:port2" non va bene
-            const forwarderDestinations = this.parseDestinations(forwarderState);
+        const response = await this.sendCommand(cmd);
 
-            // Usa callback per ottenere destinations da RelayNode
-            await this.syncCallback(forwarderDestinations);
-
-            // console.log(`[${this.nodeId}] Sync completed`);
-
-        } catch (err) {
-            console.error(`[${this.nodeId}] Sync error: `, err.message);
+        if (response !== 'OK') {
+            throw new Error(`ADD_SESSION failed: ${response}`);
         }
+
+        console.log(`[${this.nodeId}] Session ${sessionId} added`);
     }
 
-    // Parse della risposta LIST
-    // Input: "AUDIO: host1:port1,host2:port2\nVIDEO: host1:port1,host2:port2"
-    // Output: Set di "host:audioPort:videoPort"
-    // serve per sync
-    parseDestinations(response) {
-        const destinations = new Set();
+    /**
+     * Rimuovi una session dal forwarder
+     * @param {string} sessionId - ID della session
+     */
+    async removeSession(sessionId) {
+        const cmd = `REMOVE_SESSION ${sessionId}`;
+        console.log(`[${this.nodeId}] Removing session: ${sessionId}`);
 
-        const lines = response.split('\n');
-        let audioDestinations = [];
-        let videoDestinations = [];
+        const response = await this.sendCommand(cmd);
 
-        for (const line of lines) {
-            if (line.startsWith('AUDIO: ')) {
-                const clients = line.substring(7).trim(); // Rimuovi "AUDIO: "
-                if (clients && clients !== '(none)') {
-                    audioDestinations = clients.split(',').map(c => c.trim());
-                }
-            } else if (line.startsWith('VIDEO: ')) {
-                const clients = line.substring(7).trim(); // Rimuovi "VIDEO: "
-                if (clients && clients !== '(none)') {
-                    videoDestinations = clients.split(',').map(c => c.trim());
-                }
-            }
+        if (response !== 'OK') {
+            throw new Error(`REMOVE_SESSION failed: ${response}`);
         }
 
-        // Le destinazioni devono essere presenti sia in audio che video
-        // chiave unica: "host:audioPort:videoPort" così il comando ADD/REMOVE la accetta
-        for (const audioDest of audioDestinations) {
-            const [audioHost, audioPort] = audioDest.split(':');
+        console.log(`[${this.nodeId}] Session ${sessionId} removed`);
+    }
 
-            // Trova video corrispondente (stesso host)
-            for (const videoDest of videoDestinations) {
-                const [videoHost, videoPort] = videoDest.split(':');
+    /**
+     * Aggiungi una route (destination) per una session
+     * @param {string} sessionId - ID della session
+     * @param {string} targetId - ID del target (es: "egress-1")
+     * @param {string} host - Hostname/IP del target
+     * @param {number} audioPort - Porta UDP audio
+     * @param {number} videoPort - Porta UDP video
+     */
+    async addRoute(sessionId, targetId, host, audioPort, videoPort) {
+        const cmd = `ADD_ROUTE ${sessionId} ${targetId} ${host} ${audioPort} ${videoPort}`;
+        console.log(`[${this.nodeId}] Adding route: ${sessionId} -> ${targetId} (${host}:${audioPort}/${videoPort})`);
 
-                if (audioHost === videoHost) {
-                    // Aggiungi destination completa
-                    destinations.add(`${audioHost}:${audioPort}:${videoPort}`);
-                }
-            }
+        const response = await this.sendCommand(cmd);
+
+        if (response !== 'OK') {
+            throw new Error(`ADD_ROUTE failed: ${response}`);
         }
 
-        return destinations;
+        console.log(`[${this.nodeId}] Route added: ${sessionId} -> ${targetId}`);
+    }
+
+    /**
+     * Rimuovi una route per una session
+     * @param {string} sessionId - ID della session
+     * @param {string} targetId - ID del target da rimuovere
+     */
+    async removeRoute(sessionId, targetId) {
+        const cmd = `REMOVE_ROUTE ${sessionId} ${targetId}`;
+        console.log(`[${this.nodeId}] Removing route: ${sessionId} -> ${targetId}`);
+
+        const response = await this.sendCommand(cmd);
+
+        if (response !== 'OK') {
+            throw new Error(`REMOVE_ROUTE failed: ${response}`);
+        }
+
+        console.log(`[${this.nodeId}] Route removed: ${sessionId} -> ${targetId}`);
+    }
+
+    /**
+     * Ottieni lo stato completo del forwarder (sessions e route)
+     * @returns {Object} - { sessions: [{sessionId, audioSsrc, videoSsrc, targetCount, targets: [...]}] }
+     */
+    async listSessions() {
+        const response = await this.sendCommand('LIST');
+
+        try {
+            const parsed = JSON.parse(response);
+            return parsed;
+        } catch (err) {
+            console.error(`[${this.nodeId}] Failed to parse LIST response:`, err.message);
+            console.error(`[${this.nodeId}] Raw response:`, response);
+            return { sessions: [] };
+        }
     }
 
     // HEALTH CHECK
@@ -356,12 +385,9 @@ export class RelayForwarderManager {
                 const response = await this.sendCommand('PING');
 
                 // Verifica risposta
-                if (response !== 'PONG') {
+                if (response !== 'PONG')
                     console.warn(`[${this.nodeId}] Unexpected PING response: ${response}`);
-                }
 
-                // Sincronizzazione
-                await this.syncForwarder();
             } catch (err) {
                 // PING fallito
                 console.error(`[${this.nodeId}] Health check failed:`, err.message);
@@ -377,15 +403,15 @@ export class RelayForwarderManager {
 
                     await this.startForwarder();
 
-                    // Sincronizzazione dopo restart
-                    await this.syncForwarder();
+                    // Recovery dopo restart
+                    await this.forwarderRecoveryCallback();
 
                     console.log(`[${this.nodeId}] Forwarder recovered successfully`);
                 } catch (respawnErr) {
                     console.error(`[${this.nodeId}] Respawn failed:`, respawnErr.message);
                 }
             }
-        }, 120000);  // 2 minuti
+        }, 30000);  // 30 sec
     }
 
     stopHealthCheck() {
@@ -396,15 +422,6 @@ export class RelayForwarderManager {
         }
     }
 
-    async listDestinations() {
-        try {
-            const response = await this.sendCommand('LIST');
-            return response;
-        } catch (err) {
-            console.error(`[${this.nodeId}] Failed to list destinations: `, err.message);
-            return null;
-        }
-    }
 
     async shutdown() {
         // Chiudi socket

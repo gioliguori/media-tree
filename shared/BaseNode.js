@@ -80,7 +80,6 @@ export class BaseNode {
     this.children = [];
 
     this.isStopping = false;
-    this.pipelineHealth = null;
 
     this.app.use(express.json());
   }
@@ -154,7 +153,10 @@ export class BaseNode {
     });
 
     // Client Pub/Sub
-    this.subscriber = this.redis.duplicate();
+    this.subscriber = this.redis.duplicate({
+      enableReadyCheck: false,
+      maxRetriesPerRequest: null
+    });
 
     this.subscriber.on('error', (err) => {
       console.error(`[${this.nodeId}] Subscriber error:`, err.message);
@@ -171,18 +173,13 @@ export class BaseNode {
   }
   // Setup Pub/Sub
   async setupPubSub() {
-    // Subscribe a canali topology
+    // Subscribe a canali
     const channels = [
       `topology:${this.treeId}:${this.nodeId}`,  // eventi specifici nodo
-      `topology:${this.treeId}`,                  // eventi globali tree
+      `topology:${this.treeId}`,
+      `sessions:${this.treeId}:${this.nodeId}`,
+      `sessions:${this.treeId}`
     ];
-
-    if (this.nodeType === 'injection' || this.nodeType === 'egress') {
-      channels.push(`sessions:${this.treeId}:${this.nodeId}`);
-    }
-    if (this.nodeType === 'egress') {
-      channels.push(`sessions:${this.treeId}`);
-    }
 
     await this.subscriber.subscribe(...channels);
 
@@ -202,7 +199,7 @@ export class BaseNode {
 
   async registerNode() {
     await this.redis.hset(`tree:${this.treeId}:node:${this.nodeId}`, {          //  hset setta come hash redis e non come json 
-      nodeId: this.nodeId,                                  //  dovrebbe essere un'azione atomica quindi piu performante (boh)
+      nodeId: this.nodeId,                                                      //  dovrebbe essere un'azione atomica quindi piu performante (boh)
       type: this.nodeType,
       treeId: this.treeId,
       host: this.host,
@@ -232,7 +229,7 @@ export class BaseNode {
 
   // TOPOLOGY
 
-  // Handler eventi Pub/Sub
+  // Handler eventi topologia
   async handleTopologyEvent(channel, message) {
     let event;
 
@@ -247,21 +244,18 @@ export class BaseNode {
 
     switch (event.type) {
       case 'parent-changed':
-        // Solo se evento per questo nodo
         if (event.nodeId === this.nodeId) {
           await this.handleParentChangedEvent(event);
         }
         break;
 
       case 'child-added':
-        // Solo se evento per questo nodo
         if (event.nodeId === this.nodeId) {
           await this.handleChildAddedEvent(event);
         }
         break;
 
       case 'child-removed':
-        // Solo se evento per questo nodo
         if (event.nodeId === this.nodeId) {
           await this.handleChildRemovedEvent(event);
         }
@@ -316,6 +310,7 @@ export class BaseNode {
       console.error(`[${this.nodeId}] Topology update error:`, error.message);
     }
   }
+
   // handler eventi sessione
   async handleSessionEvent(channel, message) {
     let event;
@@ -335,6 +330,14 @@ export class BaseNode {
 
       case 'session-destroyed':
         await this.onSessionDestroyed(event);
+        break;
+
+      case 'route-added':
+        await this.onRouteAdded(event);
+        break;
+
+      case 'route-removed':
+        await this.onRouteRemoved(event);
         break;
 
       default:
@@ -568,11 +571,18 @@ export class BaseNode {
   }
 
   async onSessionCreated(event) {
-    // Override in egress
+    // Override in relay/egress
   }
 
   async onSessionDestroyed(event) {
-    // Override in egress
+    // Override in relay/egress
   }
 
+  async onRouteAdded(event) {
+    // Override in relay
+  }
+
+  async onRouteRemoved(event) {
+    // Override in relay
+  }
 }

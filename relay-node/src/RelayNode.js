@@ -11,7 +11,7 @@ export class RelayNode extends BaseNode {
             nodeId: this.nodeId,
             rtpAudioPort: String(this.rtp.audioPort),
             rtpVideoPort: String(this.rtp.videoPort),
-            syncCallback: this.syncForwarderState.bind(this)
+            forwarderRecoveryCallback: this.notifyRecovery.bind(this)
         });
     }
 
@@ -19,29 +19,14 @@ export class RelayNode extends BaseNode {
     async onInitialize() {
     }
 
-    // Avviare il forwarder C -> Sincronizzare i children esistenti -> Avviare l'health check
+    // Avviare il forwarder C -> notifica al controller -> Avviare l'health check
     async onStart() {
         console.log(`[${this.nodeId}] Starting relay node...`);
 
         await this.forwarder.startForwarder();
 
-        // controlla se ci sono già children registrati in Redis
-        const childrenInfo = await this.getChildrenInfo();
-
-        if (childrenInfo.length > 0) {
-            console.log(`[${this.nodeId}] Found ${childrenInfo.length} children`);
-
-            // Aggiungi ogni child al forwarder
-            for (const child of childrenInfo) {
-                try {
-                    await this.addDestination(child);
-                } catch (err) {
-                    console.error(`[${this.nodeId}] Failed to add child ${child.nodeId}:`, err.message);
-                }
-            }
-        } else {
-            console.log(`[${this.nodeId}] No children yet`);
-        }
+        // Notifica Controller che siamo pronti
+        await this.notifyReady();
 
         // PING
         this.forwarder.startHealthCheck();
@@ -49,93 +34,6 @@ export class RelayNode extends BaseNode {
         console.log(`[${this.nodeId}] Relay node ready`);
     }
 
-    // SYNC CALLBACK per RelayForwarderManager
-    // forwarderDestinations = Set di "host:audioPort:videoPort" presenti nel forwarder C
-    async syncForwarderState(forwarderDestinations) {
-        // Ottieni children da Redis
-        const childrenInfo = await this.getChildrenInfo();
-
-        // Crea Set di destinations che dovrebbero essere presenti
-        const destinations = new Set();
-        for (const child of childrenInfo) {
-            const key = `${child.host}:${child.audioPort}:${child.videoPort}`;
-            destinations.add(key);
-        }
-
-        // ADD missing destinations
-        for (const key of destinations) {
-            if (!forwarderDestinations.has(key)) {
-                const [host, audioPort, videoPort] = key.split(':');
-                console.log(`[${this.nodeId}] Adding missing destination ${key}`);
-                try {
-                    await this.forwarder.sendCommand(
-                        `ADD ${host} ${audioPort} ${videoPort}`
-                    );
-                } catch (err) {
-                    console.error(`[${this.nodeId}] Failed to add ${key}: `, err.message);
-                }
-            }
-        }
-
-        // REMOVE extra destinations
-        for (const key of forwarderDestinations) {
-            if (!destinations.has(key)) {
-                const [host, audioPort, videoPort] = key.split(':');
-                console.log(`[${this.nodeId}] Removing extra destination ${key}`);
-                try {
-                    await this.forwarder.sendCommand(
-                        `REMOVE ${host} ${audioPort} ${videoPort}`
-                    );
-                } catch (err) {
-                    console.error(`[${this.nodeId}] Failed to remove ${key}: `, err.message);
-                }
-            }
-        }
-    }
-
-    // @param {string[]} added - ID dei nuovi children
-    // @param {string[]} removed - ID dei children rimossi
-    async onChildrenChanged(added, removed) {
-        console.log(`[${this.nodeId}] children changed: +${added.length} -${removed.length}`);
-
-        if (!this.forwarder.isReady()) {
-            console.warn(`[${this.nodeId}] Forwarder not ready`);
-            return;
-        }
-
-        // AGGIUNGI NUOVI CHILDREN
-        for (const childId of added) {
-            try {
-                // Recupera info da Redis
-                const info = await this.getNodeInfo(childId);
-                if (info) {
-                    // Invia comando ADD al forwarder C
-                    await this.addDestination(info);
-                } else {
-                    console.warn(`[${this.nodeId}] Child ${childId} info not found`);
-                }
-            } catch (err) {
-                console.error(`[${this.nodeId}] Failed to add child ${childId}:`, err.message);
-            }
-        }
-
-        // RIMUOVI CHILDREN 
-        for (const childId of removed) {
-            try {
-                // Recupera info da Redis
-                const info = await this.getNodeInfo(childId);
-                if (info) {
-                    // Invia comando REMOVE al forwarder C
-                    await this.removeDestination(info);
-                } else {
-                    // Child già cancellato da Redis, non sappiamo host/porte                
-                    console.warn(`[${this.nodeId}] Cannot remove ${childId}: info not found`);
-                }
-            } catch (err) {
-                console.error(`[${this.nodeId}] Failed to remove child ${childId}:`, err.message);
-            }
-        }
-    }
 
     async onStop() {
         console.log(`[${this.nodeId}] Stopping relay node...`);
@@ -149,57 +47,225 @@ export class RelayNode extends BaseNode {
         console.log(`[${this.nodeId}] Relay node stopped`);
     }
 
-    // DESTINATION MANAGEMENT
 
-    async addDestination(child) {
-        const { nodeId, host, audioPort, videoPort } = child;
+    // SESSION EVENTS
+    /**
+     * Handler: session-created
+     * Pubblicato su: sessions:{treeId}:{nodeId}
+     * Controller invia configurazione solo ai relay coinvolti nel path
+     * 
+     * Event format:
+     * {
+     *   type: "session-created",
+     *   sessionId: "broadcaster-1",
+     *   audioSsrc: 1111,
+     *   videoSsrc: 2222,
+     *   treeId: "tree-1",
+     *   routes: [
+     *     {targetId: "egress-1", host: "egress-1", audioPort: 5002, videoPort: 5004},
+     *     {targetId: "egress-3", host: "egress-3", audioPort: 5002, videoPort: 5004}
+     *   ]
+     * }
+     */
+    async onSessionCreated(event) {
+        const { sessionId, audioSsrc, videoSsrc, treeId, routes } = event;
 
-        if (!nodeId || !host || !audioPort || !videoPort) {
-            console.error(`[${this.nodeId}] Invalid child info:`, child);
-            throw new Error('Invalid child parameters');
+        // Verifica tree
+        if (treeId !== this.treeId) {
+            console.log(`[${this.nodeId}] Wrong tree: ${treeId} !== ${this.treeId}`);
+            return;
         }
-        // Invia comando ADD al forwarder C
-        // Formato: "ADD <host> <audioPort> <videoPort>"
-        const response = await this.forwarder.sendCommand(`ADD ${host} ${audioPort} ${videoPort}`);
 
-        // Verifica risposta
-        if (response !== 'OK') {
-            throw new Error(`ADD failed: ${response}`);
+        if (!routes || routes.length === 0) {
+            console.log(`[${this.nodeId}] No route configured`);
+            return;
         }
 
-        console.log(`[${this.nodeId}] Destination added: ${nodeId} (${host}:${audioPort}/${videoPort})`);
+        try {
+            // Aggiungi session al forwarder
+            await this.forwarder.addSession(sessionId, audioSsrc, videoSsrc);
+
+            // Aggiungi tutte le route
+            for (const route of routes) {
+                await this.forwarder.addRoute(
+                    sessionId,
+                    route.targetId,
+                    route.host,
+                    route.audioPort,
+                    route.videoPort
+                );
+            }
+
+            console.log(`[${this.nodeId}] Session ${sessionId} configured`);
+
+        } catch (err) {
+            console.error(`[${this.nodeId}] Failed to configure session ${sessionId}:`, err.message);
+        }
+    }
+    /**
+     * Handler: session-destroyed
+     * Pubblicato su: sessions:{treeId}
+     * o su: sessions:{treeId}:{nodeId} (ma è raro)
+     * i nodi interessati ricevono questo evento per fare cleanup
+     * 
+     * Event format:
+     * {
+     *   type: "session-destroyed",
+     *   sessionId: "broadcaster-1",
+     *   treeId: "tree-1"
+     * }
+     */
+    async onSessionDestroyed(event) {
+        const { sessionId, treeId } = event;
+
+        // Verifica tree
+        if (treeId !== this.treeId) {
+            console.log(`[${this.nodeId}] Wrong tree: ${treeId} !== ${this.treeId}`);
+            return;
+        }
+
+        try {
+            // Rimuovi session dal forwarder (rimuove automaticamente tutte le route)
+            await this.forwarder.removeSession(sessionId);
+
+            console.log(`[${this.nodeId}] Session ${sessionId} removed`);
+
+        } catch (err) {
+            // Session potrebbe non esistere su questo relay
+            if (err.message.includes('not found')) {
+                console.log(`[${this.nodeId}] Session ${sessionId} not found (OK)`);
+            } else {
+                console.error(`[${this.nodeId}] Failed to remove session ${sessionId}:`, err.message);
+            }
+        }
+    }
+    /**
+     * Handler: route-added
+     * Pubblicato su: sessions:{treeId}:{nodeId}
+     * Controller aggiunge route
+     * 
+     * Event format:
+     * {
+     *   type: "route-added",
+     *   sessionId: "broadcaster-1",
+     *   treeId: "tree-1",
+     *   targetId
+     * }
+     */
+    async onRouteAdded(event) {
+        const { sessionId, treeId, targetId } = event;
+
+        if (treeId !== this.treeId) {
+            console.log(`[${this.nodeId}] Wrong tree: ${treeId} !== ${this.treeId}`);
+            return;
+        }
+
+        // relay ha in cache i figli quindi check potrebbe essere valido, ma il controller ha 
+        // topologia completa quindi lasciamo a lui la decisione (magari si è verificata race condition)
+        // if (!this.children.includes(targetId)) return;
+
+        const route = await this.getNodeInfo(targetId);
+        try {
+            await this.forwarder.addRoute(
+                sessionId,
+                targetId,
+                route.host,
+                route.audioPort,
+                route.videoPort
+            );
+
+            console.log(`[${this.nodeId}] Route added: ${sessionId} -> ${targetId}`);
+
+        } catch (err) {
+            console.error(`[${this.nodeId}] Failed to add route:`, err.message);
+        }
     }
 
-    async removeDestination(child) {
-        const { nodeId, host, audioPort, videoPort } = child;
-        // console.log(`[${this.nodeId}] Removing destination: ${nodeId} (${host}:${audioPort}/${videoPort})`);
-        if (!nodeId || !host || !audioPort || !videoPort) {
-            console.error(`[${this.nodeId}] Invalid child info:`, child);
-            throw new Error('Invalid child parameters');
-        }
-        // Invia comando REMOVE al forwarder C
-        // Formato: "REMOVE <host> <audioPort> <videoPort>"
-        const response = await this.forwarder.sendCommand(`REMOVE ${host} ${audioPort} ${videoPort}`);
+    /**
+     * Handler: route-removed
+     * Pubblicato su: sessions:{treeId}:{nodeId}
+     * Controller rimuove route
+     * 
+     * Event format:
+     * {
+     *   type: "route-removed",
+     *   sessionId: "broadcaster-1",
+     *   treeId: "tree-1",
+     *   targetId: "egress-1"
+     * }
+     */
+    async onRouteRemoved(event) {
+        const { sessionId, treeId, targetId } = event;
 
-        // Verifica risposta
-        if (response !== 'OK') {
-            throw new Error(`REMOVE failed: ${response}`);
+        // Verificatree
+        if (treeId !== this.treeId) {
+            console.log(`[${this.nodeId}] Wrong tree: ${treeId} !== ${this.treeId}`);
+            return;
         }
 
-        console.log(`[${this.nodeId}] Destination removed: ${nodeId} (${host}:${audioPort}/${videoPort})`);
+        // if (!this.children.includes(targetId)) return;
+
+        try {
+            await this.forwarder.removeRoute(sessionId, targetId);
+
+            console.log(`[${this.nodeId}] Route removed: ${sessionId} -> ${targetId}`);
+
+        } catch (err) {
+            console.error(`[${this.nodeId}] Failed to remove route:`, err.message);
+        }
     }
+
+    // RECOVERY & NOTIFICATIONS
+
+    /**
+     * Notifica Controller che relay è pronto (boot o dopo recovery)
+     * Controller deve re-inviare eventi session-created per tutte le session attive
+     */
+    async notifyReady() {
+        console.log(`[${this.nodeId}] Notifying Controller: relay ready`);
+
+        try {
+            await this.redis.publish('relay:ready', JSON.stringify({
+                type: 'relay-ready',
+                nodeId: this.nodeId,
+                treeId: this.treeId,
+                timestamp: Date.now()
+            }));
+        } catch (err) {
+            console.error(`[${this.nodeId}] Failed to notify ready:`, err.message);
+        }
+    }
+
+    /**
+     * Notifica Controller dopo crash/recovery forwarder
+     * Chiamato da RelayForwarderManager quando rileva crash e fa respawn
+     */
+    async notifyRecovery() {
+        console.log(`[${this.nodeId}] Notifying Controller: forwarder recovered`);
+
+        try {
+            await this.redis.publish('relay:recovery', JSON.stringify({
+                type: 'relay-recovery',
+                nodeId: this.nodeId,
+                treeId: this.treeId,
+                timestamp: Date.now()
+            }));
+        } catch (err) {
+            console.error(`[${this.nodeId}] Failed to notify recovery:`, err.message);
+        }
+    }
+
 
     async getStatus() {
         const baseStatus = await super.getStatus();
 
-        // lista delle destinazioni
-        let destinations = null;
+        // Ottieni stato forwarder
+        let forwarderSessions = null;
         try {
-            if (this.forwarder.isReady()) {
-                destinations = await this.forwarder.listDestinations();
-            }
+            if (this.forwarder.isReady())
+                forwarderSessions = await this.forwarder.listSessions();
         } catch (err) {
-            console.error(`[${this.nodeId}] Failed to get destinations:`, err.message);
+            console.error(`[${this.nodeId}] Failed to get sessions:`, err.message);
         }
         const forwarderStatus = this.forwarder.getStatus();
         return {
@@ -208,7 +274,7 @@ export class RelayNode extends BaseNode {
                 running: forwarderStatus.running,
                 processAlive: forwarderStatus.processAlive,
                 socketConnected: forwarderStatus.socketConnected,
-                destinations
+                sessions: forwarderSessions
             }
         };
     }

@@ -96,6 +96,64 @@ void cleanup_and_exit(int sig) {
     exit(0);
 }
 
+// HELPER: Collega un pad esistente alla destinazione (Queue + UDPSink)
+int link_pad_to_target(GstElement *pipeline, GstPad *pad, SsrcMapping *mapping) {
+
+    GstElement *queue = gst_element_factory_make("queue", NULL);
+    GstElement *sink = gst_element_factory_make("udpsink", NULL);
+
+    if (!queue || !sink) {
+        fprintf(stderr, " Failed to create queue/sink for SSRC %d\n", mapping->ssrc);
+        if (queue)
+            gst_object_unref(queue);
+        if (sink)
+            gst_object_unref(sink);
+        return -1;
+    }
+
+    // Configura UDPSink
+    g_object_set(sink,
+                 "host", destination_host,
+                 "port", mapping->destinationPort,
+                 "sync", FALSE,
+                 "async", FALSE,
+                 NULL);
+
+    // Aggiungi alla pipeline
+    gst_bin_add_many(GST_BIN(pipeline), queue, sink, NULL);
+
+    // Pad (Demux) -> Queue
+    GstPad *queueSinkPad = gst_element_get_static_pad(queue, "sink");
+    GstPadLinkReturn linkRet = gst_pad_link(pad, queueSinkPad);
+    gst_object_unref(queueSinkPad);
+
+    if (linkRet != GST_PAD_LINK_OK) {
+        fprintf(stderr, " Failed to link demux pad to queue for SSRC %d\n", mapping->ssrc);
+        gst_bin_remove_many(GST_BIN(pipeline), queue, sink, NULL);
+        return -1;
+    }
+
+    // Queue -> Sink
+    if (!gst_element_link(queue, sink)) {
+        fprintf(stderr, " Failed to link queue to sink for SSRC %d\n", mapping->ssrc);
+        gst_bin_remove_many(GST_BIN(pipeline), queue, sink, NULL);
+        return -1;
+    }
+
+    // Sync State e PLAYING esplicito (essenziale per elementi aggiunti a runtime)
+    gst_element_sync_state_with_parent(queue);
+    gst_element_sync_state_with_parent(sink);
+    gst_element_set_state(queue, GST_STATE_PLAYING);
+    gst_element_set_state(sink, GST_STATE_PLAYING);
+
+    // Salva riferimenti nel mapping esistente
+    mapping->queue = queue;
+    mapping->udpsink = sink;
+    mapping->demuxPad = pad;
+
+    return 0;
+}
+
 // DYNAMIC PAD CALLBACK
 // GStreamer chiama questa funzione automaticamente quando rtpssrcdemux rileva un nuovo SSRC
 // quindi rtpssrcdemux crea i pad noi dobbiamo solo collegarli con questa callback??!?
@@ -121,8 +179,27 @@ void on_audio_pad_added(GstElement *demux, guint ssrc, GstPad *pad, gpointer use
     }
 
     if (!mapping) {
-        printf(" Audio SSRC %u not registered, ignoring\n", ssrc);
-        // unlock
+        printf(" Audio SSRC %u not registered - attaching temporary FAKESINK\n", ssrc);
+
+        // Collega temporaneamente a fakesink per evitare NOT_LINKED
+        GstElement *fakesink = gst_element_factory_make("fakesink", NULL);
+        g_object_set(fakesink,
+                     "sync", FALSE,
+                     "async", FALSE,
+                     NULL);
+
+        gst_bin_add(GST_BIN(audio_pipeline), fakesink);
+
+        GstPad *sinkPad = gst_element_get_static_pad(fakesink, "sink");
+        gst_pad_link(pad, sinkPad);
+        gst_object_unref(sinkPad);
+
+        gst_element_sync_state_with_parent(fakesink);
+        gst_element_set_state(fakesink, GST_STATE_PLAYING);
+
+        // Salva fakesink nel pad per rimuoverlo dopo
+        g_object_set_data(G_OBJECT(pad), "dangling-fakesink", fakesink);
+
         pthread_mutex_unlock(&audio_mutex);
         return;
     }
@@ -130,70 +207,9 @@ void on_audio_pad_added(GstElement *demux, guint ssrc, GstPad *pad, gpointer use
     // printf(" mapping: %s -> %s:%d\n",
     //        mapping->sessionId, destination_host, mapping->destinationPort);
 
-    // Crea elementi dinamicamente
-    GstElement *queue = gst_element_factory_make("queue", NULL);
-    GstElement *sink = gst_element_factory_make("udpsink", NULL);
-
-    if (!queue || !sink) {
-        fprintf(stderr, " Failed to create queue/sink for audio SSRC %u\n", ssrc);
-        if (queue)
-            gst_object_unref(queue);
-        if (sink)
-            gst_object_unref(sink);
-        // unlock
-        pthread_mutex_unlock(&audio_mutex);
-        return;
+    if (link_pad_to_target(audio_pipeline, pad, mapping) == 0) {
+        printf(" Audio SSRC %u linked to %s:%d\n", ssrc, destination_host, mapping->destinationPort);
     }
-
-    // Config udpsink
-    g_object_set(sink,
-                 "host", destination_host,
-                 "port", mapping->destinationPort,
-                 "sync", FALSE,
-                 "async", FALSE,
-                 NULL);
-
-    // Aggiungi a pipeline
-    gst_bin_add_many(GST_BIN(audio_pipeline), queue, sink, NULL);
-
-    // Link: demux pad -> queue
-    GstPad *queue_sink_pad = gst_element_get_static_pad(queue, "sink");
-    // colleghiamo pad legato a ssrc alla sua coda
-    GstPadLinkReturn link_ret = gst_pad_link(pad, queue_sink_pad);
-    // rilasciamo riferimento a pad coda
-    gst_object_unref(queue_sink_pad);
-
-    // check
-    if (link_ret != GST_PAD_LINK_OK) {
-        fprintf(stderr, " Failed to link demux pad to queue for audio SSRC %u\n", ssrc);
-        gst_bin_remove_many(GST_BIN(audio_pipeline), queue, sink, NULL);
-        gst_object_unref(queue);
-        gst_object_unref(sink);
-        // unlock
-        pthread_mutex_unlock(&audio_mutex);
-        return;
-    }
-
-    // Link: queue -> udpsink, colleghiamo coda a uscita finale, questo è più semplice perchè rapporto 1 a 1
-    if (!gst_element_link(queue, sink)) {
-        fprintf(stderr, " Failed to link queue to sink for audio SSRC %u\n", ssrc);
-        gst_bin_remove_many(GST_BIN(audio_pipeline), queue, sink, NULL);
-        gst_object_unref(queue);
-        gst_object_unref(sink);
-        // unlock
-        pthread_mutex_unlock(&audio_mutex);
-        return;
-    }
-
-    // Sincronizza stato con parent pipeline
-    gst_element_sync_state_with_parent(queue);
-    gst_element_sync_state_with_parent(sink);
-
-    // Salva riferimenti nel mapping
-    mapping->queue = queue;
-    mapping->udpsink = sink;
-    mapping->demuxPad = pad;
-
     // unlock
     pthread_mutex_unlock(&audio_mutex);
 
@@ -221,78 +237,33 @@ void on_video_pad_added(GstElement *demux, guint ssrc, GstPad *pad, gpointer use
     }
 
     if (!mapping) {
-        printf(" Video SSRC %u not registered, ignoring\n", ssrc);
-        // unlock
+        printf(" Video SSRC %u not registered - attaching temporary FAKESINK\n", ssrc);
+
+        GstElement *fakesink = gst_element_factory_make("fakesink", NULL);
+        g_object_set(fakesink, "sync", FALSE, "async", FALSE, NULL);
+
+        gst_bin_add(GST_BIN(video_pipeline), fakesink);
+
+        // Collega temporaneamente a fakesink per evitare NOT_LINKED
+        GstPad *sinkPad = gst_element_get_static_pad(fakesink, "sink");
+        gst_pad_link(pad, sinkPad);
+        gst_object_unref(sinkPad);
+
+        gst_element_sync_state_with_parent(fakesink);
+        gst_element_set_state(fakesink, GST_STATE_PLAYING);
+        // Salva fakesink nel pad per rimuoverlo dopo
+        g_object_set_data(G_OBJECT(pad), "dangling-fakesink", fakesink);
+
         pthread_mutex_unlock(&video_mutex);
         return;
     }
 
-    printf(" Found mapping: %s -> %s:%d\n",
-           mapping->sessionId, destination_host, mapping->destinationPort);
+    // printf(" Found mapping: %s -> %s:%d\n",
+    //        mapping->sessionId, destination_host, mapping->destinationPort);
 
-    // Crea elementi dinamicamente
-    GstElement *queue = gst_element_factory_make("queue", NULL);
-    GstElement *sink = gst_element_factory_make("udpsink", NULL);
-
-    if (!queue || !sink) {
-        fprintf(stderr, " Failed to create queue/sink for video SSRC %u\n", ssrc);
-        if (queue)
-            gst_object_unref(queue);
-        if (sink)
-            gst_object_unref(sink);
-        // unlock
-        pthread_mutex_unlock(&video_mutex);
-        return;
+    if (link_pad_to_target(video_pipeline, pad, mapping) == 0) {
+        printf(" Video SSRC %u linked to %s:%d\n", ssrc, destination_host, mapping->destinationPort);
     }
-
-    // Config udpsink
-    g_object_set(sink,
-                 "host", destination_host,
-                 "port", mapping->destinationPort,
-                 "sync", FALSE,
-                 "async", FALSE,
-                 NULL);
-
-    // Aggiungi alla pipeline
-    gst_bin_add_many(GST_BIN(video_pipeline), queue, sink, NULL);
-
-    // Link: demux pad -> queue
-    GstPad *queue_sink_pad = gst_element_get_static_pad(queue, "sink");
-    GstPadLinkReturn link_ret = gst_pad_link(pad, queue_sink_pad);
-    gst_object_unref(queue_sink_pad);
-
-    if (link_ret != GST_PAD_LINK_OK) {
-        fprintf(stderr, " Failed to link demux pad to queue for video SSRC %u\n", ssrc);
-        gst_bin_remove_many(GST_BIN(video_pipeline), queue, sink, NULL);
-        gst_object_unref(queue);
-        gst_object_unref(sink);
-
-        // unlock
-        pthread_mutex_unlock(&video_mutex);
-        return;
-    }
-
-    // Link: queue -> udpsink
-    if (!gst_element_link(queue, sink)) {
-        fprintf(stderr, " Failed to link queue to sink for video SSRC %u\n", ssrc);
-        gst_bin_remove_many(GST_BIN(video_pipeline), queue, sink, NULL);
-        gst_object_unref(queue);
-        gst_object_unref(sink);
-
-        // unlock
-        pthread_mutex_unlock(&video_mutex);
-        return;
-    }
-
-    // Sincronizza stato con parent
-    gst_element_sync_state_with_parent(queue);
-    gst_element_sync_state_with_parent(sink);
-
-    // Salva riferimenti nel mapping
-    mapping->queue = queue;
-    mapping->udpsink = sink;
-    mapping->demuxPad = pad;
-
     // unlock
     pthread_mutex_unlock(&video_mutex);
     printf(" Video SSRC %u linked to %s:%d\n",
@@ -321,8 +292,7 @@ int setup_pipelines(int audio_port, int video_port, const char *dest_host) {
     // Config udpsrc
     g_object_set(audio_src,
                  "port", audio_port,
-                 "caps", gst_caps_from_string("application/x-rtp,media=audio,encoding-name=OPUS,clock-rate=48000,payload=111"),
-                 // demux deve poter leggere header
+                 "caps", gst_caps_from_string("application/x-rtp"),
                  NULL);
 
     // Connetti callback per dynamic pad
@@ -356,8 +326,7 @@ int setup_pipelines(int audio_port, int video_port, const char *dest_host) {
     // Config udpsrc
     g_object_set(video_src,
                  "port", video_port,
-                 "caps", gst_caps_from_string("application/x-rtp,media=video,encoding-name=VP8,clock-rate=90000,payload=96"),
-                 // demux deve poter leggere header
+                 "caps", gst_caps_from_string("application/x-rtp"),
                  NULL);
 
     // Connetti callback per dynamic pad
@@ -376,8 +345,6 @@ int setup_pipelines(int audio_port, int video_port, const char *dest_host) {
     gst_element_set_state(video_pipeline, GST_STATE_PAUSED);
 
     printf(" Video pipeline ready (port %d) with dynamic demux\n", video_port);
-    printf(" Pipelines PLAYING\n");
-
     return 0;
 }
 
@@ -394,58 +361,91 @@ void handle_add(const char *sessionId, int audioSsrc, int videoSsrc,
     pthread_mutex_lock(&audio_mutex);
 
     // Verifica limiti
-    if (audio_count >= MAX_MOUNTPOINTS) {
+    if (audio_count < MAX_MOUNTPOINTS) {
+        // Registra mapping audio
+        SsrcMapping *audio_map = &audio_mappings[audio_count];
+        strncpy(audio_map->sessionId, sessionId, sizeof(audio_map->sessionId) - 1);
+        audio_map->ssrc = audioSsrc;
+        audio_map->destinationPort = audioPort;
+        audio_map->queue = NULL;
+        audio_map->udpsink = NULL;
+        audio_map->demuxPad = NULL;
+        audio_map->active = 1;
+        audio_count++;
+
+        gchar padName[64];
+        snprintf(padName, sizeof(padName), "src_%u", audioSsrc);
+        GstPad *existingPad = gst_element_get_static_pad(audio_demux, padName);
+        if (existingPad) {
+            GstElement *fakesink = g_object_get_data(G_OBJECT(existingPad), "dangling-fakesink");
+            if (fakesink) {
+                GstPad *sinkPad = gst_element_get_static_pad(fakesink, "sink");
+                gst_pad_unlink(existingPad, sinkPad);
+                gst_object_unref(sinkPad);
+
+                gst_element_set_state(fakesink, GST_STATE_NULL);
+                gst_bin_remove(GST_BIN(audio_pipeline), fakesink);
+                g_object_set_data(G_OBJECT(existingPad), "dangling-fakesink", NULL);
+            }
+            link_pad_to_target(audio_pipeline, existingPad, audio_map);
+            gst_object_unref(existingPad);
+        }
+    } else {
         fprintf(stderr, " Max mountpoints reached (audio)\n");
         write(client_connection, "ERROR: Max mountpoints\n", 23);
-
-        // unlock
-        pthread_mutex_unlock(&audio_mutex);
         return;
     }
-
-    // Registra mapping audio
-    SsrcMapping *audio_map = &audio_mappings[audio_count];
-    strncpy(audio_map->sessionId, sessionId, sizeof(audio_map->sessionId) - 1);
-    audio_map->ssrc = audioSsrc;
-    audio_map->destinationPort = audioPort;
-    audio_map->queue = NULL;
-    audio_map->udpsink = NULL;
-    audio_map->demuxPad = NULL;
-    audio_map->active = 1;
-    audio_count++;
-
     // unlock
     pthread_mutex_unlock(&audio_mutex);
 
     // lock
     pthread_mutex_lock(&video_mutex);
 
-    if (video_count >= MAX_MOUNTPOINTS) {
-        fprintf(stderr, " Max mountpoints reached (video)\n");
+    if (video_count < MAX_MOUNTPOINTS) {
+        // Registra mapping video
+        SsrcMapping *video_map = &video_mappings[video_count];
+        strncpy(video_map->sessionId, sessionId, sizeof(video_map->sessionId) - 1);
+        video_map->ssrc = videoSsrc;
+        video_map->destinationPort = videoPort;
+        video_map->queue = NULL;
+        video_map->udpsink = NULL;
+        video_map->demuxPad = NULL;
+        video_map->active = 1;
+        video_count++;
 
-        // unlock
+        // Check dangling
+        char padName[64];
+        snprintf(padName, 64, "src_%u", videoSsrc);
+        GstPad *existingPad = gst_element_get_static_pad(video_demux, padName);
+        if (existingPad) {
+            printf(" Found existing DANGLING video pad - recovering\n");
+            // Rimuovi fakesink se presente
+            GstElement *fakesink = g_object_get_data(G_OBJECT(existingPad), "dangling-fakesink");
+            if (fakesink) {
+                GstPad *sinkPad = gst_element_get_static_pad(fakesink, "sink");
+                gst_pad_unlink(existingPad, sinkPad);
+                gst_object_unref(sinkPad);
+                gst_element_set_state(fakesink, GST_STATE_NULL);
+                gst_bin_remove(GST_BIN(video_pipeline), fakesink);
+                g_object_set_data(G_OBJECT(existingPad), "dangling-fakesink", NULL);
+            }
+
+            link_pad_to_target(video_pipeline, existingPad, video_map);
+            gst_object_unref(existingPad);
+        }
         pthread_mutex_unlock(&video_mutex);
+    } else {
+        // in teoria non entra mai qui
+        fprintf(stderr, " Max mountpoints reached (video)\n");
         write(client_connection, "ERROR: Max mountpoints\n", 23);
         return;
     }
 
-    // Registra mapping video
-    SsrcMapping *video_map = &video_mappings[video_count];
-    strncpy(video_map->sessionId, sessionId, sizeof(video_map->sessionId) - 1);
-    video_map->ssrc = videoSsrc;
-    video_map->destinationPort = videoPort;
-    video_map->queue = NULL;
-    video_map->udpsink = NULL;
-    video_map->demuxPad = NULL;
-    video_map->active = 1;
-    video_count++;
-
     // unlock
     pthread_mutex_unlock(&video_mutex);
-
     printf(" Mountpoint registered (waiting for RTP...)\n");
-
     write(client_connection, "OK\n", 3);
+    return;
 }
 
 void handle_remove(const char *sessionId) {

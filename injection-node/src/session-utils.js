@@ -15,13 +15,16 @@ export async function saveSessionToRedis(redis, treeId, nodeId, sessionData) {
     });
 
     await redis.sadd(`sessions:${treeId}`, sessionId);
+
+    await redis.sadd(`tree:${treeId}:sessions:node:${nodeId}`, sessionId);
 }
 
-export async function deactivateSessionInRedis(redis, treeId, sessionId) {
+export async function deactivateSessionInRedis(redis, treeId, nodeId, sessionId) {
     await redis.hset(`tree:${treeId}:session:${sessionId}`, 'active', 'false');
     await redis.hset(`tree:${treeId}:session:${sessionId}`, 'updatedAt', String(Date.now()));
 
     await redis.srem(`sessions:${treeId}`, sessionId);
+    await redis.srem(`tree:${treeId}:sessions:node:${nodeId}`, sessionId);
 
     // TTL 24 ore
     await redis.expire(`tree:${treeId}:session:${sessionId}`, 86400);

@@ -212,7 +212,7 @@ export class InjectionNode extends BaseNode {
             const { roomId, endpoint } = session;
 
             // inattiva su Redis
-            await deactivateSessionInRedis(this.redis, this.treeId, sessionId);
+            await deactivateSessionInRedis(this.redis, this.treeId, this.nodeId, sessionId);
 
             // distruggi endpoint
             try {
@@ -257,7 +257,7 @@ export class InjectionNode extends BaseNode {
         console.log(`[${this.nodeId}] Discovering existing sessions from Redis...`);
 
         try {
-            const sessionIds = await this.redis.smembers(`sessions:${this.treeId}`);
+            const sessionIds = await this.redis.smembers(`tree:${this.treeId}:sessions:node:${this.nodeId}`);
 
             if (sessionIds.length === 0) {
                 console.log(`[${this.nodeId}] No existing sessions found`);
