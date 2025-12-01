@@ -321,8 +321,7 @@ int setup_pipelines(int audio_port, int video_port, const char *dest_host) {
     // Config udpsrc
     g_object_set(audio_src,
                  "port", audio_port,
-                 "caps", gst_caps_from_string("application/x-rtp,media=audio,encoding-name=OPUS,clock-rate=48000,payload=111"),
-                 // demux deve poter leggere header
+                 "caps", gst_caps_from_string("application/x-rtp"),
                  NULL);
 
     // Connetti callback per dynamic pad
@@ -356,8 +355,7 @@ int setup_pipelines(int audio_port, int video_port, const char *dest_host) {
     // Config udpsrc
     g_object_set(video_src,
                  "port", video_port,
-                 "caps", gst_caps_from_string("application/x-rtp,media=video,encoding-name=VP8,clock-rate=90000,payload=96"),
-                 // demux deve poter leggere header
+                 "caps", gst_caps_from_string("application/x-rtp"),
                  NULL);
 
     // Connetti callback per dynamic pad
@@ -376,8 +374,6 @@ int setup_pipelines(int audio_port, int video_port, const char *dest_host) {
     gst_element_set_state(video_pipeline, GST_STATE_PAUSED);
 
     printf(" Video pipeline ready (port %d) with dynamic demux\n", video_port);
-    printf(" Pipelines PLAYING\n");
-
     return 0;
 }
 

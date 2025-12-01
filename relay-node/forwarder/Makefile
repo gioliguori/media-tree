@@ -4,7 +4,7 @@ CC = gcc
 # $(shell pkg-config ...) = path include di GStreamer
 CFLAGS = -Wall -Wextra $(shell pkg-config --cflags gstreamer-1.0)
 # librerie di gstreamer
-LIBS = $(shell pkg-config --libs gstreamer-1.0)
+LIBS = $(shell pkg-config --libs gstreamer-1.0)  -lpthread -lcjson
 
 TARGET = relay-forwarder
 SRC = relay-forwarder.c

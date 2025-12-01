@@ -426,14 +426,14 @@ export class EgressNode extends BaseNode {
 
         // console.log(`[${this.nodeId}] Discovering existing sessions for tree ${this.treeId}`);
 
-        const sessionIds = await this.redis.smembers(`sessions:${this.treeId}`);
+        const sessionIds = await this.redis.smembers(`tree:${this.treeId}:mountpoints:node:${this.nodeId}`);
 
         if (sessionIds.length === 0) {
             console.log(`[${this.nodeId}] No existing sessions found`);
             return;
         }
 
-        // console.log(`[${this.nodeId}] Found ${sessionIds.length} existing sessions`);
+        console.log(`[${this.nodeId}] Found ${sessionIds.length} existing sessions`);
 
         for (const sessionId of sessionIds) {
             const sessionData = await this.redis.hgetall(`tree:${this.treeId}:session:${sessionId}`);

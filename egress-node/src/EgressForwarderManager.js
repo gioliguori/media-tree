@@ -39,6 +39,12 @@ export class EgressForwarderManager {
         console.log(`[${this.nodeId}] Socket: ${this.socketPath}`);
         console.log(`[${this.nodeId}] Ports: audio=${this.rtpAudioPort} video=${this.rtpVideoPort}`);
 
+        try {
+            await fs.unlink(this.socketPath);
+        } catch (err) {
+            // Ignora errore (primo avvio o shutdown pulito)
+        }
+        
         // Spawn processo C
         // Argomenti: <nodeId> <audioPort> <videoPort> <destinationHost>
         this.forwarderProcess = spawn(this.forwarderPath, [
