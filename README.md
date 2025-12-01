@@ -1,4 +1,5 @@
 # media-tree
+BRANCH CON RELAY VECCHIO (MULTIUDPSINK)
 PROBLEMI 
 - Egress node (C)  
     - creazione pad ssrc funziona solo se mountpoint -> forwarding, se inviamo pacchetti prima di creare il mountpoint non funziona
