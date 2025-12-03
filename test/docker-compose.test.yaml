@@ -80,6 +80,7 @@ services:
       - NODE_HOST=injection-1
       - API_PORT=7070
       - TREE_ID=tree-1
+      - LAYER=0
       # RTP ports (for Redis registration only)
       - RTP_AUDIO_PORT=5000
       - RTP_VIDEO_PORT=5002
@@ -118,6 +119,7 @@ services:
       - NODE_HOST=relay-1
       - API_PORT=7071
       - TREE_ID=tree-1
+      - LAYER=1
       # RTP ports
       - RTP_AUDIO_PORT=5002
       - RTP_VIDEO_PORT=5004
@@ -146,6 +148,7 @@ services:
       - NODE_HOST=egress-1
       - API_PORT=7073
       - TREE_ID=tree-1
+      - LAYER=2
       # RTP Input
       - RTP_AUDIO_PORT=5002
       - RTP_VIDEO_PORT=5004
@@ -184,6 +187,7 @@ services:
       - NODE_HOST=egress-2
       - API_PORT=7074
       - TREE_ID=tree-1
+      - LAYER=2
       # RTP Input
       - RTP_AUDIO_PORT=5002
       - RTP_VIDEO_PORT=5004

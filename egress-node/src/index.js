@@ -6,6 +6,7 @@ const config = {
     host: process.env.NODE_HOST || 'localhost',
     port: parseInt(process.env.API_PORT) || 7073,
     treeId: process.env.TREE_ID,
+    layer: process.env.LAYER,
 
     // RTP config (BaseNode)
     rtp: {

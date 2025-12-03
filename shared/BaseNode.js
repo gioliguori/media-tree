@@ -17,8 +17,9 @@ export class BaseNode {
     //   host: 'injection-1',             // Hostname/IP del nodo
     //   port: 7070,                      // Porta API REST
     //   treeId: injection-1              // ID dell'albero a cui appartiene il nodo
-    //
-    //   // === RTP PORTS ===
+    //   layer: 0                         // Livello dell'albero
+    // 
+    // === RTP PORTS ===
     //   rtp: {
     //     audioPort: 5000,              // Porta UDP per RTP audio
     //     videoPort: 5002               // Porta UDP per RTP video
@@ -60,6 +61,7 @@ export class BaseNode {
     //   },
 
     this.treeId = config.treeId;
+    this.layer = config.layer || 0;
     this.host = config.host || 'localhost';
     this.port = config.port || 7070;
 
@@ -206,6 +208,7 @@ export class BaseNode {
       port: this.port,
       audioPort: this.rtp.audioPort,
       videoPort: this.rtp.videoPort,
+      layer: this.layer,
       status: 'active',
       created: Date.now()
     });
