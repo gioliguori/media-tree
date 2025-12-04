@@ -47,9 +47,9 @@ RUN git clone https://github.com/warmcat/libwebsockets.git \
     && mkdir build \
     && cd build \
     && cmake -DLWS_MAX_SMP=1 \
-           -DLWS_WITHOUT_EXTENSIONS=0 \
-           -DCMAKE_INSTALL_PREFIX:PATH=/usr \
-           -DCMAKE_C_FLAGS="-fpic" .. \
+    -DLWS_WITHOUT_EXTENSIONS=0 \
+    -DCMAKE_INSTALL_PREFIX:PATH=/usr \
+    -DCMAKE_C_FLAGS="-fpic" .. \
     && make \
     && make install \
     && cd ../.. \
@@ -70,25 +70,26 @@ RUN git clone https://github.com/meetecho/janus-gateway.git \
     && cd janus-gateway \
     && sh autogen.sh \
     && ./configure \
-        --prefix=/opt/janus \
-        --enable-websockets \
-        --enable-data-channels \
-        --enable-plugin-videoroom \
-        --disable-plugin-streaming \
-        --disable-plugin-videocall \
-        --disable-plugin-sip \
-        --disable-plugin-audiobridge \
-        --disable-plugin-recordplay \
-        --disable-plugin-textroom \
-        --disable-plugin-echotest \
-        --disable-plugin-nosip \
-        --disable-all-handlers \
-        --disable-all-loggers \
+    --prefix=/opt/janus \
+    --enable-websockets \
+    --enable-data-channels \
+    --enable-plugin-videoroom \
+    --disable-plugin-streaming \
+    --disable-plugin-videocall \
+    --disable-plugin-sip \
+    --disable-plugin-audiobridge \
+    --disable-plugin-recordplay \
+    --disable-plugin-textroom \
+    --disable-plugin-echotest \
+    --disable-plugin-nosip \
+    --disable-all-handlers \
+    --disable-all-loggers \
     && make \
     && make install \
     && cd .. \
     && rm -rf janus-gateway
 
+COPY config/*.jcfg /opt/janus/etc/janus/
 # Create log directory
 RUN mkdir -p /var/log/janus
 

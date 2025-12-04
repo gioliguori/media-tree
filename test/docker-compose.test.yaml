@@ -142,7 +142,7 @@ services:
     container_name: egress-1
     ports:
       - "7073:7073" # REST API e WHEP server
-      - "6000-6200:6000-6200/udp" # PortPool range
+      #- "6000-6200:6000-6200/udp" # PortPool range
     environment:
       - NODE_ID=egress-1
       - NODE_HOST=egress-1
@@ -154,8 +154,8 @@ services:
       - RTP_VIDEO_PORT=5004
 
       # PortPool config
-      - PORT_POOL_BASE=6000
-      - PORT_POOL_SIZE=200
+      #- PORT_POOL_BASE=6000
+      #- PORT_POOL_SIZE=200
 
       # Redis
       - REDIS_HOST=redis
@@ -181,7 +181,7 @@ services:
     container_name: egress-2
     ports:
       - "7074:7074" # REST API e WHEP server
-      - "6201-6401:6000-6200/udp" # PortPool range
+      #- "6201-6401:6000-6200/udp" # PortPool range
     environment:
       - NODE_ID=egress-2
       - NODE_HOST=egress-2
@@ -193,8 +193,8 @@ services:
       - RTP_VIDEO_PORT=5004
 
       # PortPool config
-      - PORT_POOL_BASE=6000
-      - PORT_POOL_SIZE=200
+      #- PORT_POOL_BASE=6000
+      #- PORT_POOL_SIZE=200
 
       # Redis
       - REDIS_HOST=redis

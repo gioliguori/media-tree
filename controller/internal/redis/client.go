@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"controller/internal/config"
@@ -31,4 +32,32 @@ func (c *Client) Ping(ctx context.Context) error {
 
 func (c *Client) Close() error {
 	return c.rdb.Close()
+}
+
+// GetRedisClient restituisce il client Redis nativo
+// (utile per operazioni avanzate non wrappate)
+func (c *Client) GetRedisClient() *redis.Client {
+	return c.rdb
+}
+
+// PublishJSON pubblica un evento JSON su un canale
+func (c *Client) PublishJSON(ctx context.Context, channel string, data map[string]interface{}) error {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	if err := c.rdb.Publish(ctx, channel, jsonData).Err(); err != nil {
+		return fmt.Errorf("failed to publish to %s: %w", channel, err)
+	}
+
+	return nil
+}
+
+func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
+	result, err := c.rdb.Exists(ctx, key).Result()
+	if err != nil {
+		return false, err
+	}
+	return result > 0, nil
 }

@@ -1,25 +1,33 @@
-FROM golang:1.21-alpine AS builder
-
-WORKDIR /build
-
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-w -s" \
-    -o controller \
-    ./cmd/controller
-
-FROM alpine:3.19
-
-RUN apk add --no-cache ca-certificates
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
-COPY --from=builder /build/controller .
+# Dipendenze build
+RUN apk add --no-cache git
 
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY . .
+
+# Build
+RUN CGO_ENABLED=0 GOOS=linux go build -o /controller ./cmd/controller
+
+# ============================================
+# RUNTIME STAGE
+# ============================================
+FROM alpine:3.19
+
+# INSTALLA DOCKER CLI (AGGIUNTO)
+RUN apk add --no-cache docker-cli
+
+# Copy binary
+COPY --from=builder /controller /controller
+
+# Expose API port
 EXPOSE 8080
 
-ENTRYPOINT ["/app/controller"]
+# Run
+CMD ["/controller"]
