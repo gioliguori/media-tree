@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     ninja-build \
     meson \
+    gettext-base \
     && rm -rf /var/lib/apt/lists/*
 
 # libnice (ICE support)
@@ -47,9 +48,9 @@ RUN git clone https://github.com/warmcat/libwebsockets.git \
     && mkdir build \
     && cd build \
     && cmake -DLWS_MAX_SMP=1 \
-           -DLWS_WITHOUT_EXTENSIONS=0 \
-           -DCMAKE_INSTALL_PREFIX:PATH=/usr \
-           -DCMAKE_C_FLAGS="-fpic" .. \
+    -DLWS_WITHOUT_EXTENSIONS=0 \
+    -DCMAKE_INSTALL_PREFIX:PATH=/usr \
+    -DCMAKE_C_FLAGS="-fpic" .. \
     && make \
     && make install \
     && cd ../.. \
@@ -60,29 +61,43 @@ RUN git clone https://github.com/meetecho/janus-gateway.git \
     && cd janus-gateway \
     && sh autogen.sh \
     && ./configure \
-        --prefix=/opt/janus \
-        --enable-websockets \
-        --enable-plugin-streaming \
-        --disable-plugin-videoroom \
-        --disable-plugin-videocall \
-        --disable-plugin-sip \
-        --disable-plugin-audiobridge \
-        --disable-plugin-recordplay \
-        --disable-plugin-textroom \
-        --disable-plugin-echotest \
-        --disable-plugin-nosip \
-        --disable-data-channels \
-        --disable-all-handlers \
-        --disable-all-loggers \
+    --prefix=/opt/janus \
+    --enable-websockets \
+    --enable-plugin-streaming \
+    --disable-plugin-videoroom \
+    --disable-plugin-videocall \
+    --disable-plugin-sip \
+    --disable-plugin-audiobridge \
+    --disable-plugin-recordplay \
+    --disable-plugin-textroom \
+    --disable-plugin-echotest \
+    --disable-plugin-nosip \
+    --disable-data-channels \
+    --disable-all-handlers \
+    --disable-all-loggers \
     && make \
     && make install \
     && cd .. \
     && rm -rf janus-gateway
 
+# Copy config files (static)
+COPY config/janus.plugin.streaming.jcfg /opt/janus/etc/janus/
+COPY config/janus.transport.http.jcfg /opt/janus/etc/janus/
+COPY config/janus.transport.websockets.jcfg /opt/janus/etc/janus/
+
+# Copy main config template (dynamic)
+COPY config/janus.jcfg.template /opt/janus/etc/janus/janus.jcfg.template
+
+# Copy entrypoint script
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Create log directory
 RUN mkdir -p /var/log/janus
 
-# Expose ports
+# Expose ports (default, overridden by -p)
 EXPOSE 8088 8188 20000-20100/udp
 
+# Use entrypoint to generate config from template
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["/opt/janus/bin/janus", "-F", "/opt/janus/etc/janus"]

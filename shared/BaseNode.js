@@ -17,8 +17,9 @@ export class BaseNode {
     //   host: 'injection-1',             // Hostname/IP del nodo
     //   port: 7070,                      // Porta API REST
     //   treeId: injection-1              // ID dell'albero a cui appartiene il nodo
-    //
-    //   // === RTP PORTS ===
+    //   layer: 0                         // Livello dell'albero
+    // 
+    // === RTP PORTS ===
     //   rtp: {
     //     audioPort: 5000,              // Porta UDP per RTP audio
     //     videoPort: 5002               // Porta UDP per RTP video
@@ -60,6 +61,7 @@ export class BaseNode {
     //   },
 
     this.treeId = config.treeId;
+    this.layer = config.layer || 0;
     this.host = config.host || 'localhost';
     this.port = config.port || 7070;
 
@@ -76,7 +78,7 @@ export class BaseNode {
     this.pollTimer = null;
 
     // topology
-    this.parent = null;
+    this.parents = [];
     this.children = [];
 
     this.isStopping = false;
@@ -206,6 +208,7 @@ export class BaseNode {
       port: this.port,
       audioPort: this.rtp.audioPort,
       videoPort: this.rtp.videoPort,
+      layer: this.layer,
       status: 'active',
       created: Date.now()
     });
@@ -243,11 +246,16 @@ export class BaseNode {
     console.log(`[${this.nodeId}] Event [${channel}]: ${event.type}`);
 
     switch (event.type) {
-      case 'parent-changed':
+      case 'parent-added':
         if (event.nodeId === this.nodeId) {
-          await this.handleParentChangedEvent(event);
+          await this.handleParentAdded(event.parentId);
         }
         break;
+
+      case 'parent-removed':
+        if (event.nodeId === this.nodeId) {
+          await this.handleParentRemoved(event.parentId);
+        } break;
 
       case 'child-added':
         if (event.nodeId === this.nodeId) {
@@ -276,33 +284,47 @@ export class BaseNode {
     try {
       // relay/egress
       if (this.nodeType !== 'injection') {
-        const parentId = await this.redis.get(`tree:${this.treeId}:parent:${this.nodeId}`);  // get e non hget per il controller farà solo set visto che è una stringa unica
-        if (parentId !== this.parent) {
-          const oldParent = this.parent;
-          this.parent = parentId;
-          console.log(`[${this.nodeId}] Parent changed: ${oldParent} -> ${parentId}`);
+        const parentsKey = `tree:${this.treeId}:parents:${this.nodeId}`;
+        const newParents = await this.redis.smembers(parentsKey);
 
-          await this.onParentChanged(oldParent, parentId);
+        // Confronta con current
+        const currentSet = new Set(this.parents);
+        const newSet = new Set(newParents);
+
+        // Find added/removed
+        const added = [...newSet].filter(p => !currentSet.has(p));
+        const removed = [...currentSet].filter(p => !newSet.has(p));
+
+        if (added.length > 0 || removed.length > 0) {
+          console.log(`[${this.nodeId}] Parents changed: +${added.length} -${removed.length}`);
+
+          this.parents = newParents;
+
+          // Notifica add/remove separatamente
+          for (const parentId of added) {
+            await this.onParentAdded(parentId);
+          }
+          for (const parentId of removed) {
+            await this.onParentRemoved(parentId);
+          }
         }
       }
 
       // injection/relay
       if (this.nodeType !== 'egress') {
-        const newChildren = await this.redis.smembers(`tree:${this.treeId}:children:${this.nodeId}`);   // smember = dammi il set di membri.
+        const childrenKey = `tree:${this.treeId}:children:${this.nodeId}`;
+        const newChildren = await this.redis.smembers(childrenKey);
 
         const currentSet = new Set(this.children);
         const newSet = new Set(newChildren);
 
-        if (currentSet.size !== newSet.size ||
-          ![...currentSet].every(child => newSet.has(child))) {
+        const added = [...newSet].filter(c => !currentSet.has(c));
+        const removed = [...currentSet].filter(c => !newSet.has(c));
 
-          const added = newChildren.filter(child => !currentSet.has(child));
-          const removed = this.children.filter(child => !newSet.has(child));
-
+        if (added.length > 0 || removed.length > 0) {
+          console.log(`[${this.nodeId}] Children changed: +${added.length} -${removed.length}`);
           this.children = newChildren;
           await this.onChildrenChanged(added, removed);
-
-          console.log(`[${this.nodeId}] Children: +${added.length} -${removed.length}`);
         }
       }
 
@@ -347,20 +369,32 @@ export class BaseNode {
 
 
   // Handler parent-changed
-  async handleParentChangedEvent(event) {
-    // Solo per relay/egress
-    if (this.nodeType === 'injection') return;
+  async handleParentAdded(parentId) {
+    // Verifica se già presente
+    if (this.parents.includes(parentId)) {
+      console.log(`[${this.nodeId}] Parent ${parentId} already exists, ignoring`);
+      return;
+    }
 
-    const oldParent = this.parent;
-    const newParent = event.newParent;
+    console.log(`[${this.nodeId}] Adding parent: ${parentId}`);
+    this.parents.push(parentId);
 
-    // Update cache locale
-    this.parent = newParent;
+    // Hook per sottoclasse
+    await this.onParentAdded(parentId);
+  }
 
-    console.log(`[${this.nodeId}] Parent changed: ${oldParent} -> ${newParent}`);
+  async handleParentRemoved(parentId) {
+    const index = this.parents.indexOf(parentId);
+    if (index === -1) {
+      console.log(`[${this.nodeId}] Parent ${parentId} not found, ignoring`);
+      return;
+    }
 
-    // Chiama hook
-    await this.onParentChanged(oldParent, newParent);
+    console.log(`[${this.nodeId}] Removing parent: ${parentId}`);
+    this.parents.splice(index, 1);
+
+    // Hook per sottoclasse
+    await this.onParentRemoved(parentId);
   }
 
   // Handler child-added
@@ -421,9 +455,14 @@ export class BaseNode {
     };
   }
 
-  async getParentInfo() {
-    if (!this.parent) return null;
-    return await this.getNodeInfo(this.parent);
+  async getParentsInfo() {
+    if (!this.parents) return null;
+    const parentsInfo = [];
+    for (const parentId of this.parents) {
+      const info = await this.getNodeInfo(parentId);
+      if (info) parentsInfo.push(info);
+    }
+    return parentsInfo;
   }
 
   async getChildrenInfo() {
@@ -459,7 +498,7 @@ export class BaseNode {
       let redisChildren = [];
 
       if (this.nodeType !== 'injection') {
-        redisParent = await this.redis.get(`tree:${this.treeId}:parent:${this.nodeId}`);
+        redisParent = await this.redis.get(`tree:${this.treeId}:parents:${this.nodeId}`);
       }
 
       if (this.nodeType !== 'egress') {
@@ -470,12 +509,12 @@ export class BaseNode {
       let desync = false;
 
       // Check parent
-      if (this.nodeType !== 'injection' && redisParent !== this.parent) {
-        console.warn(`[${this.nodeId}] DESYNC parent: cache=${this.parent} redis=${redisParent}`);
-        this.parent = redisParent;
-        await this.onParentChanged(null, redisParent);
-        desync = true;
-      }
+      // if (this.nodeType !== 'injection' && redisParent !== this.parent) {
+      //   console.warn(`[${this.nodeId}] DESYNC parent: cache=${this.parent} redis=${redisParent}`);
+      //   this.parent = redisParent;
+      //   await this.onParentChanged(null, redisParent);
+      //   desync = true;
+      // }
 
       // Check children
       if (this.nodeType !== 'egress') {
@@ -515,7 +554,7 @@ export class BaseNode {
       await this.updateTopology();
       res.json({
         nodeId: this.nodeId,
-        parent: this.parent,
+        parents: this.parents,
         children: this.children
       });
     });
@@ -525,7 +564,7 @@ export class BaseNode {
       res.json({
         nodeId: this.nodeId,
         nodeType: this.nodeType,
-        parent: this.parent,
+        parents: this.parents,
         children: this.children
       });
     });
@@ -543,7 +582,7 @@ export class BaseNode {
         videoPort: this.rtp.videoPort
       },
       topology: {
-        parent: this.parent,
+        parents: this.parents,
         children: this.children
       },
       uptime: Math.floor(process.uptime()),
@@ -562,9 +601,13 @@ export class BaseNode {
     // Override
   }
 
-  async onParentChanged(oldParent, newParent) {
+  async onParentAdded(parentId) {
     // Override in relay/egress
   }
+  async onParentRemoved(parentId) {
+    // Override in relay/egress
+  }
+
 
   async onChildrenChanged(added, removed) {
     // Override in injection/relay
