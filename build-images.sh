@@ -37,7 +37,7 @@ docker build -t media-tree/egress-node:latest \
   -f egress-node/Dockerfile \
   .
 
-echo "✅ All images built successfully!"
+echo "All images built successfully!"
 echo ""
 echo "Available images:"
 docker images | grep media-tree
