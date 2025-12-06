@@ -3,6 +3,7 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 	"time"
@@ -27,7 +28,8 @@ func NewDockerProvisioner(networkName string, redisClient *redis.Client) (*Docke
 	}, nil
 }
 
-// CreateNode crea un nodo
+// CreateNode: Smistatore.
+// Riceve una richiesta generica (NodeSpec) e decide quale funzione specifica chiamare
 func (p *DockerProvisioner) CreateNode(ctx context.Context, spec domain.NodeSpec) (*domain.NodeInfo, error) {
 	switch spec.NodeType {
 	case domain.NodeTypeInjection:
@@ -41,7 +43,7 @@ func (p *DockerProvisioner) CreateNode(ctx context.Context, spec domain.NodeSpec
 	}
 }
 
-// DestroyNode distrugge un nodo con graceful shutdown
+// DestroyNode
 func (p *DockerProvisioner) DestroyNode(ctx context.Context, nodeInfo *domain.NodeInfo) error {
 	// Se mancano info, recupera da Redis
 	if nodeInfo.ContainerId == "" {
@@ -52,37 +54,37 @@ func (p *DockerProvisioner) DestroyNode(ctx context.Context, nodeInfo *domain.No
 		nodeInfo = fullInfo
 	}
 
-	// 1. Graceful shutdown (SIGTERM)
-	fmt.Printf("[INFO] Stopping node %s gracefully...\n", nodeInfo.NodeId)
+	// (SIGTERM)
+	log.Printf("[INFO] Stopping node %s gracefully...", nodeInfo.NodeId)
 	if err := p.dockerStop(ctx, nodeInfo.NodeId); err != nil {
-		fmt.Printf("[WARN] Failed to stop %s gracefully: %v\n", nodeInfo.NodeId, err)
+		log.Printf("[WARN] Failed to stop %s gracefully: %v", nodeInfo.NodeId, err)
 	}
 
-	// 2. Attendi che nodo si unregister (max 3s)
+	// Attendi che nodo si unregister (max 3s)
 	time.Sleep(3 * time.Second)
 
-	// 3. Rimuovi container principale
+	// Rimuovi container principale
 	if err := p.dockerRemove(ctx, nodeInfo.NodeId); err != nil {
 		return fmt.Errorf("failed to remove node container: %w", err)
 	}
 
-	// 4. Se ha Janus, rimuovi anche quello
+	// Se ha Janus, rimuovi anche quello
 	if nodeInfo.NeedsJanus() && nodeInfo.JanusHost != "" {
-		fmt.Printf("[INFO] Stopping Janus %s...\n", nodeInfo.JanusHost)
+		log.Printf("[INFO] Stopping Janus %s...", nodeInfo.JanusHost)
 		p.dockerStop(ctx, nodeInfo.JanusHost)
 		if err := p.dockerRemove(ctx, nodeInfo.JanusHost); err != nil {
-			fmt.Printf("[WARN] Failed to remove Janus: %v\n", err)
+			log.Printf("[WARN] Failed to remove Janus: %v", err)
 		}
 	}
 
-	// 5. CLEANUP REDIS
+	// Cleanup redis
 	if nodeInfo.NodeType != "" {
 		err := p.redisClient.ForceDeleteNode(ctx, nodeInfo.TreeId, nodeInfo.NodeId, string(nodeInfo.NodeType))
 		if err != nil {
-			fmt.Printf("[WARN] ForceDeleteNode error: %v\n", err)
+			log.Printf("[WARN] ForceDeleteNode error: %v", err)
 		}
 	}
-	// 6. Rilascia porte
+	// Rilascia porte
 	if nodeInfo.ExternalAPIPort > 0 {
 		p.portAllocator.Release(nodeInfo.ExternalAPIPort)
 	}
@@ -98,20 +100,19 @@ func (p *DockerProvisioner) DestroyNode(ctx context.Context, nodeInfo *domain.No
 			p.portAllocator.ReleaseRange(nodeInfo.WebRTCPortStart, nodeInfo.WebRTCPortEnd)
 		}
 	}
-
-	// 7. Cleanup Redis provisioning info
+	// Cleanup Redis provisioning info
 	if err := p.redisClient.DeleteNodeProvisioning(ctx, nodeInfo.TreeId, nodeInfo.NodeId); err != nil {
-		fmt.Printf("[WARN] Failed to delete provisioning info: %v\n", err)
+		log.Printf("[WARN] Failed to delete provisioning info: %v", err)
 	}
 
-	fmt.Printf("[INFO] Node %s destroyed successfully\n", nodeInfo.NodeId)
+	log.Printf("[INFO] Node %s destroyed successfully", nodeInfo.NodeId)
 	return nil
 }
 
 // dockerRun esegue docker run e ritorna container ID
 func (p *DockerProvisioner) dockerRun(ctx context.Context, args []string) (string, error) {
 	cmd := exec.CommandContext(ctx, "docker", append([]string{"run"}, args...)...)
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput() // Cattura stdout e stderr
 	if err != nil {
 		return "", fmt.Errorf("docker run failed: %w, output: %s", err, string(output))
 	}
@@ -120,14 +121,14 @@ func (p *DockerProvisioner) dockerRun(ctx context.Context, args []string) (strin
 	return containerID, nil
 }
 
-// dockerStop esegue docker stop
+// dockerStop: Esegue "docker stop -t 10" (aspetta 10s prima di killare)
 func (p *DockerProvisioner) dockerStop(ctx context.Context, containerName string) error {
 	cmd := exec.CommandContext(ctx, "docker", "stop", "-t", "10", containerName)
 	_, err := cmd.CombinedOutput()
 	return err
 }
 
-// dockerRemove esegue docker rm
+// dockerRemove: Esegue "docker rm -f" (forza rimozione)
 func (p *DockerProvisioner) dockerRemove(ctx context.Context, containerName string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", containerName)
 	_, err := cmd.CombinedOutput()

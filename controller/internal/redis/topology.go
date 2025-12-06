@@ -5,40 +5,48 @@ import (
 	"fmt"
 )
 
-// GetNodeParent legge il parent di un nodo
-// Chiave: tree:{treeId}:parent:{nodeId}
-func (c *Client) GetNodeParent(ctx context.Context, treeId, nodeId string) (string, error) {
-	key := fmt.Sprintf("tree:%s:parent:%s", treeId, nodeId)
+// GetNodeParent legge i parents di un nodo
+// Chiave: tree:{treeId}:parents:{nodeId}
+func (c *Client) GetNodeParents(ctx context.Context, treeId, nodeId string) ([]string, error) {
+	key := fmt.Sprintf("tree:%s:parents:%s", treeId, nodeId)
 
-	parent, err := c.rdb.Get(ctx, key).Result()
+	parents, err := c.rdb.SMembers(ctx, key).Result()
 	if err != nil {
-		if err.Error() == "redis: nil" {
-			return "", nil // Nessun parent (es: injection node)
-		}
-		return "", fmt.Errorf("failed to get parent for %s: %w", nodeId, err)
+		return nil, fmt.Errorf("failed to get parents for %s: %w", nodeId, err)
 	}
 
-	return parent, nil
+	return parents, nil
 }
 
-// SetNodeParent imposta il parent di un nodo
-// Chiave: tree:{treeId}:parent:{nodeId}
-func (c *Client) SetNodeParent(ctx context.Context, treeId, childId, parentId string) error {
-	key := fmt.Sprintf("tree:%s:parent:%s", treeId, childId)
+// AddNodeParent: Aggiunge un genitore alla lista
+// Chiave: tree:{treeId}:parents:{nodeId}
+func (c *Client) AddNodeParent(ctx context.Context, treeId, childId, parentId string) error {
+	key := fmt.Sprintf("tree:%s:parents:%s", treeId, childId)
 
-	if err := c.rdb.Set(ctx, key, parentId, 0).Err(); err != nil {
-		return fmt.Errorf("failed to set parent for %s: %w", childId, err)
+	if err := c.rdb.SAdd(ctx, key, parentId).Err(); err != nil {
+		return fmt.Errorf("failed to add parent %s to %s: %w", parentId, childId, err)
 	}
 
 	return nil
 }
 
 // RemoveNodeParent rimuove il parent di un nodo
-func (c *Client) RemoveNodeParent(ctx context.Context, treeId, nodeId string) error {
-	key := fmt.Sprintf("tree:%s:parent:%s", treeId, nodeId)
+func (c *Client) RemoveNodeParent(ctx context.Context, treeId, nodeId, parentId string) error {
+	key := fmt.Sprintf("tree:%s:parents:%s", treeId, nodeId)
+
+	if err := c.rdb.SRem(ctx, key, parentId).Err(); err != nil {
+		return fmt.Errorf("failed to remove parent %s from %s: %w", parentId, nodeId, err)
+	}
+
+	return nil
+}
+
+// rimuove tutti i parents
+func (c *Client) RemoveAllNodeParents(ctx context.Context, treeId, nodeId string) error {
+	key := fmt.Sprintf("tree:%s:parents:%s", treeId, nodeId)
 
 	if err := c.rdb.Del(ctx, key).Err(); err != nil {
-		return fmt.Errorf("failed to remove parent for %s: %w", nodeId, err)
+		return fmt.Errorf("failed to remove all parents for %s: %w", nodeId, err)
 	}
 
 	return nil
@@ -83,9 +91,9 @@ func (c *Client) RemoveNodeChild(ctx context.Context, treeId, parentId, childId 
 
 // DeleteNodeTopology rimuove tutta la topologia di un nodo (parent + children)
 func (c *Client) DeleteNodeTopology(ctx context.Context, treeId, nodeId string) error {
-	// Rimuovi parent
-	parentKey := fmt.Sprintf("tree:%s:parent:%s", treeId, nodeId)
-	c.rdb.Del(ctx, parentKey)
+	// Rimuovi parents
+	parentsKey := fmt.Sprintf("tree:%s:parents:%s", treeId, nodeId)
+	c.rdb.Del(ctx, parentsKey)
 
 	// Rimuovi children
 	childrenKey := fmt.Sprintf("tree:%s:children:%s", treeId, nodeId)
@@ -94,16 +102,22 @@ func (c *Client) DeleteNodeTopology(ctx context.Context, treeId, nodeId string) 
 	return nil
 }
 
-// SetTopology configura parent e child atomicamente
+// SetTopology configura parent e child atomicamente (ora transazione)
 func (c *Client) SetTopology(ctx context.Context, treeId, childId, parentId string) error {
-	// Set parent del child
-	if err := c.SetNodeParent(ctx, treeId, childId, parentId); err != nil {
-		return err
-	}
+	pipe := c.rdb.TxPipeline()
 
-	// Aggiungi child al parent
-	if err := c.AddNodeChild(ctx, treeId, parentId, childId); err != nil {
-		return err
+	// Add Parent
+	keyParents := fmt.Sprintf("tree:%s:parents:%s", treeId, childId)
+	pipe.SAdd(ctx, keyParents, parentId)
+
+	// Add Child
+	keyChildren := fmt.Sprintf("tree:%s:children:%s", treeId, parentId)
+	pipe.SAdd(ctx, keyChildren, childId)
+
+	// Esegui tutto insieme
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to set topology atomically: %w", err)
 	}
 
 	return nil
@@ -111,51 +125,62 @@ func (c *Client) SetTopology(ctx context.Context, treeId, childId, parentId stri
 
 // RemoveTopology rimuove relazione parent-child atomicamente
 func (c *Client) RemoveTopology(ctx context.Context, treeId, childId, parentId string) error {
-	// Rimuovi parent del child
-	if err := c.RemoveNodeParent(ctx, treeId, childId); err != nil {
-		return err
-	}
+	pipe := c.rdb.TxPipeline()
 
-	// Rimuovi child dal parent
-	if err := c.RemoveNodeChild(ctx, treeId, parentId, childId); err != nil {
-		return err
+	// Remove Parent
+	keyParents := fmt.Sprintf("tree:%s:parents:%s", treeId, childId)
+	pipe.SRem(ctx, keyParents, parentId)
+
+	// Remove Child
+	keyChildren := fmt.Sprintf("tree:%s:children:%s", treeId, parentId)
+	pipe.SRem(ctx, keyChildren, childId)
+
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to remove topology atomically: %w", err)
 	}
 
 	return nil
 }
 
+// --- EVENTI PUB/SUB ---
+// Qui sotto gestiamo i messaggi che arrivano ai nodi Node.js per avvisarli dei cambi.
+
 // PublishTopologyEvent pubblica un evento su topology:{treeId}:{nodeId}
-// TARGETED - solo quel nodo riceve
-func (c *Client) PublishTopologyEvent(ctx context.Context, treeId, nodeId string, event map[string]interface{}) error {
+func (c *Client) PublishTopologyEvent(ctx context.Context, treeId, nodeId string, event map[string]any) error {
 	channel := fmt.Sprintf("topology:%s:%s", treeId, nodeId)
 	return c.PublishJSON(ctx, channel, event)
 }
 
 // PublishGlobalTopologyEvent pubblica un evento su topology:{treeId}
 // BROADCAST - tutti i nodi del tree ricevono
-func (c *Client) PublishGlobalTopologyEvent(ctx context.Context, treeId string, event map[string]interface{}) error {
+func (c *Client) PublishGlobalTopologyEvent(ctx context.Context, treeId string, event map[string]any) error {
 	channel := fmt.Sprintf("topology:%s", treeId)
 	return c.PublishJSON(ctx, channel, event)
 }
 
-// PublishParentChanged pubblica evento parent-changed
-func (c *Client) PublishParentChanged(ctx context.Context, treeId, nodeId, oldParent, newParent string) error {
-	event := map[string]interface{}{
-		"type":      "parent-changed",
-		"nodeId":    nodeId,
-		"newParent": newParent,
-	}
-
-	if oldParent != "" {
-		event["oldParent"] = oldParent
+func (c *Client) PublishParentAdded(ctx context.Context, treeId, nodeId, parentId string) error {
+	event := map[string]any{
+		"type":     "parent-added",
+		"nodeId":   nodeId,
+		"parentId": parentId,
 	}
 
 	return c.PublishTopologyEvent(ctx, treeId, nodeId, event)
 }
 
-// PublishChildAdded pubblica evento child-added
+func (c *Client) PublishParentRemoved(ctx context.Context, treeId, nodeId, parentId string) error {
+	event := map[string]any{
+		"type":     "parent-removed",
+		"nodeId":   nodeId,
+		"parentId": parentId,
+	}
+
+	return c.PublishTopologyEvent(ctx, treeId, nodeId, event)
+}
+
 func (c *Client) PublishChildAdded(ctx context.Context, treeId, parentId, childId string) error {
-	event := map[string]interface{}{
+	event := map[string]any{
 		"type":    "child-added",
 		"nodeId":  parentId,
 		"childId": childId,
@@ -164,9 +189,8 @@ func (c *Client) PublishChildAdded(ctx context.Context, treeId, parentId, childI
 	return c.PublishTopologyEvent(ctx, treeId, parentId, event)
 }
 
-// PublishChildRemoved pubblica evento child-removed
 func (c *Client) PublishChildRemoved(ctx context.Context, treeId, parentId, childId string) error {
-	event := map[string]interface{}{
+	event := map[string]any{
 		"type":    "child-removed",
 		"nodeId":  parentId,
 		"childId": childId,
@@ -175,9 +199,8 @@ func (c *Client) PublishChildRemoved(ctx context.Context, treeId, parentId, chil
 	return c.PublishTopologyEvent(ctx, treeId, parentId, event)
 }
 
-// PublishTopologyReset pubblica evento topology-reset (BROADCAST)
 func (c *Client) PublishTopologyReset(ctx context.Context, treeId string) error {
-	event := map[string]interface{}{
+	event := map[string]any{
 		"type": "topology-reset",
 	}
 

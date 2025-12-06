@@ -60,26 +60,26 @@ echo ""
 
 echo "--- CONFIGURAZIONE: injection-1 -> relay-1 ---"
 docker exec redis redis-cli SADD tree:tree-1:children:injection-1 relay-1
-docker exec redis redis-cli SET tree:tree-1:parent:relay-1 injection-1
+docker exec redis redis-cli SADD tree:tree-1:parents:relay-1 injection-1
 
 docker exec redis redis-cli PUBLISH topology:tree-1:injection-1 '{"type":"child-added","nodeId":"injection-1","childId":"relay-1"}'
-docker exec redis redis-cli PUBLISH topology:tree-1:relay-1 '{"type":"parent-changed","nodeId":"relay-1","newParent":"injection-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:relay-1 '{"type":"parent-added","nodeId":"relay-1","parentId":"injection-1"}'
 sleep 2
 
 echo "--- CONFIGURAZIONE: relay-1 -> egress-1 ---"
 docker exec redis redis-cli SADD tree:tree-1:children:relay-1 egress-1
-docker exec redis redis-cli SET tree:tree-1:parent:egress-1 relay-1
+docker exec redis redis-cli SADD tree:tree-1:parents:egress-1 relay-1
 
 docker exec redis redis-cli PUBLISH topology:tree-1:relay-1 '{"type":"child-added","nodeId":"relay-1","childId":"egress-1"}'
-docker exec redis redis-cli PUBLISH topology:tree-1:egress-1 '{"type":"parent-changed","nodeId":"egress-1","newParent":"relay-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:egress-1 '{"type":"parent-added","nodeId":"egress-1","parentId":"relay-1"}'
 sleep 2
 
 echo "--- CONFIGURAZIONE: relay-1 -> egress-2 ---"
 docker exec redis redis-cli SADD tree:tree-1:children:relay-1 egress-2
-docker exec redis redis-cli SET tree:tree-1:parent:egress-2 relay-1
+docker exec redis redis-cli SADD tree:tree-1:parents:egress-2 relay-1
 
 docker exec redis redis-cli PUBLISH topology:tree-1:relay-1 '{"type":"child-added","nodeId":"relay-1","childId":"egress-2"}'
-docker exec redis redis-cli PUBLISH topology:tree-1:egress-2 '{"type":"parent-changed","nodeId":"egress-2","newParent":"relay-1"}'
+docker exec redis redis-cli PUBLISH topology:tree-1:egress-2 '{"type":"parent-added","nodeId":"egress-2","parentId":"relay-1"}'
 sleep 2
 
 echo "--- VERIFICA TOPOLOGIA ---"
@@ -87,13 +87,13 @@ echo "Injection-1 children:"
 curl -s http://localhost:7070/topology | jq '.children'
 echo ""
 echo "Relay-1 topology:"
-curl -s http://localhost:7071/topology | jq '{parent, children}'
+curl -s http://localhost:7071/topology | jq '{parents, children}'
 echo ""
-echo "Egress-1 parent:"
-curl -s http://localhost:7073/topology | jq '.parent'
+echo "Egress-1 parents:"
+curl -s http://localhost:7073/topology | jq '.parents'
 echo ""
-echo "Egress-2 parent:"
-curl -s http://localhost:7074/topology | jq '.parent'
+echo "Egress-2 parents:"
+curl -s http://localhost:7074/topology | jq '.parents'
 
 pause
 

@@ -63,7 +63,6 @@ func (h *TestHandler) TestDomainModels(c *gin.Context) {
 
 // TestPortAllocator testa allocazione base
 func (h *TestHandler) TestPortAllocator(c *gin.Context) {
-	h.portAllocator.Reset()
 
 	// Alloca 3 porte API
 	api1, _ := h.portAllocator.AllocateAPIPort()
@@ -87,14 +86,13 @@ func (h *TestHandler) TestPortAllocator(c *gin.Context) {
 
 // TestPortAllocation simula allocazione 3 nodi
 func (h *TestHandler) TestPortAllocation(c *gin.Context) {
-	h.portAllocator.Reset()
 
-	nodes := []map[string]interface{}{}
+	nodes := []map[string]any{}
 
 	for i := 1; i <= 3; i++ {
 		apiPort, _ := h.portAllocator.AllocateAPIPort()
 
-		node := map[string]interface{}{
+		node := map[string]any{
 			"nodeId":  fmt.Sprintf("node-%d", i),
 			"apiPort": apiPort,
 		}
@@ -121,7 +119,6 @@ func (h *TestHandler) TestPortAllocation(c *gin.Context) {
 
 // TestPortRelease testa rilascio porta
 func (h *TestHandler) TestPortRelease(c *gin.Context) {
-	h.portAllocator.Reset()
 
 	port1, _ := h.portAllocator.AllocateAPIPort()
 	port2, _ := h.portAllocator.AllocateAPIPort()
@@ -145,7 +142,7 @@ func (h *TestHandler) TestPortRelease(c *gin.Context) {
 func (h *TestHandler) TestWebRTCAllocation(c *gin.Context) {
 	h.portAllocator.Reset()
 
-	instances := []map[string]interface{}{}
+	instances := []map[string]any{}
 
 	for i := 1; i <= 3; i++ {
 		httpPort, wsPort, err := h.portAllocator.AllocateJanusPorts()
@@ -160,7 +157,7 @@ func (h *TestHandler) TestWebRTCAllocation(c *gin.Context) {
 			return
 		}
 
-		instances = append(instances, map[string]interface{}{
+		instances = append(instances, map[string]any{
 			"instance":     fmt.Sprintf("janus-%d", i),
 			"http_port":    httpPort,
 			"ws_port":      wsPort,
@@ -181,14 +178,14 @@ func (h *TestHandler) TestWebRTCAllocation(c *gin.Context) {
 func (h *TestHandler) TestFullTreeAllocation(c *gin.Context) {
 	h.portAllocator.Reset()
 
-	nodes := []map[string]interface{}{}
+	nodes := []map[string]any{}
 
 	// INJECTION
 	injectionAPI, _ := h.portAllocator.AllocateAPIPort()
 	janusVRHTTP, janusVRWS, _ := h.portAllocator.AllocateJanusPorts()
 	webrtcVRStart, webrtcVREnd, _ := h.portAllocator.AllocateWebRTCRange()
 
-	nodes = append(nodes, map[string]interface{}{
+	nodes = append(nodes, map[string]any{
 		"node_id":      "injection-1",
 		"type":         "injection",
 		"api_port":     injectionAPI,
@@ -201,7 +198,7 @@ func (h *TestHandler) TestFullTreeAllocation(c *gin.Context) {
 	// RELAY
 	relayAPI, _ := h.portAllocator.AllocateAPIPort()
 
-	nodes = append(nodes, map[string]interface{}{
+	nodes = append(nodes, map[string]any{
 		"node_id":  "relay-1",
 		"type":     "relay",
 		"api_port": relayAPI,
@@ -212,7 +209,7 @@ func (h *TestHandler) TestFullTreeAllocation(c *gin.Context) {
 	janusStreamHTTP, janusStreamWS, _ := h.portAllocator.AllocateJanusPorts()
 	webrtcStreamStart, webrtcStreamEnd, _ := h.portAllocator.AllocateWebRTCRange()
 
-	nodes = append(nodes, map[string]interface{}{
+	nodes = append(nodes, map[string]any{
 		"node_id":      "egress-1",
 		"type":         "egress",
 		"api_port":     egressAPI,

@@ -75,22 +75,21 @@ func (h *HealthHandler) TestTopology(c *gin.Context) {
 	ctx := c.Request.Context()
 	treeId := "tree-1"
 
-	// Leggi topologia esistente
 	injectionChildren, _ := h.redisClient.GetNodeChildren(ctx, treeId, "injection-1")
-	relayParent, _ := h.redisClient.GetNodeParent(ctx, treeId, "relay-1")
+	relayParents, _ := h.redisClient.GetNodeParents(ctx, treeId, "relay-1")
 	relayChildren, _ := h.redisClient.GetNodeChildren(ctx, treeId, "relay-1")
-	egressParent, _ := h.redisClient.GetNodeParent(ctx, treeId, "egress-1")
+	egressParents, _ := h.redisClient.GetNodeParents(ctx, treeId, "egress-1")
 
 	c.JSON(200, gin.H{
 		"injection-1": gin.H{
 			"children": injectionChildren,
 		},
 		"relay-1": gin.H{
-			"parent":   relayParent,
+			"parents":  relayParents,
 			"children": relayChildren,
 		},
 		"egress-1": gin.H{
-			"parent": egressParent,
+			"parents": egressParents,
 		},
 	})
 }

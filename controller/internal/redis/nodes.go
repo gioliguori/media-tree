@@ -3,21 +3,21 @@ package redis
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"log"
 )
 
-// NodeData rappresenta ESATTAMENTE quello che BaseNode salva in Redis
+// NodeData rappresenta quello che BaseNode salva in Redis
 type NodeData struct {
-	NodeId    string
-	Type      string // "injection", "relay", "egress"
-	TreeId    string
-	Host      string
-	Port      int
-	AudioPort int
-	VideoPort int
-	Layer     int
-	Status    string
-	Created   int64
+	NodeId    string `redis:"nodeId"`
+	NodeType  string `redis:"type"`
+	TreeId    string `redis:"treeId"`
+	Host      string `redis:"host"`
+	Port      int    `redis:"port"`
+	AudioPort int    `redis:"audioPort"`
+	VideoPort int    `redis:"videoPort"`
+	Layer     int    `redis:"layer"`
+	Status    string `redis:"status"`
+	Created   int64  `redis:"created"`
 }
 
 // GetNode legge un nodo da Redis
@@ -25,42 +25,19 @@ type NodeData struct {
 func (c *Client) GetNode(ctx context.Context, treeId, nodeId string) (*NodeData, error) {
 	key := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
 
-	result, err := c.rdb.HGetAll(ctx, key).Result()
-	if err != nil {
+	var node NodeData
+
+	// .Scan() legge da Redis e riempie la struct usando i tag
+	if err := c.rdb.HGetAll(ctx, key).Scan(&node); err != nil {
 		return nil, fmt.Errorf("failed to get node %s: %w", nodeId, err)
 	}
 
-	if len(result) == 0 {
+	// Scan non dà errore se la chiave non esiste restituisce una struct vuota.
+	if node.NodeId == "" {
 		return nil, fmt.Errorf("node not found: %s", nodeId)
 	}
 
-	// Parse hash Redis in NodeData struct
-	node := &NodeData{
-		NodeId: result["nodeId"],
-		Type:   result["type"],
-		TreeId: result["treeId"],
-		Host:   result["host"],
-		Status: result["status"],
-	}
-
-	// Parse campi int
-	if port, err := strconv.Atoi(result["port"]); err == nil {
-		node.Port = port
-	}
-	if audioPort, err := strconv.Atoi(result["audioPort"]); err == nil {
-		node.AudioPort = audioPort
-	}
-	if videoPort, err := strconv.Atoi(result["videoPort"]); err == nil {
-		node.VideoPort = videoPort
-	}
-	if layer, err := strconv.Atoi(result["layer"]); err == nil {
-		node.Layer = layer
-	}
-	if created, err := strconv.ParseInt(result["created"], 10, 64); err == nil {
-		node.Created = created
-	}
-
-	return node, nil
+	return &node, nil
 }
 
 // GetTreeNodes legge tutti i nodi di un tree per tipo
@@ -69,6 +46,7 @@ func (c *Client) GetNode(ctx context.Context, treeId, nodeId string) (*NodeData,
 func (c *Client) GetTreeNodes(ctx context.Context, treeId, nodeType string) ([]string, error) {
 	key := fmt.Sprintf("tree:%s:%s", treeId, nodeType)
 
+	// SMembers: Legge tutti i membri di un SET Redis.
 	nodeIds, err := c.rdb.SMembers(ctx, key).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tree nodes %s/%s: %w", treeId, nodeType, err)
@@ -77,11 +55,11 @@ func (c *Client) GetTreeNodes(ctx context.Context, treeId, nodeType string) ([]s
 	return nodeIds, nil
 }
 
-// GetAllTreeNodes legge TUTTI i nodi di un tree (injection + relay + egress)
+// GetAllTreeNodes legge TUTTI i nodi di un tree
 // Ritorna: lista completa di NodeData
 func (c *Client) GetAllTreeNodes(ctx context.Context, treeId string) ([]*NodeData, error) {
 	var allNodes []*NodeData
-
+	skipped := 0
 	// Leggi ogni tipo di nodo
 	for _, nodeType := range []string{"injection", "relay", "egress"} {
 		nodeIds, err := c.GetTreeNodes(ctx, treeId, nodeType)
@@ -94,10 +72,16 @@ func (c *Client) GetAllTreeNodes(ctx context.Context, treeId string) ([]*NodeDat
 			node, err := c.GetNode(ctx, treeId, nodeId)
 			if err != nil {
 				// Skip nodi non validi (potrebbero essere expired)
+				log.Printf("[WARN] Failed to get node %s in tree %s: %v\n", nodeId, treeId, err)
+				skipped++
 				continue
 			}
 			allNodes = append(allNodes, node)
 		}
+	}
+
+	if skipped > 0 {
+		log.Printf("[WARN] Skipped %d invalid nodes in tree %s\n", skipped, treeId)
 	}
 
 	return allNodes, nil
@@ -115,33 +99,44 @@ func (c *Client) NodeExists(ctx context.Context, treeId, nodeId string) (bool, e
 	return exists > 0, nil
 }
 
-// ForceDeleteNode rimuove un nodo da Redis (cleanup forzato)
-// Usa SOLO quando il container è già morto e non può unregistersi
+// ForceDeleteNode rimuove un nodo da Redis e pulisce i riferimenti
 func (c *Client) ForceDeleteNode(ctx context.Context, treeId, nodeId, nodeType string) error {
-	// Rimuovi hash nodo
-	nodeKey := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
-	if err := c.rdb.Del(ctx, nodeKey).Err(); err != nil {
-		return fmt.Errorf("failed to delete node hash %s: %w", nodeId, err)
+	// Pulizia riferimenti
+	parentsKey := fmt.Sprintf("tree:%s:parents:%s", treeId, nodeId)
+	parents, _ := c.rdb.SMembers(ctx, parentsKey).Result()
+	for _, parentId := range parents {
+		c.rdb.SRem(ctx, fmt.Sprintf("tree:%s:children:%s", treeId, parentId), nodeId)
 	}
-
-	// Rimuovi da set tipo
-	setKey := fmt.Sprintf("tree:%s:%s", treeId, nodeType)
-	if err := c.rdb.SRem(ctx, setKey, nodeId).Err(); err != nil {
-		return fmt.Errorf("failed to remove node from set %s: %w", nodeId, err)
-	}
-
-	// Rimuovi topologia (parent/children)
-	// Questo pulisce anche se il nodo aveva relazioni
-	parentKey := fmt.Sprintf("tree:%s:parent:%s", treeId, nodeId)
-	c.rdb.Del(ctx, parentKey)
 
 	childrenKey := fmt.Sprintf("tree:%s:children:%s", treeId, nodeId)
-	c.rdb.Del(ctx, childrenKey)
+	children, _ := c.rdb.SMembers(ctx, childrenKey).Result()
+	for _, childId := range children {
+		c.rdb.SRem(ctx, fmt.Sprintf("tree:%s:parents:%s", treeId, childId), nodeId)
+	}
+
+	// Cancella dati
+	if err := c.rdb.Del(ctx, fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)).Err(); err != nil {
+		fmt.Printf("[WARN] Failed to delete node key %s: %v\n", nodeId, err)
+	}
+
+	if err := c.rdb.SRem(ctx, fmt.Sprintf("tree:%s:%s", treeId, nodeType), nodeId).Err(); err != nil {
+		fmt.Printf("[WARN] Failed to remove %s from type set: %v\n", nodeId, err)
+	}
+
+	if err := c.rdb.Del(ctx, parentsKey).Err(); err != nil {
+		fmt.Printf("[WARN] Failed to delete parents key %s: %v\n", nodeId, err)
+	}
+
+	if err := c.rdb.Del(ctx, childrenKey).Err(); err != nil {
+		fmt.Printf("[WARN] Failed to delete children key %s: %v\n", nodeId, err)
+	}
+
+	fmt.Printf("[INFO] ForceDeleteNode %s completed\n", nodeId)
 
 	return nil
 }
 
-// GetNodesByType è un alias più leggibile di GetTreeNodes
+// GetNodesByType è un alias più leggibile
 func (c *Client) GetNodesByType(ctx context.Context, treeId string, nodeType string) ([]string, error) {
 	return c.GetTreeNodes(ctx, treeId, nodeType)
 }

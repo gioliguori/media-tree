@@ -6,6 +6,8 @@ import (
 )
 
 type Config struct {
+	ServerPort    int
+	DockerNetwork string
 	RedisHost     string
 	RedisPort     int
 	RedisPassword string
@@ -14,6 +16,8 @@ type Config struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{
+		ServerPort:    getEnvInt("SERVER_PORT", 8080),
+		DockerNetwork: getEnv("DOCKER_NETWORK", "media-tree"),
 		RedisHost:     getEnv("REDIS_HOST", "redis"),
 		RedisPort:     getEnvInt("REDIS_PORT", 6379),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),

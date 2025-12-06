@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"controller/internal/domain"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // NodeProvisioningData è quello che il controller salva in Redis
-// Aggiunti tag `redis` per mappare i campi sull'Hash Redis
 type NodeProvisioningData struct {
 	NodeId   string `json:"nodeId" redis:"nodeId"`
 	NodeType string `json:"nodeType" redis:"nodeType"`
@@ -32,7 +33,7 @@ type NodeProvisioningData struct {
 	CreatedAt int64  `json:"createdAt" redis:"createdAt"`
 }
 
-// SaveNodeProvisioning salva info provisioning in Redis usando HSet
+// SaveNodeProvisioning salva info provisioning in Redis
 func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.NodeInfo) error {
 	key := fmt.Sprintf("tree:%s:controller:node:%s", nodeInfo.TreeId, nodeInfo.NodeId)
 
@@ -52,12 +53,12 @@ func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.Node
 		CreatedAt:        time.Now().Unix(),
 	}
 
-	// HSet accetta direttamente la struct grazie ai tag redis:"..."
-	// Non serve più json.Marshal
+	// HSet accetta direttamente la struct grazie ai tag redis
+	// Non serve json.Marshal
 	return c.rdb.HSet(ctx, key, data).Err()
 }
 
-// GetNodeProvisioning legge info provisioning da Redis usando HGetAll
+// GetNodeProvisioning legge info provisioning da Redis
 func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string) (*domain.NodeInfo, error) {
 	key := fmt.Sprintf("tree:%s:controller:node:%s", treeId, nodeId)
 
@@ -74,12 +75,12 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string)
 	}
 
 	var data NodeProvisioningData
-	// Scan riempie la struct convertendo le stringhe Redis nei tipi corretti (int, string, etc)
+	// Scan riempie la struct convertendo le stringhe Redis nei tipi corretti
 	if err := cmd.Scan(&data); err != nil {
 		return nil, fmt.Errorf("failed to scan data: %w", err)
 	}
 
-	// Converti a NodeInfo (uguale a prima)
+	// Converti a NodeInfo
 	nodeInfo := &domain.NodeInfo{
 		NodeId:           data.NodeId,
 		NodeType:         domain.NodeType(data.NodeType),
@@ -95,10 +96,11 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string)
 		ExternalHost:     "localhost",
 	}
 
-	// Derive JanusHost dal nodeId
-	if nodeInfo.NodeType == domain.NodeTypeInjection {
+	// JanusHost dal nodeId
+	switch nodeInfo.NodeType {
+	case domain.NodeTypeInjection:
 		nodeInfo.JanusHost = data.NodeId + "-janus-vr"
-	} else if nodeInfo.NodeType == domain.NodeTypeEgress {
+	case domain.NodeTypeEgress:
 		nodeInfo.JanusHost = data.NodeId + "-janus-streaming"
 	}
 
@@ -115,29 +117,49 @@ func (c *Client) DeleteNodeProvisioning(ctx context.Context, treeId, nodeId stri
 func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*domain.NodeInfo, error) {
 	pattern := fmt.Sprintf("tree:%s:controller:node:*", treeId)
 
-	// NOTA: In produzione con tanti nodi, KEYS può essere lento.
-	// Sarebbe meglio mantenere un Set Redis "tree:{id}:provisioned_nodes"
+	// KEYS è lento
+	// sostituire KEYS con un SET Redis dedicato
 	keys, err := c.rdb.Keys(ctx, pattern).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get keys: %w", err)
 	}
 
+	if len(keys) == 0 {
+		return []*domain.NodeInfo{}, nil
+	}
+
+	// INIZIO PIPELINE
+	pipe := c.rdb.Pipeline()
+
+	// Accodiamo tutti i comandi HGetAll nel tubo
+	cmds := make([]*redis.MapStringStringCmd, len(keys))
+	for i, key := range keys {
+		cmds[i] = pipe.HGetAll(ctx, key)
+	}
+
+	// Eseguiamo tutto
+	_, err = pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("pipeline execution failed: %w", err)
+	}
+	// --- FINE PIPELINE ---
+
 	nodes := make([]*domain.NodeInfo, 0, len(keys))
 
-	// Opzionale: Usare una Pipeline qui velocizzerebbe molto se hai tanti nodi
-	for _, key := range keys {
+	for i, cmd := range cmds {
 		var data NodeProvisioningData
 
-		// Usa Scan direttamente su HGetAll
-		if err := c.rdb.HGetAll(ctx, key).Scan(&data); err != nil {
-			continue // Skip errori o dati parziali
+		// Scan lavora sul risultato locale, non chiama più Redis
+		if err := cmd.Scan(&data); err != nil {
+			fmt.Printf("Error scanning key %s: %v\n", keys[i], err)
+			continue
 		}
 
-		// Controllo base se lo scan ha trovato dati (NodeId non dovrebbe essere vuoto)
 		if data.NodeId == "" {
 			continue
 		}
 
+		// Mapping
 		nodeInfo := &domain.NodeInfo{
 			NodeId:           data.NodeId,
 			NodeType:         domain.NodeType(data.NodeType),
@@ -153,9 +175,11 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*
 			ExternalHost:     "localhost",
 		}
 
-		if nodeInfo.NodeType == domain.NodeTypeInjection {
+		// Janus Host
+		switch nodeInfo.NodeType {
+		case domain.NodeTypeInjection:
 			nodeInfo.JanusHost = data.NodeId + "-janus-vr"
-		} else if nodeInfo.NodeType == domain.NodeTypeEgress {
+		case domain.NodeTypeEgress:
 			nodeInfo.JanusHost = data.NodeId + "-janus-streaming"
 		}
 

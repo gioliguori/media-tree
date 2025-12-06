@@ -3,14 +3,13 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"controller/internal/domain"
 )
 
 func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain.NodeSpec) (*domain.NodeInfo, error) {
-	// ========================================
-	// 1. ALLOCA PORTE
-	// ========================================
+	// Alloca porte
 	apiPort, err := p.portAllocator.AllocateAPIPort()
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate API port: %w", err)
@@ -28,9 +27,7 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 		return nil, fmt.Errorf("failed to allocate WebRTC range: %w", err)
 	}
 
-	// ========================================
-	// 2. CREA JANUS VIDEOROOM (CLI)
-	// ========================================
+	// Crea Janus Videoroom
 	janusName := spec.NodeId + "-janus-vr"
 
 	janusArgs := []string{
@@ -38,6 +35,7 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 		"--name", janusName,
 		"--hostname", janusName,
 		"--network", p.networkName,
+		"-e", fmt.Sprintf("JANUS_RTP_PORT_RANGE=%d-%d", webrtcStart, webrtcEnd),
 		"-e", "JANUS_LOG_LEVEL=4",
 		"-p", fmt.Sprintf("%d:8088/tcp", janusHTTP),
 		"-p", fmt.Sprintf("%d:8188/tcp", janusWS),
@@ -52,9 +50,7 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 		return nil, fmt.Errorf("failed to create Janus container: %w", err)
 	}
 
-	// ========================================
-	// 3. CREA INJECTION NODE (CLI)
-	// ========================================
+	// Crea Injection Node
 	nodeArgs := []string{
 		"-d",
 		"--name", spec.NodeId,
@@ -79,6 +75,8 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 
 	nodeID, err := p.dockerRun(ctx, nodeArgs)
 	if err != nil {
+		// Rollback
+		p.dockerRemove(ctx, spec.NodeId)
 		p.dockerStop(ctx, janusName)
 		p.dockerRemove(ctx, janusName)
 		p.portAllocator.ReleasePorts(apiPort, janusHTTP, janusWS)
@@ -86,9 +84,7 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 		return nil, fmt.Errorf("failed to create injection node: %w", err)
 	}
 
-	// ========================================
-	// 4. COSTRUISCI NodeInfo
-	// ========================================
+	// Costruisci NodeInfo
 	nodeInfo := &domain.NodeInfo{
 		NodeId:           spec.NodeId,
 		NodeType:         spec.NodeType,
@@ -103,17 +99,16 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 		ExternalAPIPort:  apiPort,
 		JanusContainerId: janusID,
 		JanusHost:        janusName,
-		JanusWSPort:      8188,
+		JanusWSPort:      janusWS,
 		JanusHTTPPort:    janusHTTP,
 		WebRTCPortStart:  webrtcStart,
 		WebRTCPortEnd:    webrtcEnd,
 	}
 
-	// ========================================
-	// 5. SALVA IN REDIS
-	// ========================================
+	// Salva in Redis
 	if err := p.redisClient.SaveNodeProvisioning(ctx, nodeInfo); err != nil {
-		// Rollback: distruggi container
+		// Rollback
+		log.Printf("[WARN] Failed to save to Redis, rolling back %s...", spec.NodeId)
 		p.dockerStop(ctx, nodeInfo.NodeId)
 		p.dockerRemove(ctx, nodeInfo.NodeId)
 		p.dockerStop(ctx, janusName)

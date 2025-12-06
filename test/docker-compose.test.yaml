@@ -25,9 +25,10 @@ services:
       - "8088:8088" # HTTP
       - "8188:8188" # WebSocket
       - "20000-20050:20000-20050/udp" # WebRTC
-    volumes:
-      - ../janus-videoroom/config:/opt/janus/etc/janus:ro
+    #volumes:
+    #  - ../janus-videoroom/config:/opt/janus/etc/janus:ro
     environment:
+      - JANUS_RTP_PORT_RANGE=20000-20050
       - JANUS_LOG_LEVEL=4
     networks:
       - media-tree
@@ -41,9 +42,10 @@ services:
       - "8089:8088" # HTTP API
       - "8189:8188" # WebSocket
       - "20051-20150:20051-20150/udp" # WebRTC
-    volumes:
-      - ../janus-streaming/config:/opt/janus/etc/janus:ro
+    #volumes:
+    #  - ../janus-streaming/config:/opt/janus/etc/janus:ro
     environment:
+      - JANUS_RTP_PORT_RANGE=20051-20150
       - JANUS_LOG_LEVEL=4
     networks:
       - media-tree
@@ -57,9 +59,10 @@ services:
       - "8090:8088" # HTTP API
       - "8190:8188" # WebSocket
       - "20151-20200:20101-20150/udp" # WebRTC
-    volumes:
-      - ../janus-streaming/config:/opt/janus/etc/janus:ro
+    # volumes:
+    #   - ../janus-streaming/config:/opt/janus/etc/janus:ro
     environment:
+      - JANUS_RTP_PORT_RANGE=20101-20150
       - JANUS_LOG_LEVEL=4
     networks:
       - media-tree

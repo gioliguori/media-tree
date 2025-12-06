@@ -16,18 +16,22 @@ import (
 func main() {
 	log.Println("Starting Media Tree Controller...")
 
-	// Load config
+	// Config redis
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Connect to Redis
 	log.Printf("Connecting to Redis at %s:%d...", cfg.RedisHost, cfg.RedisPort)
 	redisClient := redis.NewClient(cfg)
 
+	defer func() {
+		log.Println("Closing Redis connection...")
+		redisClient.Close()
+	}()
+	// Timer 10 sec
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	defer cancel() // cleanup
 
 	if err := redisClient.Ping(ctx); err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
@@ -36,22 +40,25 @@ func main() {
 	log.Println("Connected to Redis successfully!")
 
 	// Start API server
-	server := api.NewServer(8080, redisClient)
+	server := api.NewServer(cfg, redisClient)
 
+	// Go routine perchè server.Start() è bloccante
 	go func() {
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start API server: %v", err)
 		}
 	}()
 
-	// Wait for interrupt signal
+	// Channel OS
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Si blocca qui in attesa di shutdown
 	<-quit
 
-	log.Println("Shutting down gracefully...")
+	log.Println("Shutting down")
 
-	// Graceful shutdown con timeout
+	// Shutdown con timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 

@@ -15,12 +15,10 @@ COPY . .
 # Build
 RUN CGO_ENABLED=0 GOOS=linux go build -o /controller ./cmd/controller
 
-# ============================================
 # RUNTIME STAGE
-# ============================================
 FROM alpine:3.19
 
-# INSTALLA DOCKER CLI (AGGIUNTO)
+# Docker CLI
 RUN apk add --no-cache docker-cli
 
 # Copy binary

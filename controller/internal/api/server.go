@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"controller/internal/api/handlers"
+	"controller/internal/config"
 	"controller/internal/redis"
 )
 
@@ -16,23 +18,22 @@ type Server struct {
 	router      *gin.Engine
 	httpServer  *http.Server
 	redisClient *redis.Client
-	port        int
+	config      *config.Config
 }
 
-func NewServer(port int, redisClient *redis.Client) *Server {
-	// Gin in release mode (meno verbose)
+func NewServer(cfg *config.Config, redisClient *redis.Client) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
 
 	// Middleware
-	router.Use(gin.Recovery())     // Recover da panic
-	router.Use(loggerMiddleware()) // Logger custom
+	router.Use(gin.Recovery())
+	router.Use(loggerMiddleware())
 
 	server := &Server{
 		router:      router,
 		redisClient: redisClient,
-		port:        port,
+		config:      cfg,
 	}
 
 	// Setup routes
@@ -60,8 +61,8 @@ func (s *Server) setupRoutes() {
 	s.router.GET("/test/tree", testHandler.TestFullTreeAllocation)
 	s.router.GET("/test/release-range", testHandler.TestReleaseWebRTCRange)
 
-	// Provisioner tests (AGGIORNATO con RedisClient)
-	provHandler, err := handlers.NewProvisionerHandler("test_media-tree", s.redisClient)
+	// Provisioner tests
+	provHandler, err := handlers.NewProvisionerHandler(s.config.DockerNetwork, s.redisClient)
 	if err != nil {
 		panic("Failed to create provisioner handler: " + err.Error())
 	}
@@ -73,6 +74,13 @@ func (s *Server) setupRoutes() {
 	s.router.GET("/test/provision/list", provHandler.TestListProvisioned)
 	s.router.GET("/test/provision/:nodeId", provHandler.TestGetProvisionInfo)
 
+	// Tree handler
+	treeHandler := handlers.NewTreeHandler(s.redisClient, provHandler.GetProvisioner())
+
+	s.router.POST("/trees", treeHandler.CreateTree)
+	s.router.GET("/trees/:id", treeHandler.GetTree)
+	s.router.DELETE("/trees/:id", treeHandler.DestroyTree)
+	s.router.GET("/trees", treeHandler.ListTrees)
 	// Root endpoint
 	s.router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -84,7 +92,7 @@ func (s *Server) setupRoutes() {
 }
 
 func (s *Server) Start() error {
-	addr := fmt.Sprintf(":%d", s.port)
+	addr := fmt.Sprintf(":%d", s.config.ServerPort)
 
 	s.httpServer = &http.Server{
 		Addr:         addr,
@@ -94,7 +102,7 @@ func (s *Server) Start() error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	fmt.Printf("API server listening on %s\n", addr)
+	log.Printf("API server listening on %s", addr)
 
 	// ListenAndServe blocca fino a shutdown
 	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -105,13 +113,13 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	fmt.Println("Shutting down API server...")
+	log.Println("Shutting down API server...")
 
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		return fmt.Errorf("server shutdown failed: %w", err)
 	}
 
-	fmt.Println("API server stopped gracefully")
+	log.Println("API server stopped gracefully")
 	return nil
 }
 
@@ -127,6 +135,6 @@ func loggerMiddleware() gin.HandlerFunc {
 		duration := time.Since(start)
 		statusCode := c.Writer.Status()
 
-		fmt.Printf("[API] %s %s - %d (%v)\n", method, path, statusCode, duration)
+		log.Printf("[API] %s %s - %d (%v)", method, path, statusCode, duration)
 	}
 }

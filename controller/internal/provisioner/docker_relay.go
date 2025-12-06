@@ -3,22 +3,19 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"controller/internal/domain"
 )
 
 func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.NodeSpec) (*domain.NodeInfo, error) {
-	// ========================================
-	// 1. ALLOCA PORTA API
-	// ========================================
+	// Alloca porta api
 	apiPort, err := p.portAllocator.AllocateAPIPort()
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate API port: %w", err)
 	}
 
-	// ========================================
-	// 2. CREA RELAY NODE (CLI)
-	// ========================================
+	// Crea Relay Node
 	nodeArgs := []string{
 		"-d",
 		"--name", spec.NodeId,
@@ -34,20 +31,18 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 		"-e", "REDIS_HOST=redis",
 		"-e", "REDIS_PORT=6379",
 		"-p", fmt.Sprintf("%d:%d/tcp", apiPort, apiPort),
-		"-p", "5002:5002/udp",
-		"-p", "5004:5004/udp",
 		"media-tree/relay-node:latest",
 	}
 
 	nodeID, err := p.dockerRun(ctx, nodeArgs)
 	if err != nil {
+		p.dockerRemove(ctx, spec.NodeId)
 		p.portAllocator.Release(apiPort)
 		return nil, fmt.Errorf("failed to create relay node: %w", err)
+
 	}
 
-	// ========================================
-	// 3. COSTRUISCI NodeInfo
-	// ========================================
+	// Costruisci NodeInfo
 	nodeInfo := &domain.NodeInfo{
 		NodeId:           spec.NodeId,
 		NodeType:         spec.NodeType,
@@ -62,11 +57,10 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 		ExternalAPIPort:  apiPort,
 	}
 
-	// ========================================
-	// 4. SALVA IN REDIS
-	// ========================================
+	// Salva in Redis
 	if err := p.redisClient.SaveNodeProvisioning(ctx, nodeInfo); err != nil {
 		// Rollback
+		log.Printf("[WARN] Failed to save Relay to Redis, rolling back %s...", spec.NodeId)
 		p.dockerStop(ctx, nodeInfo.NodeId)
 		p.dockerRemove(ctx, nodeInfo.NodeId)
 		p.portAllocator.Release(apiPort)

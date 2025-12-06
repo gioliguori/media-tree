@@ -3,14 +3,13 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"controller/internal/domain"
 )
 
 func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.NodeSpec) (*domain.NodeInfo, error) {
-	// ========================================
-	// 1. ALLOCA PORTE
-	// ========================================
+	// Alloca porte
 	apiPort, err := p.portAllocator.AllocateAPIPort()
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate API port: %w", err)
@@ -28,9 +27,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		return nil, fmt.Errorf("failed to allocate WebRTC range: %w", err)
 	}
 
-	// ========================================
-	// 2. CREA JANUS STREAMING (CLI)
-	// ========================================
+	// Crea Janus Streaming
 	janusName := spec.NodeId + "-janus-streaming"
 
 	janusArgs := []string{
@@ -38,6 +35,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		"--name", janusName,
 		"--hostname", janusName,
 		"--network", p.networkName,
+		"-e", fmt.Sprintf("JANUS_RTP_PORT_RANGE=%d-%d", webrtcStart, webrtcEnd),
 		"-e", "JANUS_LOG_LEVEL=4",
 		"-p", fmt.Sprintf("%d:8088/tcp", janusHTTP),
 		"-p", fmt.Sprintf("%d:8188/tcp", janusWS),
@@ -52,9 +50,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		return nil, fmt.Errorf("failed to create Janus container: %w", err)
 	}
 
-	// ========================================
-	// 3. CREA EGRESS NODE (CLI)
-	// ========================================
+	// Crea egress node
 	nodeArgs := []string{
 		"-d",
 		"--name", spec.NodeId,
@@ -74,12 +70,13 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		"-e", "WHEP_BASE_PATH=/whep",
 		"-e", "WHEP_TOKEN=verysecret",
 		"-p", fmt.Sprintf("%d:7073/tcp", apiPort),
-		"-p", "6000-6200:6000-6200/udp",
 		"media-tree/egress-node:latest",
 	}
 
 	nodeID, err := p.dockerRun(ctx, nodeArgs)
 	if err != nil {
+		// Rollback
+		p.dockerRemove(ctx, spec.NodeId)
 		p.dockerStop(ctx, janusName)
 		p.dockerRemove(ctx, janusName)
 		p.portAllocator.ReleasePorts(apiPort, janusHTTP, janusWS)
@@ -87,9 +84,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		return nil, fmt.Errorf("failed to create egress node: %w", err)
 	}
 
-	// ========================================
-	// 4. COSTRUISCI NodeInfo
-	// ========================================
+	// Costruisci NodeInfo
 	nodeInfo := &domain.NodeInfo{
 		NodeId:           spec.NodeId,
 		NodeType:         spec.NodeType,
@@ -104,17 +99,15 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		ExternalAPIPort:  apiPort,
 		JanusContainerId: janusID,
 		JanusHost:        janusName,
-		JanusWSPort:      8188,
+		JanusWSPort:      janusWS,
 		JanusHTTPPort:    janusHTTP,
 		WebRTCPortStart:  webrtcStart,
 		WebRTCPortEnd:    webrtcEnd,
 	}
-
-	// ========================================
-	// 5. SALVA IN REDIS
-	// ========================================
+	// Salva in Redis
 	if err := p.redisClient.SaveNodeProvisioning(ctx, nodeInfo); err != nil {
 		// Rollback
+		log.Printf("[WARN] Failed to save Egress to Redis, rolling back %s...", spec.NodeId)
 		p.dockerStop(ctx, nodeInfo.NodeId)
 		p.dockerRemove(ctx, nodeInfo.NodeId)
 		p.dockerStop(ctx, janusName)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -161,9 +162,9 @@ func (h *ProvisionerHandler) TestCreateTree(c *gin.Context) {
 // TestDestroyTree distrugge dinamicamente tutti i nodi di un albero
 func (h *ProvisionerHandler) TestDestroyTree(c *gin.Context) {
 	ctx := c.Request.Context()
-	treeId := "test-tree-1" // O prendilo da c.Query("treeId")
+	treeId := "test-tree-1"
 
-	// 1. Recupera tutti i nodi provisionati per questo albero
+	// Recupera tutti i nodi provisionati per questo albero
 	//    (Usa la funzione che legge tree:ID:controller:node:*)
 	nodes, err := h.redisClient.GetAllProvisionedNodes(ctx, treeId)
 	if err != nil {
@@ -181,24 +182,15 @@ func (h *ProvisionerHandler) TestDestroyTree(c *gin.Context) {
 	destroyed := []string{}
 	errors := []string{}
 
-	// 2. Itera e distruggi
+	// Itera e distruggi
 	for _, node := range nodes {
-		// DestroyNode ora farà pulizia completa (Container + Redis Runtime + Redis Provisioning)
 		if err := h.provisioner.DestroyNode(ctx, node); err != nil {
-			fmt.Printf("Error destroying %s: %v\n", node.NodeId, err)
+			log.Printf("Error destroying %s: %v", node.NodeId, err)
 			errors = append(errors, fmt.Sprintf("%s: %v", node.NodeId, err))
 		} else {
 			destroyed = append(destroyed, node.NodeId)
 		}
 	}
-
-	// 3. (Opzionale ma consigliato) Pulizia finale dei Set "fantasmi"
-	// Se c'erano ID vecchi nei Set (quelli del tuo screenshot) che non avevano
-	// for _, nType := range []string{"injection", "relay", "egress"} {
-	// 	// Svuota il set tree:ID:type
-	// 	setKey := fmt.Sprintf("tree:%s:%s", treeId, nType)
-	// 	h.redisClient.GetRedisClient().Del(ctx, setKey)
-	// }
 
 	c.JSON(http.StatusOK, gin.H{
 		"tree_id":   treeId,
@@ -247,4 +239,9 @@ func (h *ProvisionerHandler) TestGetProvisionInfo(c *gin.Context) {
 // Close chiude provisioner
 func (h *ProvisionerHandler) Close() error {
 	return h.provisioner.Close()
+}
+
+// GetProvisioner ritorna il provisioner
+func (h *ProvisionerHandler) GetProvisioner() provisioner.Provisioner {
+	return h.provisioner
 }
