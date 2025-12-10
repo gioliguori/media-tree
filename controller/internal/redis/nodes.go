@@ -116,22 +116,22 @@ func (c *Client) ForceDeleteNode(ctx context.Context, treeId, nodeId, nodeType s
 
 	// Cancella dati
 	if err := c.rdb.Del(ctx, fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)).Err(); err != nil {
-		fmt.Printf("[WARN] Failed to delete node key %s: %v\n", nodeId, err)
+		log.Printf("[WARN] Failed to delete node key %s: %v\n", nodeId, err)
 	}
 
 	if err := c.rdb.SRem(ctx, fmt.Sprintf("tree:%s:%s", treeId, nodeType), nodeId).Err(); err != nil {
-		fmt.Printf("[WARN] Failed to remove %s from type set: %v\n", nodeId, err)
+		log.Printf("[WARN] Failed to remove %s from type set: %v\n", nodeId, err)
 	}
 
 	if err := c.rdb.Del(ctx, parentsKey).Err(); err != nil {
-		fmt.Printf("[WARN] Failed to delete parents key %s: %v\n", nodeId, err)
+		log.Printf("[WARN] Failed to delete parents key %s: %v\n", nodeId, err)
 	}
 
 	if err := c.rdb.Del(ctx, childrenKey).Err(); err != nil {
-		fmt.Printf("[WARN] Failed to delete children key %s: %v\n", nodeId, err)
+		log.Printf("[WARN] Failed to delete children key %s: %v\n", nodeId, err)
 	}
 
-	fmt.Printf("[INFO] ForceDeleteNode %s completed\n", nodeId)
+	log.Printf("[INFO] ForceDeleteNode %s completed\n", nodeId)
 
 	return nil
 }

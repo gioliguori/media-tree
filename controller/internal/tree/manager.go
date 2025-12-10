@@ -295,19 +295,28 @@ func (tm *TreeManager) updateTreeStatus(ctx context.Context, treeId, status stri
 }
 
 func (tm *TreeManager) cleanupTreeRedis(ctx context.Context, treeId string) {
-	// Rimuovi metadata
-	tm.redis.Del(ctx, fmt.Sprintf("tree:%s:metadata", treeId))
+	log.Printf("[INFO] Cleaning up ALL Redis keys for tree %s", treeId)
 
-	// Rimuovi topologia (parents/children keys)
-	// Anche qui problema KEYS
-	for _, kind := range []string{"parents", "children"} {
-		pattern := fmt.Sprintf("tree:%s:%s:*", treeId, kind)
-		if keys, _ := tm.redis.Keys(ctx, pattern); len(keys) > 0 {
-			for _, k := range keys {
-				tm.redis.Del(ctx, k)
+	// Pattern: tree:{treeId}:*
+	pattern := fmt.Sprintf("tree:%s:*", treeId)
+	keys, err := tm.redis.Keys(ctx, pattern)
+	if err != nil {
+		log.Printf("[WARN] Failed to get keys for cleanup: %v", err)
+		return
+	}
+
+	log.Printf("[INFO] Found %d keys to cleanup for tree %s", len(keys), treeId)
+
+	// Delete tutte le chiavi
+	if len(keys) > 0 {
+		for _, key := range keys {
+			if err := tm.redis.Del(ctx, key); err != nil {
+				log.Printf("[WARN] Failed to delete key %s: %v", key, err)
 			}
 		}
 	}
+
+	log.Printf("[INFO] Redis cleanup completed for tree %s (%d keys removed)", treeId, len(keys))
 }
 
 func (tm *TreeManager) cleanupPartialTree(ctx context.Context, treeId string, nodes []*domain.NodeInfo) {

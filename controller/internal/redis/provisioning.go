@@ -96,6 +96,14 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string)
 		ExternalHost:     "localhost",
 	}
 
+	// Internal network info (per comunicazione Docker tra nodi)
+	nodeInfo.InternalHost = data.NodeId // es: "test-1-injection-1"
+
+	// Porte API interne
+	nodeInfo.InternalAPIPort = 7070
+	nodeInfo.InternalRTPAudio = 5002
+	nodeInfo.InternalRTPVideo = 5004
+
 	// JanusHost dal nodeId
 	switch nodeInfo.NodeType {
 	case domain.NodeTypeInjection:
@@ -174,6 +182,14 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*
 			WebRTCPortEnd:    data.WebRTCPortEnd,
 			ExternalHost:     "localhost",
 		}
+
+		// Internal network info (per comunicazione Docker tra nodi)
+		nodeInfo.InternalHost = data.NodeId
+
+		// Porte API interne
+		nodeInfo.InternalAPIPort = 7070
+		nodeInfo.InternalRTPAudio = 5002
+		nodeInfo.InternalRTPVideo = 5004
 
 		// Janus Host
 		switch nodeInfo.NodeType {

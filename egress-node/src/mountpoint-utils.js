@@ -1,5 +1,5 @@
 export async function saveMountpointToRedis(redis, treeId, nodeId, mountpointData) {
-    const { sessionId, mountpointId, audioSsrc, videoSsrc, janusAudioPort, janusVideoPort, createdAt } = mountpointData;
+    const { sessionId, mountpointId, audioSsrc, videoSsrc, janusAudioPort, janusVideoPort, endpoint, createdAt } = mountpointData;
 
     // hset -> hash set, di redis
     await redis.hset(`tree:${treeId}:mountpoint:${nodeId}:${sessionId}`, {
@@ -11,25 +11,23 @@ export async function saveMountpointToRedis(redis, treeId, nodeId, mountpointDat
         janusAudioPort: String(janusAudioPort),
         janusVideoPort: String(janusVideoPort),
         egressNodeId: nodeId,
+        //whepEndpoint: endpoint,
         active: 'true',
         createdAt: String(createdAt),
         updatedAt: String(createdAt)
     });
 
-    await redis.sadd(`mountpoints:${treeId}`, `${nodeId}:${sessionId}`);
+    await redis.sadd(`tree:${treeId}:mountpoints`, `${nodeId}:${sessionId}`);
     await redis.sadd(`tree:${treeId}:mountpoints:node:${nodeId}`, sessionId);
 }
 
 export async function deactivateMountpointInRedis(redis, treeId, nodeId, sessionId) {
+    // Rimuovi completamente l'hash
+    await redis.del(`tree:${treeId}:mountpoint:${nodeId}:${sessionId}`);
 
-    await redis.hset(`tree:${treeId}:mountpoint:${nodeId}:${sessionId}`, 'active', 'false');
-    await redis.hset(`tree:${treeId}:mountpoint:${nodeId}:${sessionId}`, 'updatedAt', String(Date.now()));
-
-    await redis.srem(`mountpoints:${treeId}`, `${nodeId}:${sessionId}`);
+    // Rimuovi dai SET di indice
+    await redis.srem(`tree:${treeId}:mountpoints`, `${nodeId}:${sessionId}`);
     await redis.srem(`tree:${treeId}:mountpoints:node:${nodeId}`, sessionId);
-
-    // TTL 24 ore
-    await redis.expire(`tree:${treeId}:mountpoint:${nodeId}:${sessionId}`, 86400);
 }
 
 export function getMountpointInfo(mountpointsMap, sessionId) {
@@ -44,6 +42,7 @@ export function getMountpointInfo(mountpointsMap, sessionId) {
         videoSsrc: mountpoint.videoSsrc,
         janusAudioPort: mountpoint.janusAudioPort,
         janusVideoPort: mountpoint.janusVideoPort,
+        whepEndpoint: `/whep/endpoint/${sessionId}`,
         active: mountpoint.active,
         createdAt: mountpoint.createdAt,
         uptime: Math.floor((Date.now() - mountpoint.createdAt) / 1000)
@@ -62,6 +61,7 @@ export function getAllMountpointsInfo(mountpointsMap) {
             videoSsrc: mountpoint.videoSsrc,
             janusAudioPort: mountpoint.janusAudioPort,
             janusVideoPort: mountpoint.janusVideoPort,
+            whepEndpoint: `/whep/endpoint/${sessionId}`,
             active: mountpoint.active,
             createdAt: mountpoint.createdAt,
             uptime: Math.floor((Date.now() - mountpoint.createdAt) / 1000)

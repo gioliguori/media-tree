@@ -46,41 +46,53 @@ func (s *Server) setupRoutes() {
 	// Health check endpoints
 	healthHandler := handlers.NewHealthHandler(s.redisClient)
 
-	s.router.GET("/health", healthHandler.Health)
-	s.router.GET("/ready", healthHandler.Ready)
-	s.router.GET("/test/redis", healthHandler.TestRedis)
-	s.router.GET("/test/topology", healthHandler.TestTopology)
+	s.router.GET("/api/health", healthHandler.Health)
+	s.router.GET("/api/ready", healthHandler.Ready)
+	s.router.GET("/api/test/redis", healthHandler.TestRedis)
+	s.router.GET("/api/test/topology", healthHandler.TestTopology)
 
 	testHandler := handlers.NewTestHandler()
-	s.router.GET("/test/domain", testHandler.TestDomainModels)
-	s.router.GET("/test/ports", testHandler.TestPortAllocator)
-	s.router.GET("/test/ports/allocation", testHandler.TestPortAllocation)
-	s.router.GET("/test/ports/release", testHandler.TestPortRelease)
+	s.router.GET("/api/test/domain", testHandler.TestDomainModels)
+	s.router.GET("/api/test/ports", testHandler.TestPortAllocator)
+	s.router.GET("/api/test/ports/allocation", testHandler.TestPortAllocation)
+	s.router.GET("/api/test/ports/release", testHandler.TestPortRelease)
 
-	s.router.GET("/test/webrtc", testHandler.TestWebRTCAllocation)
-	s.router.GET("/test/tree", testHandler.TestFullTreeAllocation)
-	s.router.GET("/test/release-range", testHandler.TestReleaseWebRTCRange)
+	s.router.GET("/api/test/webrtc", testHandler.TestWebRTCAllocation)
+	s.router.GET("/api/test/tree", testHandler.TestFullTreeAllocation)
+	s.router.GET("/api/test/release-range", testHandler.TestReleaseWebRTCRange)
 
 	// Provisioner tests
 	provHandler, err := handlers.NewProvisionerHandler(s.config.DockerNetwork, s.redisClient)
 	if err != nil {
 		panic("Failed to create provisioner handler: " + err.Error())
 	}
-	s.router.POST("/test/provision/injection", provHandler.TestCreateInjection)
-	s.router.POST("/test/provision/relay", provHandler.TestCreateRelay)
-	s.router.POST("/test/provision/egress", provHandler.TestCreateEgress)
-	s.router.POST("/test/provision/tree", provHandler.TestCreateTree)
-	s.router.DELETE("/test/provision/tree", provHandler.TestDestroyTree)
-	s.router.GET("/test/provision/list", provHandler.TestListProvisioned)
-	s.router.GET("/test/provision/:nodeId", provHandler.TestGetProvisionInfo)
+	s.router.POST("/api/test/provision/injection", provHandler.TestCreateInjection)
+	s.router.POST("/api/test/provision/relay", provHandler.TestCreateRelay)
+	s.router.POST("/api/test/provision/egress", provHandler.TestCreateEgress)
+	s.router.POST("/api/test/provision/tree", provHandler.TestCreateTree)
+	s.router.DELETE("/api/test/provision/tree", provHandler.TestDestroyTree)
+	s.router.GET("/api/test/provision/list", provHandler.TestListProvisioned)
+	s.router.GET("/api/test/provision/:nodeId", provHandler.TestGetProvisionInfo)
 
 	// Tree handler
 	treeHandler := handlers.NewTreeHandler(s.redisClient, provHandler.GetProvisioner())
 
-	s.router.POST("/trees", treeHandler.CreateTree)
-	s.router.GET("/trees/:id", treeHandler.GetTree)
-	s.router.DELETE("/trees/:id", treeHandler.DestroyTree)
-	s.router.GET("/trees", treeHandler.ListTrees)
+	s.router.POST("/api/trees", treeHandler.CreateTree)
+	s.router.GET("/api/trees/:tree_id", treeHandler.GetTree)
+	s.router.DELETE("/api/trees/:tree_id", treeHandler.DestroyTree)
+	s.router.GET("/api/trees", treeHandler.ListTrees)
+
+	sessionHandler := handlers.NewSessionHandler(s.redisClient, treeHandler.GetTreeManager())
+
+	s.router.POST("/api/sessions", sessionHandler.CreateSession)
+
+	// Rotte per GET e DELETE
+	s.router.GET("/api/trees/:tree_id/sessions/:session_id", sessionHandler.GetSession)
+	s.router.DELETE("/api/trees/:tree_id/sessions/:session_id", sessionHandler.DestroySession)
+
+	// List
+	s.router.GET("/api/trees/:tree_id/sessions", sessionHandler.ListSessions)
+
 	// Root endpoint
 	s.router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
