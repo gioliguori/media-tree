@@ -44,7 +44,7 @@ func (h *TreeHandler) CreateTree(c *gin.Context) {
 
 // GET /trees/:id
 func (h *TreeHandler) GetTree(c *gin.Context) {
-	treeId := c.Param("id")
+	treeId := c.Param("tree_id")
 
 	tree, err := h.treeManager.GetTree(c.Request.Context(), treeId)
 	if err != nil {
@@ -57,7 +57,7 @@ func (h *TreeHandler) GetTree(c *gin.Context) {
 
 // DELETE /trees/:id
 func (h *TreeHandler) DestroyTree(c *gin.Context) {
-	treeId := c.Param("id")
+	treeId := c.Param("tree_id")
 
 	if err := h.treeManager.DestroyTree(c.Request.Context(), treeId); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -76,4 +76,8 @@ func (h *TreeHandler) ListTrees(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"trees": trees, "count": len(trees)})
+}
+
+func (h *TreeHandler) GetTreeManager() *tree.TreeManager {
+	return h.treeManager
 }

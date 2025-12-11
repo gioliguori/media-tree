@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // GetNodeParent legge i parents di un nodo
@@ -205,4 +206,23 @@ func (c *Client) PublishTopologyReset(ctx context.Context, treeId string) error 
 	}
 
 	return c.PublishGlobalTopologyEvent(ctx, treeId, event)
+}
+
+func (c *Client) GetAllTrees(ctx context.Context) ([]string, error) {
+	pattern := "tree:*:metadata"
+	keys, err := c.Keys(ctx, pattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get trees: %w", err)
+	}
+
+	trees := make([]string, 0, len(keys))
+	for _, key := range keys {
+		// Estrai tree_id da "tree:{treeId}:metadata"
+		parts := strings.Split(key, ":")
+		if len(parts) >= 2 {
+			trees = append(trees, parts[1])
+		}
+	}
+
+	return trees, nil
 }

@@ -175,6 +175,7 @@ export class InjectionNode extends BaseNode {
                 audioSsrc,
                 videoSsrc,
                 recipients,
+                endpoint,
                 createdAt
             });
 

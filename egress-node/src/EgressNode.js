@@ -293,6 +293,7 @@ export class EgressNode extends BaseNode {
                 videoSsrc,
                 janusAudioPort: audioPort,
                 janusVideoPort: videoPort,
+                endpoint,
                 createdAt: Date.now()
             });
 

@@ -140,21 +140,21 @@ general: {
 # plugins/streams folder sends to. Whatever is sent to those ports will
 # be the source of a WebRTC broadcast users can subscribe to.
 #
-rtp-sample: {
-	type = "rtp"
-	id = 1
-	description = "Opus/VP8 live stream coming from external source"
-	metadata = "You can use this metadata section to put any info you want!"
-	audio = true
-	video = true
-	audioport = 5002
-	audiopt = 111
-	audiocodec = "opus"
-	videoport = 5004
-	videopt = 100
-	videocodec = "vp8"
-	secret = "adminpwd"
-}
+#rtp-sample: {
+#	type = "rtp"
+#	id = 1
+#	description = "Opus/VP8 live stream coming from external source"
+#	metadata = "You can use this metadata section to put any info you want!"
+#	audio = true
+#	video = true
+#	audioport = 5002
+#	audiopt = 111
+#	audiocodec = "opus"
+#	videoport = 5004
+#	videopt = 100
+#	videocodec = "vp8"
+#	secret = "adminpwd"
+#}
 
 #
 # This is a better example that uses the new settings to configure a live

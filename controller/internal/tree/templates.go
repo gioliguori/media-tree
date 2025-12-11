@@ -28,9 +28,9 @@ var Templates = map[string]TemplateConfig{
 
 	"medium": {
 		Name:        "medium",
-		Description: "1 injection + 2 relay + 6 egress",
+		Description: "2 injection + 2 relay + 6 egress",
 		Nodes: []TemplateNodeSpec{
-			{NodeType: "injection", Layer: 0, Count: 1},
+			{NodeType: "injection", Layer: 0, Count: 2},
 			{NodeType: "relay", Layer: 1, Count: 2},
 			{NodeType: "egress", Layer: 2, Count: 6},
 		},
@@ -55,6 +55,17 @@ var Templates = map[string]TemplateConfig{
 			{NodeType: "relay", Layer: 2, Count: 4},
 			{NodeType: "egress", Layer: 2, Count: 4},
 			{NodeType: "egress", Layer: 3, Count: 8},
+		},
+	},
+	"test-route": {
+		Name:        "test-route",
+		Description: "testing routing sessions",
+		Nodes: []TemplateNodeSpec{
+			{NodeType: "injection", Layer: 0, Count: 2},
+			{NodeType: "relay", Layer: 1, Count: 1},
+			{NodeType: "relay", Layer: 2, Count: 1},
+			{NodeType: "egress", Layer: 2, Count: 2},
+			{NodeType: "egress", Layer: 3, Count: 2},
 		},
 	},
 }
