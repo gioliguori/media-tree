@@ -52,7 +52,7 @@ services:
       dockerfile: Dockerfile
     container_name: whip-client-2
     environment:
-      - URL=http://test-3-injection-1:7070/whip/endpoint/broadcaster-auto
+      - URL=http://test-1-injection-1:7070/whip/endpoint/broadcaster-auto
       - TOKEN=verysecret
 
       - AUDIO_PIPE=audiotestsrc is-live=true wave=sine freq=880 ! audioconvert ! audioresample ! queue ! opusenc ! rtpopuspay pt=111 ssrc=3333 ! queue ! application/x-rtp,media=audio,encoding-name=OPUS,payload=111
