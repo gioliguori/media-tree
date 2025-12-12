@@ -170,7 +170,7 @@ PART 3: Distruzione e Cleanup
 Verifica che il sistema rilasci correttamente le risorse.
 
 Cancellazione Sessione
-curl -X DELETE http://localhost:8080/api/trees/test-3/sessions/broadcaster-auto | jq '.'
+curl -X DELETE http://localhost:8080/api/trees/test-1/sessions/broadcaster-auto | jq '.'
 
 Verifica Cleanup Redis per Sessione:
 # Metadati (Deve essere vuoto)

@@ -318,7 +318,7 @@ export class EgressNode extends BaseNode {
                 // Rollback: rimuovi mountpoint
                 this.mountpoints.delete(sessionId);
                 // this.portPool.release(audioPort, videoPort);
-                await destroyJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId);
+                await destroyJanusMountpoint(this.janusStreaming, mountpointId, this.mountpointSecret);
 
                 throw new Error(`Failed to configure forwarder: ${err.message}`);
             }
