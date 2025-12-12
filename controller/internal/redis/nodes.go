@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 )
 
 // NodeData rappresenta quello che BaseNode salva in Redis
@@ -20,19 +21,89 @@ type NodeData struct {
 	Created   int64  `redis:"created"`
 }
 
-// GetNode legge un nodo da Redis
-// Chiave: tree:{treeId}:node:{nodeId}
+// ============================================
+// POOL LAYER-BASED (NUOVO)
+// ============================================
+
+// AddNodeToPool aggiunge nodo a pool layer-based
+// Struttura: tree:{treeId}:pool: layer:{layer}:{nodeType}
+func (c *Client) AddNodeToPool(
+	ctx context.Context,
+	treeId string,
+	nodeType string,
+	layer int,
+	nodeId string,
+) error {
+	// Nuova struttura: pool:layer:{X}:{type}
+	key := fmt.Sprintf("tree:%s:pool:layer:%d:%s", treeId, layer, nodeType)
+
+	if err := c.rdb.SAdd(ctx, key, nodeId).Err(); err != nil {
+		return fmt.Errorf("failed to add node to pool:  %w", err)
+	}
+
+	log.Printf("[Redis] Added %s to pool %s", nodeId, key)
+	return nil
+}
+
+// GetNodesAtLayer recupera tutti i nodi di un tipo a layer specifico
+// Struttura: tree:{treeId}:pool:layer:{layer}:{nodeType}
+func (c *Client) GetNodesAtLayer(
+	ctx context.Context,
+	treeId string,
+	nodeType string,
+	layer int,
+) ([]string, error) {
+	key := fmt.Sprintf("tree:%s:pool:layer:%d:%s", treeId, layer, nodeType)
+
+	nodeIds, err := c.rdb.SMembers(ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes at layer %d: %w", layer, err)
+	}
+
+	return nodeIds, nil
+}
+
+// GetAllInjectionNodes recupera tutti injection nodes di un tree
+func (c *Client) GetAllInjectionNodes(ctx context.Context, treeId string) ([]string, error) {
+	key := fmt.Sprintf("tree:%s:pool:layer:0: injection", treeId)
+	return c.rdb.SMembers(ctx, key).Result()
+}
+
+// RemoveNodeFromPool rimuove nodo da tutti i pool
+func (c *Client) RemoveNodeFromPool(
+	ctx context.Context,
+	treeId string,
+	nodeId string,
+) error {
+	// Pattern: tree:{treeId}: pool:layer: *
+	pattern := fmt.Sprintf("tree:%s:pool:layer:*", treeId)
+	keys, err := c.Keys(ctx, pattern)
+	if err != nil {
+		return fmt.Errorf("failed to find pool keys: %w", err)
+	}
+
+	// Rimuovi da tutti i pool trovati
+	for _, key := range keys {
+		c.rdb.SRem(ctx, key, nodeId)
+	}
+
+	log.Printf("[Redis] Removed %s from all pools in tree %s", nodeId, treeId)
+	return nil
+}
+
+// LEGACY (DEPRECATO - Mantenuto per compatibilità)
+
+// GetNode legge un nodo da Redis (compatibilità con BaseNode. js)
+// Chiave: tree:{treeId}: node:{nodeId}
 func (c *Client) GetNode(ctx context.Context, treeId, nodeId string) (*NodeData, error) {
 	key := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
 
 	var node NodeData
 
-	// .Scan() legge da Redis e riempie la struct usando i tag
 	if err := c.rdb.HGetAll(ctx, key).Scan(&node); err != nil {
 		return nil, fmt.Errorf("failed to get node %s: %w", nodeId, err)
 	}
 
-	// Scan non dà errore se la chiave non esiste restituisce una struct vuota.
 	if node.NodeId == "" {
 		return nil, fmt.Errorf("node not found: %s", nodeId)
 	}
@@ -40,118 +111,143 @@ func (c *Client) GetNode(ctx context.Context, treeId, nodeId string) (*NodeData,
 	return &node, nil
 }
 
-// GetTreeNodes legge tutti i nodi di un tree per tipo
-// Chiave: tree:{treeId}:{nodeType} (injection, relay, egress)
-// Ritorna: lista di nodeId
+// GetTreeNodes legge tutti i nodi di un tree per tipo (DEPRECATO)
+// Usa GetNodesAtLayer invece
 func (c *Client) GetTreeNodes(ctx context.Context, treeId, nodeType string) ([]string, error) {
-	key := fmt.Sprintf("tree:%s:%s", treeId, nodeType)
+	// Fallback: cerca in tutti i layer
+	var allNodes []string
 
-	// SMembers: Legge tutti i membri di un SET Redis.
-	nodeIds, err := c.rdb.SMembers(ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tree nodes %s/%s: %w", treeId, nodeType, err)
-	}
-
-	return nodeIds, nil
-}
-
-// GetAllTreeNodes legge TUTTI i nodi di un tree
-// Ritorna: lista completa di NodeData
-func (c *Client) GetAllTreeNodes(ctx context.Context, treeId string) ([]*NodeData, error) {
-	var allNodes []*NodeData
-	skipped := 0
-	// Leggi ogni tipo di nodo
-	for _, nodeType := range []string{"injection", "relay", "egress"} {
-		nodeIds, err := c.GetTreeNodes(ctx, treeId, nodeType)
+	for layer := 0; layer <= 5; layer++ {
+		nodes, err := c.GetNodesAtLayer(ctx, treeId, nodeType, layer)
 		if err != nil {
-			return nil, err
+			continue
 		}
-
-		// Leggi metadata di ogni nodo
-		for _, nodeId := range nodeIds {
-			node, err := c.GetNode(ctx, treeId, nodeId)
-			if err != nil {
-				// Skip nodi non validi (potrebbero essere expired)
-				log.Printf("[WARN] Failed to get node %s in tree %s: %v\n", nodeId, treeId, err)
-				skipped++
-				continue
-			}
-			allNodes = append(allNodes, node)
-		}
-	}
-
-	if skipped > 0 {
-		log.Printf("[WARN] Skipped %d invalid nodes in tree %s\n", skipped, treeId)
+		allNodes = append(allNodes, nodes...)
 	}
 
 	return allNodes, nil
 }
 
-// NodeExists verifica se un nodo esiste in Redis
-func (c *Client) NodeExists(ctx context.Context, treeId, nodeId string) (bool, error) {
-	key := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
+// GetAllTreeNodes legge TUTTI i nodi di un tree
+func (c *Client) GetAllTreeNodes(ctx context.Context, treeId string) ([]*NodeData, error) {
+	var allNodes []*NodeData
+	skipped := 0
 
-	exists, err := c.rdb.Exists(ctx, key).Result()
+	// Cerca pattern tree:{treeId}:node: *
+	pattern := fmt.Sprintf("tree:%s:node:*", treeId)
+	keys, err := c.Keys(ctx, pattern)
 	if err != nil {
-		return false, fmt.Errorf("failed to check node existence %s: %w", nodeId, err)
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
 
-	return exists > 0, nil
+	for _, key := range keys {
+		// Estrai nodeId da key
+		nodeId := extractNodeIdFromKey(key)
+		if nodeId == "" {
+			continue
+		}
+
+		node, err := c.GetNode(ctx, treeId, nodeId)
+		if err != nil {
+			log.Printf("[WARN] Failed to get node %s: %v", nodeId, err)
+			skipped++
+			continue
+		}
+		allNodes = append(allNodes, node)
+	}
+
+	if skipped > 0 {
+		log.Printf("[WARN] Skipped %d invalid nodes in tree %s", skipped, treeId)
+	}
+
+	return allNodes, nil
 }
 
-// ForceDeleteNode rimuove un nodo da Redis e pulisce i riferimenti
-func (c *Client) ForceDeleteNode(ctx context.Context, treeId, nodeId, nodeType string) error {
-	// Pulizia riferimenti
-	parentsKey := fmt.Sprintf("tree:%s:parents:%s", treeId, nodeId)
-	parents, _ := c.rdb.SMembers(ctx, parentsKey).Result()
-	for _, parentId := range parents {
-		c.rdb.SRem(ctx, fmt.Sprintf("tree:%s:children:%s", treeId, parentId), nodeId)
+// Helper:  estrae nodeId da "tree:{treeId}:node:{nodeId}"
+func extractNodeIdFromKey(key string) string {
+	parts := strings.Split(key, ":")
+	if len(parts) >= 4 && parts[2] == "node" {
+		return parts[3]
+	}
+	return ""
+}
+
+// ============================================
+// CLEANUP NODO
+// ============================================
+
+// ForceDeleteNode rimuove completamente un nodo da Redis
+func (c *Client) ForceDeleteNode(
+	ctx context.Context,
+	treeId string,
+	nodeId string,
+	nodeType string,
+) error {
+	log.Printf("[Redis] Force deleting node %s from tree %s", nodeId, treeId)
+
+	// 1. Rimuovi da pool layer-based
+	if err := c.RemoveNodeFromPool(ctx, treeId, nodeId); err != nil {
+		log.Printf("[WARN] Failed to remove from pool: %v", err)
 	}
 
+	// 2. Rimuovi provisioning info (salvato da Provisioner)
+	provisioningKey := fmt.Sprintf("tree:%s:controller:node:%s", treeId, nodeId)
+	if err := c.rdb.Del(ctx, provisioningKey).Err(); err != nil {
+		log.Printf("[WARN] Failed to delete provisioning info: %v", err)
+	}
+
+	// 3. Rimuovi runtime info (salvato da BaseNode.js)
+	runtimeKey := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
+	if err := c.rdb.Del(ctx, runtimeKey).Err(); err != nil {
+		log.Printf("[WARN] Failed to delete runtime info: %v", err)
+	}
+
+	// 4. Rimuovi children (se è injection o relay-root)
 	childrenKey := fmt.Sprintf("tree:%s:children:%s", treeId, nodeId)
-	children, _ := c.rdb.SMembers(ctx, childrenKey).Result()
-	for _, childId := range children {
-		c.rdb.SRem(ctx, fmt.Sprintf("tree:%s:parents:%s", treeId, childId), nodeId)
-	}
+	c.rdb.Del(ctx, childrenKey)
 
-	// Cancella dati
-	if err := c.rdb.Del(ctx, fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)).Err(); err != nil {
-		log.Printf("[WARN] Failed to delete node key %s: %v\n", nodeId, err)
-	}
+	// 5. Rimuovi parents
+	parentsKey := fmt.Sprintf("tree:%s:parents:%s", treeId, nodeId)
+	c.rdb.Del(ctx, parentsKey)
 
-	if err := c.rdb.SRem(ctx, fmt.Sprintf("tree:%s:%s", treeId, nodeType), nodeId).Err(); err != nil {
-		log.Printf("[WARN] Failed to remove %s from type set: %v\n", nodeId, err)
-	}
-
-	if err := c.rdb.Del(ctx, parentsKey).Err(); err != nil {
-		log.Printf("[WARN] Failed to delete parents key %s: %v\n", nodeId, err)
-	}
-
-	if err := c.rdb.Del(ctx, childrenKey).Err(); err != nil {
-		log.Printf("[WARN] Failed to delete children key %s: %v\n", nodeId, err)
-	}
-
-	log.Printf("[INFO] ForceDeleteNode %s completed\n", nodeId)
-
+	log.Printf("[Redis] Node %s force deleted successfully", nodeId)
 	return nil
 }
 
-// GetNodesByType è un alias più leggibile
-func (c *Client) GetNodesByType(ctx context.Context, treeId string, nodeType string) ([]string, error) {
-	return c.GetTreeNodes(ctx, treeId, nodeType)
-}
-
-// GetInjectionNodes legge tutti gli injection nodes
+// GetInjectionNodes recupera tutti i nodi injection di un tree
+// Wrapper per compatibilità con codice esistente
 func (c *Client) GetInjectionNodes(ctx context.Context, treeId string) ([]string, error) {
-	return c.GetTreeNodes(ctx, treeId, "injection")
+	return c.GetAllInjectionNodes(ctx, treeId)
 }
 
-// GetRelayNodes legge tutti i relay nodes
+// GetRelayNodes recupera tutti i nodi relay di un tree (tutti i layer)
 func (c *Client) GetRelayNodes(ctx context.Context, treeId string) ([]string, error) {
-	return c.GetTreeNodes(ctx, treeId, "relay")
+	var allRelays []string
+
+	// Cerca in tutti i layer (0-10)
+	for layer := 0; layer <= 10; layer++ {
+		relays, err := c.GetNodesAtLayer(ctx, treeId, "relay", layer)
+		if err != nil {
+			continue
+		}
+		allRelays = append(allRelays, relays...)
+	}
+
+	return allRelays, nil
 }
 
-// GetEgressNodes legge tutti gli egress nodes
+// GetEgressNodes recupera tutti i nodi egress di un tree (tutti i layer)
 func (c *Client) GetEgressNodes(ctx context.Context, treeId string) ([]string, error) {
-	return c.GetTreeNodes(ctx, treeId, "egress")
+	var allEgress []string
+
+	// Cerca in tutti i layer (1-10)
+	for layer := 1; layer <= 10; layer++ {
+		egress, err := c.GetNodesAtLayer(ctx, treeId, "egress", layer)
+		if err != nil {
+			continue
+		}
+		allEgress = append(allEgress, egress...)
+	}
+
+	return allEgress, nil
 }

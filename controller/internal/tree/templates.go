@@ -5,67 +5,69 @@ import (
 )
 
 // Templates predefiniti per creazione alberi
+// Nota: relay-root vengono creati automaticamente per ogni injection
 var Templates = map[string]TemplateConfig{
 	"minimal": {
 		Name:        "minimal",
-		Description: "1 injection + 1 relay + 1 egress",
+		Description: "1 injection + 1 egress (relay-root auto-created)",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 1},
-			{NodeType: "relay", Layer: 1, Count: 1},
-			{NodeType: "egress", Layer: 2, Count: 1},
+			{NodeType: "egress", Layer: 1, Count: 1},
 		},
 	},
 
 	"small": {
 		Name:        "small",
-		Description: "1 injection + 1 relay + 3 egress",
+		Description: "1 injection + 3 egress (relay-root auto-created)",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 1},
-			{NodeType: "relay", Layer: 1, Count: 1},
-			{NodeType: "egress", Layer: 2, Count: 3},
+			{NodeType: "egress", Layer: 1, Count: 3},
 		},
 	},
 
 	"medium": {
 		Name:        "medium",
-		Description: "2 injection + 2 relay + 6 egress",
+		Description: "2 injection + 2 relay L1 + 6 egress (2 relay-root auto-created)",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 2},
 			{NodeType: "relay", Layer: 1, Count: 2},
-			{NodeType: "egress", Layer: 2, Count: 6},
+			{NodeType: "egress", Layer: 1, Count: 3},
+			{NodeType: "egress", Layer: 2, Count: 3},
 		},
 	},
 
 	"large": {
 		Name:        "large",
-		Description: "1 injection + 3 relay + 9 egress",
+		Description: "1 injection + 3 relay L1 + 9 egress (relay-root auto-created)",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 1},
 			{NodeType: "relay", Layer: 1, Count: 3},
-			{NodeType: "egress", Layer: 2, Count: 9},
+			{NodeType: "egress", Layer: 1, Count: 5},
+			{NodeType: "egress", Layer: 2, Count: 4},
 		},
 	},
 
 	"deep": {
 		Name:        "deep",
-		Description: "Multi-tier with relay at layer 2",
+		Description: "Multi-tier with varying heights",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 1},
 			{NodeType: "relay", Layer: 1, Count: 2},
-			{NodeType: "relay", Layer: 2, Count: 4},
-			{NodeType: "egress", Layer: 2, Count: 4},
-			{NodeType: "egress", Layer: 3, Count: 8},
+			{NodeType: "relay", Layer: 2, Count: 2},
+			{NodeType: "egress", Layer: 1, Count: 2},
+			{NodeType: "egress", Layer: 2, Count: 2},
+			{NodeType: "egress", Layer: 3, Count: 4},
 		},
 	},
+
 	"test-route": {
 		Name:        "test-route",
-		Description: "testing routing sessions",
+		Description: "Testing routing with multiple injection pairs",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 2},
-			{NodeType: "relay", Layer: 1, Count: 1},
-			{NodeType: "relay", Layer: 2, Count: 1},
+			{NodeType: "relay", Layer: 1, Count: 2},
+			{NodeType: "egress", Layer: 1, Count: 2},
 			{NodeType: "egress", Layer: 2, Count: 2},
-			{NodeType: "egress", Layer: 3, Count: 2},
 		},
 	},
 }

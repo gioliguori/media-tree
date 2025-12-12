@@ -72,14 +72,15 @@ type TemplateConfig struct {
 	Nodes       []TemplateNodeSpec `json:"nodes"`
 }
 
-// Specifica per creazione nodi nel template
+// TemplateNodeSpec specifica per creazione nodi nel template
+// Nota: relay-root vengono creati automaticamente per ogni injection
 type TemplateNodeSpec struct {
-	NodeType string `json:"node_type"`
-	Layer    int    `json:"layer"`
-	Count    int    `json:"count"`
+	NodeType string `json:"node_type"` // injection, relay, egress
+	Layer    int    `json:"layer"`     // 0, 1, 2, 3...
+	Count    int    `json:"count"`     // Numero di nodi da creare
 }
 
-// ValidateTemplate
+// Validate valida configurazione template
 func (tc *TemplateConfig) Validate() error {
 	if tc.Name == "" {
 		return fmt.Errorf("template name is required")
@@ -111,24 +112,32 @@ func (tc *TemplateConfig) Validate() error {
 		// Regole specifiche per tipo
 		switch spec.NodeType {
 		case "injection":
+			// Injection devono essere al layer 0
 			if spec.Layer != 0 {
 				return fmt.Errorf("injection nodes must be at layer 0")
 			}
 			hasInjection = true
 
 		case "relay":
+			// Relay al layer 0 (relay-root) sono creati automaticamente
+			// Non devono essere specificati nel template
+			if spec.Layer == 0 {
+				return fmt.Errorf("relay at layer 0 are auto-created with injection (remove from template)")
+			}
 			if spec.Layer < 1 {
 				return fmt.Errorf("relay nodes must be at layer >= 1")
 			}
 
 		case "egress":
-			if spec.Layer < 2 {
-				return fmt.Errorf("egress nodes must be at layer >= 2")
+			// Egress possono iniziare dal layer 1 (direttamente sotto relay-root)
+			if spec.Layer < 1 {
+				return fmt.Errorf("egress nodes must be at layer >= 1")
 			}
 			hasEgress = true
 		}
 	}
 
+	// Template deve avere almeno 1 injection e 1 egress
 	if !hasInjection {
 		return fmt.Errorf("template must have at least one injection node")
 	}
