@@ -196,10 +196,6 @@ export class InjectionNode extends BaseNode {
     }
 
     async destroySession(sessionId) {
-        // Check esistenza
-        if (!this.sessions.has(sessionId)) {
-            throw new Error(`Session ${sessionId} not found`);
-        }
         // Lock
         if (this.operationLocks.get(sessionId)) {
             throw new Error(`Operation already in progress for session ${sessionId}`);
@@ -258,8 +254,8 @@ export class InjectionNode extends BaseNode {
         console.log(`[${this.nodeId}] Discovering existing sessions from Redis...`);
 
         try {
-            const sessionIds = await this.redis.smembers(`tree:${this.treeId}:sessions:node:${this.nodeId}`);
-
+            const key = `tree:${this.treeId}:node:${this.nodeId}:sessions`;
+            const sessionIds = await this.redis.smembers(key);
             if (sessionIds.length === 0) {
                 console.log(`[${this.nodeId}] No existing sessions found`);
                 return;
@@ -367,6 +363,21 @@ export class InjectionNode extends BaseNode {
         // recipients statici
     }
 
+    async onSessionDestroyed(event) {
+        const { sessionId } = event;
+        console.log(`[${this.nodeId}] Request to destroy session: ${sessionId}`);
+
+        // Check memoria
+        if (this.sessions.has(sessionId)) {
+            try {
+                await this.destroySession(sessionId);
+            } catch (error) {
+                console.error(`[${this.nodeId}] Error handling session-destroyed event:`, error.message);
+            }
+        } else {
+            console.log(`[${this.nodeId}] Session ${sessionId} already destroyed or not found locally`);
+        }
+    }
     // API ENDPOINTS
 
     setupInjectionAPI() {

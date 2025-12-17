@@ -270,10 +270,10 @@ func (pa *PortAllocator) GetStats() map[string]any {
 	}
 
 	return map[string]any{
-		"total_used_ports":          len(pa.usedPorts),
-		"api_ports_available":       apiFree,
-		"janus_instances_available": janusInstances,
-		"webrtc_ranges_available":   webrtcRanges,
+		"totalUsedPorts":          len(pa.usedPorts),
+		"apiPortsAvailable":       apiFree,
+		"janusInstancesAvailable": janusInstances,
+		"webrtcRangesAvailable":   webrtcRanges,
 	}
 }
 

@@ -3,7 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"strings"
 )
 
 // SaveSession salva session metadata
@@ -82,32 +82,7 @@ func (c *Client) GetTreeSessions(
 	return c.rdb.SMembers(ctx, key).Result()
 }
 
-// SaveSessionEgressInfo salva info per egress specifico
-func (c *Client) SaveSessionEgressInfo(
-	ctx context.Context,
-	treeId string,
-	sessionId string,
-	egressId string,
-	path string,
-	whepEndpoint string,
-) error {
-	key := fmt.Sprintf("tree:%s:session:%s:egress:%s", treeId, sessionId, egressId)
-	return c.rdb.HSet(ctx, key,
-		"path", path,
-		"whep_endpoint", whepEndpoint,
-	).Err()
-}
-
-// GetSessionEgressInfo legge info egress
-func (c *Client) GetSessionEgressInfo(
-	ctx context.Context,
-	treeId string,
-	sessionId string,
-	egressId string,
-) (map[string]string, error) {
-	key := fmt.Sprintf("tree:%s:session:%s:egress:%s", treeId, sessionId, egressId)
-	return c.rdb.HGetAll(ctx, key).Result()
-}
+// Egress
 
 // AddEgressToSession aggiunge egress a lista session
 func (c *Client) AddEgressToSession(
@@ -130,9 +105,64 @@ func (c *Client) GetSessionEgresses(
 	return c.rdb.SMembers(ctx, key).Result()
 }
 
+// RemoveEgressFromSession rimuove egress da session
+func (c *Client) RemoveEgressFromSession(
+	ctx context.Context,
+	treeId string,
+	sessionId string,
+	egressId string,
+) error {
+	key := fmt.Sprintf("tree:%s:session:%s:egresses", treeId, sessionId)
+	return c.rdb.SRem(ctx, key, egressId).Err()
+}
+
+// FindEgressServingSession ritorna egress che servono una sessione
+// Usato da ProvisionViewer per riusare egress esistente invece di crearne uno nuovo
+func (c *Client) FindEgressServingSession(
+	ctx context.Context,
+	treeId string,
+	sessionId string,
+) ([]string, error) {
+	// Wrapper semantico per GetSessionEgresses
+	return c.GetSessionEgresses(ctx, treeId, sessionId)
+}
+
+// SaveSessionPath salva path costruito per coppia (session, egress)
+func (c *Client) SaveSessionPath(
+	ctx context.Context,
+	treeId string,
+	sessionId string,
+	egressId string,
+	path []string,
+) error {
+	key := fmt.Sprintf("tree:%s:session:%s:path:%s", treeId, sessionId, egressId)
+	pathStr := strings.Join(path, ",")
+	return c.rdb.Set(ctx, key, pathStr, 0).Err()
+}
+
+// GetSessionPath legge path per coppia (session, egress)
+func (c *Client) GetSessionPath(
+	ctx context.Context,
+	treeId string,
+	sessionId string,
+	egressId string,
+) ([]string, error) {
+	key := fmt.Sprintf("tree:%s:session:%s:path:%s", treeId, sessionId, egressId)
+	pathStr, err := c.rdb.Get(ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	if pathStr == "" {
+		return []string{}, nil
+	}
+
+	return strings.Split(pathStr, ","), nil
+}
+
 // GetNextRoomId genera room ID incrementale
 func (c *Client) GetNextRoomId(ctx context.Context, treeId string) (int, error) {
-	key := fmt.Sprintf("tree:%s:room_counter", treeId)
+	key := fmt.Sprintf("tree:%s:roomCounter", treeId)
 
 	// Controlla se il counter esiste
 	exists, err := c.rdb.Exists(ctx, key).Result()
@@ -154,34 +184,10 @@ func (c *Client) GetNextRoomId(ctx context.Context, treeId string) (int, error) 
 	return int(roomId), nil
 }
 
-func (c *Client) DeleteMountpoint(
-	ctx context.Context,
-	treeId string,
-	nodeId string,
-	sessionId string,
-) error {
-	// Cancella hash mountpoint
-	key := fmt.Sprintf("tree:%s:mountpoint:%s:%s", treeId, nodeId, sessionId)
-	if err := c.rdb.Del(ctx, key).Err(); err != nil {
-		return err
-	}
-
-	// Rimuovi da SET di indice
-	if err := c.rdb.SRem(ctx, fmt.Sprintf("tree:%s:mountpoints", treeId), fmt.Sprintf("%s:%s", nodeId, sessionId)).Err(); err != nil {
-		return err
-	}
-
-	if err := c.rdb.SRem(ctx, fmt.Sprintf("tree:%s:mountpoints:node:%s", treeId, nodeId), sessionId).Err(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // GetNextSSRC genera SSRC incrementale
 // Range: 10000-999999999
 func (c *Client) GetNextSSRC(ctx context.Context, treeId string) (int, error) {
-	key := fmt.Sprintf("tree:%s:ssrc_counter", treeId)
+	key := fmt.Sprintf("tree:%s:ssrcCounter", treeId)
 
 	// Controlla se il counter esiste
 	exists, err := c.rdb.Exists(ctx, key).Result()
@@ -201,26 +207,4 @@ func (c *Client) GetNextSSRC(ctx context.Context, treeId string) (int, error) {
 		return 0, err
 	}
 	return int(ssrc), nil
-}
-
-// ParseSessionData converte map[string]string in dati strutturati
-func ParseSessionData(data map[string]string) (sessionId string, audioSsrc, videoSsrc, roomId int, err error) {
-	sessionId = data["session_id"]
-
-	audioSsrc, err = strconv.Atoi(data["audio_ssrc"])
-	if err != nil {
-		return "", 0, 0, 0, fmt.Errorf("invalid audio_ssrc: %w", err)
-	}
-
-	videoSsrc, err = strconv.Atoi(data["video_ssrc"])
-	if err != nil {
-		return "", 0, 0, 0, fmt.Errorf("invalid video_ssrc: %w", err)
-	}
-
-	roomId, err = strconv.Atoi(data["room_id"])
-	if err != nil {
-		return "", 0, 0, 0, fmt.Errorf("invalid room_id: %w", err)
-	}
-
-	return sessionId, audioSsrc, videoSsrc, roomId, nil
 }

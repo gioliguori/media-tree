@@ -58,7 +58,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		"--network", p.networkName,
 		"-e", fmt.Sprintf("NODE_ID=%s", spec.NodeId),
 		"-e", fmt.Sprintf("NODE_HOST=%s", spec.NodeId),
-		"-e", "API_PORT=7073",
+		"-e", "API_PORT=7070",
 		"-e", fmt.Sprintf("TREE_ID=%s", spec.TreeId),
 		"-e", fmt.Sprintf("LAYER=%d", spec.Layer),
 		"-e", "RTP_AUDIO_PORT=5002",
@@ -69,7 +69,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		"-e", "JANUS_STREAMING_MOUNTPOINT_SECRET=adminpwd",
 		"-e", "WHEP_BASE_PATH=/whep",
 		"-e", "WHEP_TOKEN=verysecret",
-		"-p", fmt.Sprintf("%d:7073/tcp", apiPort),
+		"-p", fmt.Sprintf("%d:7070/tcp", apiPort),
 		"media-tree/egress-node:latest",
 	}
 
@@ -92,7 +92,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		Layer:            spec.Layer,
 		ContainerId:      nodeID,
 		InternalHost:     spec.NodeId,
-		InternalAPIPort:  7073,
+		InternalAPIPort:  7070,
 		InternalRTPAudio: 5002,
 		InternalRTPVideo: 5004,
 		ExternalHost:     "localhost",

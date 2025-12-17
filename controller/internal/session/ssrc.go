@@ -7,7 +7,8 @@ import (
 	"controller/internal/redis"
 )
 
-// Usa counter incrementale
+// GenerateSSRC genera SSRC univoco per tree
+// Range: 10000-999999999 (counter incrementale)
 func GenerateSSRC(
 	ctx context.Context,
 	redisClient *redis.Client,
@@ -18,7 +19,7 @@ func GenerateSSRC(
 		return 0, fmt.Errorf("failed to generate SSRC: %w", err)
 	}
 
-	// Range: 10000-999999999
+	// Range check
 	if ssrc > 999999999 {
 		return 0, fmt.Errorf("SSRC overflow: %d", ssrc)
 	}
@@ -41,7 +42,6 @@ func GenerateSSRCPair(
 	// Genera video SSRC
 	videoSsrc, err = GenerateSSRC(ctx, redisClient, treeId)
 	if err != nil {
-		// rollback per errori Redis
 		return 0, 0, fmt.Errorf("failed to generate video SSRC: %w", err)
 	}
 
@@ -54,7 +54,6 @@ func GenerateRoomId(
 	redisClient *redis.Client,
 	treeId string,
 ) (int, error) {
-	// Usa counter incrementale Redis
 	roomId, err := redisClient.GetNextRoomId(ctx, treeId)
 	if err != nil {
 		return 0, fmt.Errorf("failed to generate room ID: %w", err)

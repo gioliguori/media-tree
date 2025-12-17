@@ -1,0 +1,223 @@
+{
+  "tree:test-1:node:relay-root-1:sessions": [
+    "session-1"
+  ],
+  "tree:test-1:session:session-1:egresses": [
+    "egress-1"
+  ],
+  "tree:test-1:controller:node:injection-1": {
+    "nodeId": "injection-1",
+    "nodeType": "injection",
+    "treeId": "test-1",
+    "layer": "0",
+    "containerId": "58621348abce5f27e18aaced16e4a539b9f16752e1956be07778723ef68227ba",
+    "janusContainerId": "84dc7095508f5a09b27b986e98fedf4ae9313baf6dcd29bae50a6152fe21ee93",
+    "externalAPIPort": "7070",
+    "janusHTTPPort": "8088",
+    "janusWSPort": "8188",
+    "webrtcPortStart": "20000",
+    "webrtcPortEnd": "20099",
+    "createdBy": "controller",
+    "createdAt": "1765899290"
+  },
+  "tree:test-1:node:egress-1:sessions": [
+    "session-1"
+  ],
+  "tree:test-1:controller:node:egress-2": {
+    "nodeId": "egress-2",
+    "nodeType": "egress",
+    "treeId": "test-1",
+    "layer": "1",
+    "containerId": "759b8770e2757b6242bf60a92790a4fe5c5d0215670af1287c467cc11870cee8",
+    "janusContainerId": "abbf489f80f1c9cc2667be6e73805f2096a5ea00a7ab7749c397a3255e94f497",
+    "externalAPIPort": "7073",
+    "janusHTTPPort": "8090",
+    "janusWSPort": "8190",
+    "webrtcPortStart": "20200",
+    "webrtcPortEnd": "20299",
+    "createdBy": "controller",
+    "createdAt": "1765899293"
+  },
+  "tree:test-1:controller:node:egress-3": {
+    "nodeId": "egress-3",
+    "nodeType": "egress",
+    "treeId": "test-1",
+    "layer": "1",
+    "containerId": "98d938f9207e15dd70fb8435f3b966ddff605693371dbd934152f6b5eb9be8a1",
+    "janusContainerId": "37ec6a2250fd2425df88922e1c898b8ed226c98f3e0111e922a1872f0869a8a1",
+    "externalAPIPort": "7074",
+    "janusHTTPPort": "8091",
+    "janusWSPort": "8191",
+    "webrtcPortStart": "20300",
+    "webrtcPortEnd": "20399",
+    "createdBy": "controller",
+    "createdAt": "1765899295"
+  },
+  "tree:test-1:controller:node:relay-root-1": {
+    "nodeId": "relay-root-1",
+    "nodeType": "relay",
+    "treeId": "test-1",
+    "layer": "0",
+    "containerId": "3899c480aec0885ce7f8a8d433967b334dd7db606ebd23feecb69e492e019b4a",
+    "janusContainerId": "",
+    "externalAPIPort": "7071",
+    "janusHTTPPort": "0",
+    "janusWSPort": "0",
+    "webrtcPortStart": "0",
+    "webrtcPortEnd": "0",
+    "createdBy": "controller",
+    "createdAt": "1765899290"
+  },
+  "tree:test-1:pool:layer:1:egress": [
+    "egress-1",
+    "egress-3",
+    "egress-2"
+  ],
+  "tree:test-1:parents:relay-root-1": [
+    "injection-1"
+  ],
+  "tree:test-1:mountpoints": [
+    "egress-1:session-1"
+  ],
+  "tree:test-1:session:session-1:path:egress-1": "injection-1,relay-root-1,egress-1",
+  "tree:test-1:children:injection-1": [
+    "relay-root-1"
+  ],
+  "tree:test-1:routing:session-1:relay-root-1": [
+    "egress-1"
+  ],
+  "tree:test-1:relay": [
+    "relay-root-1"
+  ],
+  "tree:test-1:metadata": {
+    "status": "active",
+    "createdAt": "1765899289",
+    "updatedAt": "1765899295",
+    "treeId": "test-1",
+    "template": "small"
+  },
+  "tree:test-1:node:egress-1": {
+    "nodeId": "egress-1",
+    "type": "egress",
+    "treeId": "test-1",
+    "host": "egress-1",
+    "port": "7073",
+    "audioPort": "5002",
+    "videoPort": "5004",
+    "layer": "1",
+    "status": "active",
+    "created": "1765899292213"
+  },
+  "tree:test-1:mountpoint:egress-1:session-1": {
+    "sessionId": "session-1",
+    "treeId": "test-1",
+    "mountpointId": "1000",
+    "audioSsrc": "10000",
+    "videoSsrc": "10001",
+    "janusAudioPort": "6000",
+    "janusVideoPort": "6001",
+    "egressNodeId": "egress-1",
+    "active": "true",
+    "createdAt": "1765899340226",
+    "updatedAt": "1765899340226"
+  },
+  "tree:test-1:node:egress-3": {
+    "nodeId": "egress-3",
+    "type": "egress",
+    "treeId": "test-1",
+    "host": "egress-3",
+    "port": "7073",
+    "audioPort": "5002",
+    "videoPort": "5004",
+    "layer": "1",
+    "status": "active",
+    "created": "1765899295468"
+  },
+  "tree:test-1:pool:layer:0:injection": [
+    "injection-1"
+  ],
+  "tree:test-1:roomCounter": "1000",
+  "tree:test-1:mountpoints:node:egress-1": [
+    "session-1"
+  ],
+  "tree:test-1:injection": [
+    "injection-1"
+  ],
+  "tree:test-1:node:relay-root-1": {
+    "nodeId": "relay-root-1",
+    "type": "relay",
+    "treeId": "test-1",
+    "host": "relay-root-1",
+    "port": "7071",
+    "audioPort": "5002",
+    "videoPort": "5004",
+    "layer": "0",
+    "status": "active",
+    "created": "1765899290837"
+  },
+  "tree:test-1:session:session-1": {
+    "sessionId": "session-1",
+    "treeId": "test-1",
+    "relayRootId": "relay-root-1",
+    "videoSsrc": "10001",
+    "roomId": "1000",
+    "injectionNodeId": "injection-1",
+    "audioSsrc": "10000",
+    "active": "1",
+    "createdAt": "1765899302146"
+  },
+  "tree:test-1:egress": [
+    "egress-1",
+    "egress-3",
+    "egress-2"
+  ],
+  "tree:test-1:node:injection-1": {
+    "nodeId": "injection-1",
+    "type": "injection",
+    "treeId": "test-1",
+    "host": "injection-1",
+    "port": "7070",
+    "audioPort": "5000",
+    "videoPort": "5002",
+    "layer": "0",
+    "status": "active",
+    "created": "1765899290916"
+  },
+  "tree:test-1:node:injection-1:sessions": [
+    "session-1"
+  ],
+  "tree:test-1:pool:layer:0:relay": [
+    "relay-root-1"
+  ],
+  "tree:test-1:sessions": [
+    "session-1"
+  ],
+  "tree:test-1:node:egress-2": {
+    "nodeId": "egress-2",
+    "type": "egress",
+    "treeId": "test-1",
+    "host": "egress-2",
+    "port": "7073",
+    "audioPort": "5002",
+    "videoPort": "5004",
+    "layer": "1",
+    "status": "active",
+    "created": "1765899293581"
+  },
+  "tree:test-1:controller:node:egress-1": {
+    "nodeId": "egress-1",
+    "nodeType": "egress",
+    "treeId": "test-1",
+    "layer": "1",
+    "containerId": "abce1d32a6da2d06180abb60a230c5f98c0bab2902f2614e3780a26787743854",
+    "janusContainerId": "18cb0b32fdb3acfd83d2dc24e46387b9cf4d925f604f54589ffae3fb5a9ba325",
+    "externalAPIPort": "7072",
+    "janusHTTPPort": "8089",
+    "janusWSPort": "8189",
+    "webrtcPortStart": "20100",
+    "webrtcPortEnd": "20199",
+    "createdBy": "controller",
+    "createdAt": "1765899291"
+  },
+  "tree:test-1:ssrcCounter": "10001"
+}

@@ -74,13 +74,13 @@ func (h *TestHandler) TestPortAllocator(c *gin.Context) {
 	janusHTTP2, janusWS2, _ := h.portAllocator.AllocateJanusPorts()
 
 	c.JSON(http.StatusOK, gin.H{
-		"api_ports": []int{api1, api2, api3},
-		"janus_ports": []map[string]int{
+		"apiPorts": []int{api1, api2, api3},
+		"janusPorts": []map[string]int{
 			{"http": janusHTTP1, "ws": janusWS1},
 			{"http": janusHTTP2, "ws": janusWS2},
 		},
-		"used_ports":      h.portAllocator.GetUsedPorts(),
-		"available_ports": h.portAllocator.GetAvailableAPIPorts(),
+		"usedPorts":      h.portAllocator.GetUsedPorts(),
+		"availablePorts": h.portAllocator.GetAvailableAPIPorts(),
 	})
 }
 
@@ -109,10 +109,10 @@ func (h *TestHandler) TestPortAllocation(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"nodes":      nodes,
-		"used_ports": h.portAllocator.GetUsedPorts(),
+		"usedPorts": h.portAllocator.GetUsedPorts(),
 		"summary": gin.H{
-			"total_allocated": len(h.portAllocator.GetUsedPorts()),
-			"available_api":   h.portAllocator.GetAvailableAPIPorts(),
+			"totalAllocated": len(h.portAllocator.GetUsedPorts()),
+			"availableApi":   h.portAllocator.GetAvailableAPIPorts(),
 		},
 	})
 }
@@ -133,8 +133,8 @@ func (h *TestHandler) TestPortRelease(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"allocated":   []int{port1, port2, port3},
 		"released":    port2,
-		"used_before": usedBefore,
-		"used_after":  usedAfter,
+		"usedBefore": usedBefore,
+		"usedAfter":  usedAfter,
 	})
 }
 
@@ -159,17 +159,17 @@ func (h *TestHandler) TestWebRTCAllocation(c *gin.Context) {
 
 		instances = append(instances, map[string]any{
 			"instance":     fmt.Sprintf("janus-%d", i),
-			"http_port":    httpPort,
-			"ws_port":      wsPort,
-			"webrtc_start": webrtcStart,
-			"webrtc_end":   webrtcEnd,
-			"webrtc_count": webrtcEnd - webrtcStart + 1,
+			"httpPort":    httpPort,
+			"wsPort":      wsPort,
+			"webrtcStart": webrtcStart,
+			"webrtcEnd":   webrtcEnd,
+			"webrtcCount": webrtcEnd - webrtcStart + 1,
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"instances":  instances,
-		"used_ports": h.portAllocator.GetUsedPorts(),
+		"usedPorts": h.portAllocator.GetUsedPorts(),
 		"stats":      h.portAllocator.GetStats(),
 	})
 }
@@ -186,22 +186,22 @@ func (h *TestHandler) TestFullTreeAllocation(c *gin.Context) {
 	webrtcVRStart, webrtcVREnd, _ := h.portAllocator.AllocateWebRTCRange()
 
 	nodes = append(nodes, map[string]any{
-		"node_id":      "injection-1",
+		"nodeId":      "injection-1",
 		"type":         "injection",
-		"api_port":     injectionAPI,
-		"janus_http":   janusVRHTTP,
-		"janus_ws":     janusVRWS,
-		"webrtc_start": webrtcVRStart,
-		"webrtc_end":   webrtcVREnd,
+		"apiPort":     injectionAPI,
+		"janusHttp":   janusVRHTTP,
+		"janusWs":     janusVRWS,
+		"webrtcStart": webrtcVRStart,
+		"webrtcEnd":   webrtcVREnd,
 	})
 
 	// RELAY
 	relayAPI, _ := h.portAllocator.AllocateAPIPort()
 
 	nodes = append(nodes, map[string]any{
-		"node_id":  "relay-1",
+		"nodeId":  "relay-1",
 		"type":     "relay",
-		"api_port": relayAPI,
+		"apiPort": relayAPI,
 	})
 
 	// EGRESS
@@ -210,19 +210,19 @@ func (h *TestHandler) TestFullTreeAllocation(c *gin.Context) {
 	webrtcStreamStart, webrtcStreamEnd, _ := h.portAllocator.AllocateWebRTCRange()
 
 	nodes = append(nodes, map[string]any{
-		"node_id":      "egress-1",
+		"nodeId":      "egress-1",
 		"type":         "egress",
-		"api_port":     egressAPI,
-		"janus_http":   janusStreamHTTP,
-		"janus_ws":     janusStreamWS,
-		"webrtc_start": webrtcStreamStart,
-		"webrtc_end":   webrtcStreamEnd,
+		"apiPort":     egressAPI,
+		"janusHttp":   janusStreamHTTP,
+		"janusWs":     janusStreamWS,
+		"webrtcStart": webrtcStreamStart,
+		"webrtcEnd":   webrtcStreamEnd,
 	})
 
 	c.JSON(http.StatusOK, gin.H{
-		"tree_id":    "tree-1",
+		"treeId":    "tree-1",
 		"nodes":      nodes,
-		"total_used": len(h.portAllocator.GetUsedPorts()),
+		"totalUsed": len(h.portAllocator.GetUsedPorts()),
 		"stats":      h.portAllocator.GetStats(),
 	})
 }
@@ -250,8 +250,8 @@ func (h *TestHandler) TestReleaseWebRTCRange(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"allocated":   allocated,
 		"released":    map[string]int{"start": start2, "end": end2},
-		"used_before": usedBefore,
-		"used_after":  usedAfter,
-		"freed_count": usedBefore - usedAfter,
+		"usedBefore": usedBefore,
+		"usedAfter":  usedAfter,
+		"freedCount": usedBefore - usedAfter,
 	})
 }
