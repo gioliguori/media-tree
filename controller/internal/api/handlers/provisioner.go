@@ -152,10 +152,10 @@ func (h *ProvisionerHandler) TestCreateTree(c *gin.Context) {
 	nodes = append(nodes, egressInfo)
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":      "created",
-		"tree_id":     "test-tree-1",
-		"nodes_count": len(nodes),
-		"nodes":       nodes,
+		"status":     "created",
+		"treeId":     "test-tree-1",
+		"nodesCount": len(nodes),
+		"nodes":      nodes,
 	})
 }
 
@@ -193,7 +193,7 @@ func (h *ProvisionerHandler) TestDestroyTree(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"tree_id":   treeId,
+		"treeId":    treeId,
 		"found":     len(nodes),
 		"destroyed": destroyed,
 		"errors":    errors,
@@ -204,7 +204,7 @@ func (h *ProvisionerHandler) TestDestroyTree(c *gin.Context) {
 // TestListProvisioned lista tutti i nodi provisionati
 func (h *ProvisionerHandler) TestListProvisioned(c *gin.Context) {
 	ctx := c.Request.Context()
-	treeId := c.DefaultQuery("tree_id", "test-tree-1")
+	treeId := c.DefaultQuery("treeId", "test-tree-1")
 
 	nodes, err := h.redisClient.GetAllProvisionedNodes(ctx, treeId)
 	if err != nil {
@@ -213,16 +213,16 @@ func (h *ProvisionerHandler) TestListProvisioned(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"tree_id":     treeId,
-		"nodes_count": len(nodes),
-		"nodes":       nodes,
+		"treeId":    treeId,
+		"nodeCount": len(nodes),
+		"nodes":     nodes,
 	})
 }
 
 // TestGetProvisionInfo ottiene provisioning info per nodo
 func (h *ProvisionerHandler) TestGetProvisionInfo(c *gin.Context) {
 	ctx := c.Request.Context()
-	treeId := c.DefaultQuery("tree_id", "test-tree-1")
+	treeId := c.DefaultQuery("treeId", "test-tree-1")
 	nodeId := c.Param("nodeId")
 
 	nodeInfo, err := h.redisClient.GetNodeProvisioning(ctx, treeId, nodeId)

@@ -5,20 +5,23 @@ import (
 )
 
 // Templates predefiniti per creazione alberi
-// Nota: relay-root vengono creati automaticamente per ogni injection
+// relay-root vengono creati automaticamente per ogni injection
 var Templates = map[string]TemplateConfig{
 	"minimal": {
 		Name:        "minimal",
-		Description: "1 injection + 1 egress (relay-root auto-created)",
+		Description: "1 injection + 1 egress",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 1},
 			{NodeType: "egress", Layer: 1, Count: 1},
+			//{NodeType: "relay", Layer: 1, Count: 1},
+			//{NodeType: "relay", Layer: 2, Count: 1},
+			//{NodeType: "egress", Layer: 3, Count: 1},
 		},
 	},
 
 	"small": {
 		Name:        "small",
-		Description: "1 injection + 3 egress (relay-root auto-created)",
+		Description: "1 injection + 3 egress",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 1},
 			{NodeType: "egress", Layer: 1, Count: 3},
@@ -27,7 +30,7 @@ var Templates = map[string]TemplateConfig{
 
 	"medium": {
 		Name:        "medium",
-		Description: "2 injection + 2 relay L1 + 6 egress (2 relay-root auto-created)",
+		Description: "2 injection + 2 relay + 6 egress",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 2},
 			{NodeType: "relay", Layer: 1, Count: 2},
@@ -38,7 +41,7 @@ var Templates = map[string]TemplateConfig{
 
 	"large": {
 		Name:        "large",
-		Description: "1 injection + 3 relay L1 + 9 egress (relay-root auto-created)",
+		Description: "1 injection + 3 relay + 9 egress",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 1},
 			{NodeType: "relay", Layer: 1, Count: 3},
@@ -49,7 +52,7 @@ var Templates = map[string]TemplateConfig{
 
 	"deep": {
 		Name:        "deep",
-		Description: "Multi-tier with varying heights",
+		Description: "Multi-tier",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 1},
 			{NodeType: "relay", Layer: 1, Count: 2},

@@ -23,7 +23,7 @@ func NewTreeHandler(redisClient *redis.Client, prov provisioner.Provisioner) *Tr
 // POST /api//trees
 func (h *TreeHandler) CreateTree(c *gin.Context) {
 	var req struct {
-		TreeId   string `json:"tree_id" binding:"required"`
+		TreeId   string `json:"treeId" binding:"required"`
 		Template string `json:"template" binding:"required"`
 	}
 
@@ -44,7 +44,7 @@ func (h *TreeHandler) CreateTree(c *gin.Context) {
 
 // GET /api//trees/:id
 func (h *TreeHandler) GetTree(c *gin.Context) {
-	treeId := c.Param("tree_id")
+	treeId := c.Param("treeId")
 
 	tree, err := h.treeManager.GetTree(c.Request.Context(), treeId)
 	if err != nil {
@@ -57,14 +57,14 @@ func (h *TreeHandler) GetTree(c *gin.Context) {
 
 // DELETE /api//trees/:id
 func (h *TreeHandler) DestroyTree(c *gin.Context) {
-	treeId := c.Param("tree_id")
+	treeId := c.Param("treeId")
 
 	if err := h.treeManager.DestroyTree(c.Request.Context(), treeId); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "destroyed", "tree_id": treeId})
+	c.JSON(http.StatusOK, gin.H{"status": "destroyed", "treeId": treeId})
 }
 
 // GET /api/trees

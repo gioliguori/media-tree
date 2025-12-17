@@ -16,8 +16,8 @@ type NodeSelector struct {
 	// Round-robin counters
 	mu               sync.Mutex
 	treeCounter      int
-	injectionCounter map[string]int // treeId -> counter
-	egressCounter    map[string]int // treeId -> counter
+	injectionCounter map[string]int         // treeId -> counter
+	egressCounter    map[string]map[int]int // treeId -> layer
 }
 
 // NewNodeSelector crea nuovo NodeSelector
@@ -25,11 +25,11 @@ func NewNodeSelector(redisClient *redis.Client) *NodeSelector {
 	return &NodeSelector{
 		redis:            redisClient,
 		injectionCounter: make(map[string]int),
-		egressCounter:    make(map[string]int),
+		egressCounter:    make(map[string]map[int]int),
 	}
 }
 
-// SelectTree seleziona un tree con round-robin
+// SelectTree seleziona un tree round-robin
 func (ns *NodeSelector) SelectTree(ctx context.Context) (string, error) {
 	ns.mu.Lock()
 	defer ns.mu.Unlock()
@@ -48,7 +48,7 @@ func (ns *NodeSelector) SelectTree(ctx context.Context) (string, error) {
 	selectedTree := trees[ns.treeCounter%len(trees)]
 	ns.treeCounter++
 
-	log.Printf("[NodeSelector] Selected tree: %s (counter=%d, total_trees=%d)", selectedTree, ns.treeCounter, len(trees))
+	log.Printf("[NodeSelector] Selected tree: %s", selectedTree)
 	return selectedTree, nil
 }
 
@@ -74,58 +74,75 @@ func (ns *NodeSelector) SelectInjection(ctx context.Context, treeId string) (str
 	selectedInjection := injectionNodes[counter%len(injectionNodes)]
 	ns.injectionCounter[treeId] = counter + 1
 
-	log.Printf("[NodeSelector] Selected injection: %s (tree=%s, counter=%d, total_injections=%d)",
-		selectedInjection, treeId, counter+1, len(injectionNodes))
 	return selectedInjection, nil
 }
 
-// SelectEgress seleziona N egress nodes con round-robin
-func (ns *NodeSelector) SelectEgress(ctx context.Context, treeId string, count int) ([]string, error) {
+// SelectBestEgressForSession seleziona egress per viewer
+func (ns *NodeSelector) SelectBestEgressForSession(
+	ctx context.Context,
+	treeId string,
+	sessionId string,
+) (string, error) {
 	ns.mu.Lock()
 	defer ns.mu.Unlock()
 
-	// Get egress nodes for tree
-	egressNodes, err := ns.redis.GetEgressNodes(ctx, treeId)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get egress nodes: %w", err)
+	// Check egress esistenti (riuso)
+	// lo facciamo già in ProvisionViewer, commento per il mom
+	// existingEgress, err := ns.redis.FindEgressServingSession(ctx, treeId, sessionId)
+	// if err == nil && len(existingEgress) > 0 {
+	// 	for _, egressId := range existingEgress {
+	// 		if ns.CanAcceptViewer(ctx, egressId) {
+	// 			log.Printf("[NodeSelector] Reusing egress %s (multicast)", egressId)
+	// 			return egressId, nil
+	// 		}
+	// 	}
+	// }
+	// Breadth-first Selection (Layer by Layer)
+	for layer := 1; layer <= 10; layer++ {
+		egresses, err := ns.redis.GetNodesAtLayer(ctx, treeId, "egress", layer)
+		if err != nil || len(egresses) == 0 {
+			continue
+		}
+
+		if ns.egressCounter[treeId] == nil {
+			ns.egressCounter[treeId] = make(map[int]int)
+		}
+
+		startOffset := ns.egressCounter[treeId][layer]
+		count := len(egresses)
+
+		for i := 0; i < count; i++ {
+			idx := (startOffset + i) % count
+			candidate := egresses[idx]
+
+			if ns.CanAcceptViewer(ctx, candidate) {
+				ns.egressCounter[treeId][layer] = idx + 1
+				log.Printf("[NodeSelector] Selected egress %s at layer %d", candidate, layer)
+				return candidate, nil
+			}
+		}
 	}
 
-	if len(egressNodes) == 0 {
-		return nil, fmt.Errorf("no egress nodes available in tree %s", treeId)
-	}
-
-	// Se richiesti più egress di quelli disponibili, usa tutti quelli disponibili
-	if count > len(egressNodes) {
-		log.Printf("[WARN] Requested %d egress but only %d available in tree %s, using all", count, len(egressNodes), treeId)
-		count = len(egressNodes)
-	}
-
-	// Get counter for this tree
-	counter := ns.egressCounter[treeId]
-
-	// Round-robin selection
-	selectedEgress := make([]string, 0, count)
-	for i := 0; i < count; i++ {
-		egress := egressNodes[(counter+i)%len(egressNodes)]
-		selectedEgress = append(selectedEgress, egress)
-	}
-
-	// Update counter
-	ns.egressCounter[treeId] = counter + count
-
-	log.Printf("[NodeSelector] Selected %d egress: %v (tree=%s, counter=%d, total_egress=%d)",
-		count, selectedEgress, treeId, counter+count, len(egressNodes))
-	return selectedEgress, nil
+	return "", fmt.Errorf("no egress available in tree %s - scaling needed", treeId)
 }
 
-// ResetCounters resetta tutti i counter (per testing)
+func (ns *NodeSelector) CanAcceptViewer(ctx context.Context, egressId string) bool {
+	// Simulazione TEST:
+	if egressId == "egress-1" || egressId == "test-1-egress-1" {
+		sessions, _ := ns.redis.GetNodeSessions(ctx, "test-1", egressId)
+		if len(sessions) >= 1 {
+			return false
+		}
+	}
+	return true
+}
+
+// Helpers
 func (ns *NodeSelector) ResetCounters() {
 	ns.mu.Lock()
 	defer ns.mu.Unlock()
 
 	ns.treeCounter = 0
 	ns.injectionCounter = make(map[string]int)
-	ns.egressCounter = make(map[string]int)
-
-	log.Printf("[NodeSelector] All counters reset")
+	ns.egressCounter = make(map[string]map[int]int)
 }

@@ -48,8 +48,6 @@ func (s *Server) setupRoutes() {
 
 	s.router.GET("/api/health", healthHandler.Health)
 	s.router.GET("/api/ready", healthHandler.Ready)
-	s.router.GET("/api/test/redis", healthHandler.TestRedis)
-	s.router.GET("/api/test/topology", healthHandler.TestTopology)
 
 	testHandler := handlers.NewTestHandler()
 	s.router.GET("/api/test/domain", testHandler.TestDomainModels)
@@ -78,27 +76,49 @@ func (s *Server) setupRoutes() {
 	treeHandler := handlers.NewTreeHandler(s.redisClient, provHandler.GetProvisioner())
 
 	s.router.POST("/api/trees", treeHandler.CreateTree)
-	s.router.GET("/api/trees/:tree_id", treeHandler.GetTree)
-	s.router.DELETE("/api/trees/:tree_id", treeHandler.DestroyTree)
+	s.router.GET("/api/trees/:treeId", treeHandler.GetTree)
+	s.router.DELETE("/api/trees/:treeId", treeHandler.DestroyTree)
 	s.router.GET("/api/trees", treeHandler.ListTrees)
 
+	//  Session handler
 	sessionHandler := handlers.NewSessionHandler(s.redisClient, treeHandler.GetTreeManager())
 
+	// Create session (ingresso)
 	s.router.POST("/api/sessions", sessionHandler.CreateSession)
-
-	// Rotte per GET e DELETE
-	s.router.GET("/api/trees/:tree_id/sessions/:session_id", sessionHandler.GetSession)
-	s.router.DELETE("/api/trees/:tree_id/sessions/:session_id", sessionHandler.DestroySession)
-
-	// List
-	s.router.GET("/api/trees/:tree_id/sessions", sessionHandler.ListSessions)
-
-	// Root endpoint
+	// List session
+	s.router.GET("/api/sessions", sessionHandler.ListSessions)
+	// Watch session (create session uscita)
+	s.router.GET("/api/sessions/:sessionId/view", sessionHandler.ViewSession)
+	// GET Sessioni
+	s.router.GET("/api/trees/:treeId/sessions", sessionHandler.ListSessions)
+	// GET Sessione
+	s.router.GET("/api/trees/:treeId/sessions/:sessionId", sessionHandler.GetSession)
+	// DELETE Rimuove intera sessione
+	s.router.DELETE("/api/trees/:treeId/sessions/:sessionId", sessionHandler.DestroySession)
+	// DELETE Rimuove sessione su un egress (debug)
+	s.router.DELETE("/api/trees/:treeId/sessions/:sessionId/egress/:egressId",
+		sessionHandler.DestroySessionPath)
+	//File statici
 	s.router.GET("/", func(c *gin.Context) {
+		c.File("web/sessions.html")
+	})
+	s.router.GET("/sessions.html", func(c *gin.Context) {
+		c.File("web/sessions.html")
+	})
+
+	s.router.Static("/web", "./web")
+	// Root Endpoint
+	s.router.GET("/api", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"service": "media-tree-controller",
 			"version": "0.1.0",
 			"status":  "running",
+			"endpoints": gin.H{
+				"health":   "/api/health",
+				"trees":    "/api/trees",
+				"sessions": "/api/sessions",
+				"ui":       "/sessions.html",
+			},
 		})
 	})
 }
@@ -114,9 +134,10 @@ func (s *Server) Start() error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	log.Printf("API server listening on %s", addr)
+	log.Printf(" Controller starting on %s", addr)
+	log.Printf(" UI:  http://localhost:%d", s.config.ServerPort)
+	log.Printf(" API: http://localhost:%d/api", s.config.ServerPort)
 
-	// ListenAndServe blocca fino a shutdown
 	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
@@ -135,7 +156,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// Logger middleware semplice
+// Logger middleware
 func loggerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

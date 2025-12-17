@@ -6,6 +6,14 @@ import (
 	"fmt"
 )
 
+// Route: Dati completi
+type Route struct {
+	TargetId  string `json:"targetId"`
+	Host      string `json:"host"`
+	AudioPort int    `json:"audioPort"`
+	VideoPort int    `json:"videoPort"`
+}
+
 // AddRoute aggiunge route per relay
 func (c *Client) AddRoute(
 	ctx context.Context,
@@ -41,13 +49,12 @@ func (c *Client) RemoveRoute(
 	return c.rdb.SRem(ctx, key, targetId).Err()
 }
 
-// RemoveAllRoutesForSession rimuove tutte le route per una session
+// RemoveAllRoutesForSession
 func (c *Client) RemoveAllRoutesForSession(
 	ctx context.Context,
 	treeId string,
 	sessionId string,
 ) error {
-	// Pattern: tree:{treeId}:routing:{sessionId}:*
 	pattern := fmt.Sprintf("tree:%s:routing:%s:*", treeId, sessionId)
 	keys, err := c.Keys(ctx, pattern)
 	if err != nil {
@@ -67,6 +74,17 @@ func (c *Client) RemoveAllRoutesForSession(
 	return nil
 }
 
+// RemoveAllRoutesForRelay
+func (c *Client) RemoveAllRoutesForRelay(
+	ctx context.Context,
+	treeId string,
+	sessionId string,
+	relayId string,
+) error {
+	key := fmt.Sprintf("tree:%s:routing:%s:%s", treeId, sessionId, relayId)
+	return c.rdb.Del(ctx, key).Err()
+}
+
 // AddSessionToNode registra session su node (per recovery)
 func (c *Client) AddSessionToNode(
 	ctx context.Context,
@@ -74,7 +92,7 @@ func (c *Client) AddSessionToNode(
 	nodeId string,
 	sessionId string,
 ) error {
-	key := fmt.Sprintf("tree:%s:sessions:node:%s", treeId, nodeId)
+	key := fmt.Sprintf("tree:%s:node:%s:sessions", treeId, nodeId)
 	return c.rdb.SAdd(ctx, key, sessionId).Err()
 }
 
@@ -85,7 +103,7 @@ func (c *Client) RemoveSessionFromNode(
 	nodeId string,
 	sessionId string,
 ) error {
-	key := fmt.Sprintf("tree:%s:sessions:node:%s", treeId, nodeId)
+	key := fmt.Sprintf("tree:%s:node:%s:sessions", treeId, nodeId)
 	return c.rdb.SRem(ctx, key, sessionId).Err()
 }
 
@@ -95,42 +113,96 @@ func (c *Client) GetNodeSessions(
 	treeId string,
 	nodeId string,
 ) ([]string, error) {
-	key := fmt.Sprintf("tree:%s:sessions:node:%s", treeId, nodeId)
+	key := fmt.Sprintf("tree:%s:node:%s:sessions", treeId, nodeId)
 	return c.rdb.SMembers(ctx, key).Result()
 }
 
-// PublishSessionEvent pubblica evento session su canale Redis
+// Eventi pub/sub
+
+// PublishSessionEvent
 func (c *Client) PublishSessionEvent(
 	ctx context.Context,
 	channel string,
 	event any,
 ) error {
-	// Serializza evento in JSON
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
-
-	// Pubblica su canale Redis
-	if err := c.rdb.Publish(ctx, channel, eventJSON).Err(); err != nil {
-		return fmt.Errorf("failed to publish event: %w", err)
-	}
-
-	return nil
+	return c.rdb.Publish(ctx, channel, eventJSON).Err()
 }
+
+// Eventi specifici
 
 // PublishNodeSessionCreated pubblica evento session-created a un nodo
 func (c *Client) PublishNodeSessionCreated(
 	ctx context.Context,
 	treeId string,
 	nodeId string,
-	event any,
+	sessionId string,
+	audioSsrc int,
+	videoSsrc int,
+	initialRoutes []Route,
 ) error {
 	channel := fmt.Sprintf("sessions:%s:%s", treeId, nodeId)
+
+	event := map[string]any{
+		"type":      "session-created",
+		"sessionId": sessionId,
+		"treeId":    treeId,
+		"audioSsrc": audioSsrc,
+		"videoSsrc": videoSsrc,
+	}
+
+	// Se ci sono rotte, le includiamo
+	if len(initialRoutes) > 0 {
+		event["routes"] = initialRoutes
+	}
+
 	return c.PublishSessionEvent(ctx, channel, event)
 }
 
-// PublishSessionDestroyed pubblica evento session-destroyed a un nodo
+// PublishRouteAdded
+func (c *Client) PublishRouteAdded(
+	ctx context.Context,
+	treeId string,
+	nodeId string,
+	sessionId string,
+	targetId string,
+) error {
+	channel := fmt.Sprintf("sessions:%s:%s", treeId, nodeId)
+
+	event := map[string]any{
+		"type":      "route-added",
+		"sessionId": sessionId,
+		"treeId":    treeId,
+		"targetId":  targetId,
+	}
+
+	return c.PublishSessionEvent(ctx, channel, event)
+}
+
+// PublishRouteRemoved notifica rimozione rotta
+func (c *Client) PublishRouteRemoved(
+	ctx context.Context,
+	treeId string,
+	nodeId string,
+	sessionId string,
+	targetId string,
+) error {
+	channel := fmt.Sprintf("sessions:%s:%s", treeId, nodeId)
+
+	event := map[string]any{
+		"type":      "route-removed",
+		"sessionId": sessionId,
+		"treeId":    treeId,
+		"targetId":  targetId,
+	}
+
+	return c.PublishSessionEvent(ctx, channel, event)
+}
+
+// PublishNodeSessionDestroyed notifica distruzione sessione al nodo
 func (c *Client) PublishNodeSessionDestroyed(
 	ctx context.Context,
 	treeId string,
@@ -146,7 +218,7 @@ func (c *Client) PublishNodeSessionDestroyed(
 	return c.PublishSessionEvent(ctx, channel, event)
 }
 
-// PublishSessionDestroyed pubblica evento session-destroyed broadcast
+// PublishSessionDestroyed (tutto l'albero)
 func (c *Client) PublishSessionDestroyed(
 	ctx context.Context,
 	treeId string,

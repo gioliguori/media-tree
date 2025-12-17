@@ -7,13 +7,8 @@ import (
 	"strings"
 )
 
-// ============================================
-// TOPOLOGIA - CHILDREN & PARENTS
-// ============================================
-
 // GetNodeChildren legge i children di un nodo
 // Chiave: tree:{treeId}:children:{nodeId}
-// USATO SOLO per Injection → RelayRoot (compatibilità con InjectionNode.js)
 func (c *Client) GetNodeChildren(ctx context.Context, treeId, nodeId string) ([]string, error) {
 	key := fmt.Sprintf("tree:%s:children:%s", treeId, nodeId)
 
@@ -38,13 +33,10 @@ func (c *Client) GetNodeParents(ctx context.Context, treeId, nodeId string) ([]s
 	return parents, nil
 }
 
-// ============================================
-// ADD - CON EVENTI
-// ============================================
+// ADD
 
-// AddNodeChild aggiunge un child a un nodo E pubblica evento
+// AddNodeChild aggiunge un child a un nodo e pubblica evento
 // Chiave: tree:{treeId}:children:{nodeId}
-// USATO SOLO per linkare Injection → RelayRoot
 func (c *Client) AddNodeChild(ctx context.Context, treeId, parentId, childId string) error {
 	key := fmt.Sprintf("tree:%s:children:%s", treeId, parentId)
 
@@ -52,17 +44,16 @@ func (c *Client) AddNodeChild(ctx context.Context, treeId, parentId, childId str
 		return fmt.Errorf("failed to add child %s to %s: %w", childId, parentId, err)
 	}
 
-	// Pubblica evento child-added automaticamente
+	// Pubblica evento child-added
 	if err := c.PublishChildAdded(ctx, treeId, parentId, childId); err != nil {
 		log.Printf("[WARN] Failed to publish child-added event: %v", err)
-		// Non bloccare se evento fallisce
 	}
 
 	log.Printf("[Redis] Added child %s to %s (tree %s)", childId, parentId, treeId)
 	return nil
 }
 
-// AddNodeParent aggiunge un parent a un nodo E pubblica evento
+// AddNodeParent aggiunge un parent a un nodo e pubblica evento
 // Chiave: tree:{treeId}:parents:{nodeId}
 func (c *Client) AddNodeParent(ctx context.Context, treeId, childId, parentId string) error {
 	key := fmt.Sprintf("tree:%s:parents:%s", treeId, childId)
@@ -71,19 +62,16 @@ func (c *Client) AddNodeParent(ctx context.Context, treeId, childId, parentId st
 		return fmt.Errorf("failed to add parent %s to %s: %w", parentId, childId, err)
 	}
 
-	// Pubblica evento parent-added automaticamente
+	// Pubblica evento parent-added
 	if err := c.PublishParentAdded(ctx, treeId, childId, parentId); err != nil {
 		log.Printf("[WARN] Failed to publish parent-added event: %v", err)
-		// Non bloccare se evento fallisce
 	}
 
 	log.Printf("[Redis] Added parent %s to %s (tree %s)", parentId, childId, treeId)
 	return nil
 }
 
-// ============================================
-// REMOVE - CON EVENTI
-// ============================================
+// REMOVE
 
 // RemoveNodeChild rimuove un child da un nodo E pubblica evento
 func (c *Client) RemoveNodeChild(ctx context.Context, treeId, parentId, childId string) error {
@@ -93,7 +81,7 @@ func (c *Client) RemoveNodeChild(ctx context.Context, treeId, parentId, childId 
 		return fmt.Errorf("failed to remove child %s from %s: %w", childId, parentId, err)
 	}
 
-	// Pubblica evento child-removed automaticamente
+	// Pubblica evento child-removed
 	if err := c.PublishChildRemoved(ctx, treeId, parentId, childId); err != nil {
 		log.Printf("[WARN] Failed to publish child-removed event: %v", err)
 	}
@@ -110,7 +98,7 @@ func (c *Client) RemoveNodeParent(ctx context.Context, treeId, nodeId, parentId 
 		return fmt.Errorf("failed to remove parent %s from %s: %w", parentId, nodeId, err)
 	}
 
-	// Pubblica evento parent-removed automaticamente
+	// Pubblica evento parent-removed
 	if err := c.PublishParentRemoved(ctx, treeId, nodeId, parentId); err != nil {
 		log.Printf("[WARN] Failed to publish parent-removed event: %v", err)
 	}
@@ -119,22 +107,22 @@ func (c *Client) RemoveNodeParent(ctx context.Context, treeId, nodeId, parentId 
 	return nil
 }
 
-// RemoveAllNodeParents rimuove tutti i parent di un nodo E pubblica eventi
+// RemoveAllNodeParents rimuove tutti i parent di un nodo e pubblica eventi
 func (c *Client) RemoveAllNodeParents(ctx context.Context, treeId, nodeId string) error {
-	// 1. Leggi parents esistenti (per pubblicare eventi)
+	// Leggi parents esistenti
 	parents, err := c.GetNodeParents(ctx, treeId, nodeId)
 	if err != nil {
 		return fmt.Errorf("failed to get parents: %w", err)
 	}
 
-	// 2. Pubblica evento per ogni parent rimosso
+	// Pubblica evento per ogni parent rimosso
 	for _, parentId := range parents {
 		if err := c.PublishParentRemoved(ctx, treeId, nodeId, parentId); err != nil {
 			log.Printf("[WARN] Failed to publish parent-removed event: %v", err)
 		}
 	}
 
-	// 3. Rimuovi la key Redis
+	// Rimuovi la key Redis
 	key := fmt.Sprintf("tree:%s:parents:%s", treeId, nodeId)
 	if err := c.rdb.Del(ctx, key).Err(); err != nil {
 		return fmt.Errorf("failed to remove all parents for %s: %w", nodeId, err)
@@ -144,101 +132,7 @@ func (c *Client) RemoveAllNodeParents(ctx context.Context, treeId, nodeId string
 	return nil
 }
 
-// ============================================
-// BATCH OPERATIONS - CON EVENTI
-// ============================================
-
-// SetTopology aggiunge relazione parent-child atomicamente E pubblica eventi
-// DEPRECATO: Usa AddNodeChild + AddNodeParent invece (più esplicito)
-func (c *Client) SetTopology(ctx context.Context, treeId, childId, parentId string) error {
-	pipe := c.rdb.TxPipeline()
-
-	// Add Parent
-	keyParents := fmt.Sprintf("tree:%s:parents:%s", treeId, childId)
-	pipe.SAdd(ctx, keyParents, parentId)
-
-	// Add Child
-	keyChildren := fmt.Sprintf("tree:%s:children:%s", treeId, parentId)
-	pipe.SAdd(ctx, keyChildren, childId)
-
-	_, err := pipe.Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to set topology atomically: %w", err)
-	}
-
-	// Pubblica eventi DOPO commit atomico
-	if err := c.PublishParentAdded(ctx, treeId, childId, parentId); err != nil {
-		log.Printf("[WARN] Failed to publish parent-added event: %v", err)
-	}
-	if err := c.PublishChildAdded(ctx, treeId, parentId, childId); err != nil {
-		log.Printf("[WARN] Failed to publish child-added event: %v", err)
-	}
-
-	log.Printf("[Redis] Set topology: %s <-> %s (tree %s)", parentId, childId, treeId)
-	return nil
-}
-
-// RemoveTopology rimuove relazione parent-child atomicamente E pubblica eventi
-// DEPRECATO: Usa RemoveNodeChild + RemoveNodeParent invece
-func (c *Client) RemoveTopology(ctx context.Context, treeId, childId, parentId string) error {
-	pipe := c.rdb.TxPipeline()
-
-	keyParents := fmt.Sprintf("tree:%s:parents:%s", treeId, childId)
-	pipe.SRem(ctx, keyParents, parentId)
-
-	keyChildren := fmt.Sprintf("tree:%s:children:%s", treeId, parentId)
-	pipe.SRem(ctx, keyChildren, childId)
-
-	_, err := pipe.Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to remove topology atomically: %w", err)
-	}
-
-	// Pubblica eventi DOPO commit atomico
-	if err := c.PublishParentRemoved(ctx, treeId, childId, parentId); err != nil {
-		log.Printf("[WARN] Failed to publish parent-removed event: %v", err)
-	}
-	if err := c.PublishChildRemoved(ctx, treeId, parentId, childId); err != nil {
-		log.Printf("[WARN] Failed to publish child-removed event: %v", err)
-	}
-
-	log.Printf("[Redis] Removed topology: %s <-> %s (tree %s)", parentId, childId, treeId)
-	return nil
-}
-
-// DeleteNodeTopology rimuove tutta la topologia di un nodo E pubblica eventi
-func (c *Client) DeleteNodeTopology(ctx context.Context, treeId, nodeId string) error {
-	// 1. Leggi parents (per eventi)
-	parents, _ := c.GetNodeParents(ctx, treeId, nodeId)
-	for _, parentId := range parents {
-		// Rimuovi da parent.children
-		c.RemoveNodeChild(ctx, treeId, parentId, nodeId)
-		// Evento pubblicato dentro RemoveNodeChild
-	}
-
-	// 2. Leggi children (per eventi)
-	children, _ := c.GetNodeChildren(ctx, treeId, nodeId)
-	for _, childId := range children {
-		// Rimuovi da child.parents
-		c.RemoveNodeParent(ctx, treeId, childId, nodeId)
-		// Evento pubblicato dentro RemoveNodeParent
-	}
-
-	// 3. Rimuovi chiavi Redis
-	parentsKey := fmt.Sprintf("tree:%s:parents:%s", treeId, nodeId)
-	c.rdb.Del(ctx, parentsKey)
-
-	childrenKey := fmt.Sprintf("tree:%s:children:%s", treeId, nodeId)
-	c.rdb.Del(ctx, childrenKey)
-
-	log.Printf("[Redis] Deleted topology for node %s (tree %s)", nodeId, treeId)
-	return nil
-}
-
-// ============================================
 // EVENTI PUB/SUB
-// ============================================
-
 // PublishTopologyEvent pubblica un evento su topology:{treeId}:{nodeId}
 func (c *Client) PublishTopologyEvent(ctx context.Context, treeId, nodeId string, event map[string]any) error {
 	channel := fmt.Sprintf("topology:%s:%s", treeId, nodeId)
@@ -304,10 +198,7 @@ func (c *Client) PublishTopologyReset(ctx context.Context, treeId string) error 
 	return c.PublishGlobalTopologyEvent(ctx, treeId, event)
 }
 
-// ============================================
-// UTILITY
-// ============================================
-
+// Utility
 // GetAllTrees ritorna lista di tutti i tree
 func (c *Client) GetAllTrees(ctx context.Context) ([]string, error) {
 	pattern := "tree:*:metadata"
@@ -318,7 +209,7 @@ func (c *Client) GetAllTrees(ctx context.Context) ([]string, error) {
 
 	trees := make([]string, 0, len(keys))
 	for _, key := range keys {
-		// Estrai tree_id da "tree:{treeId}:metadata"
+		// Estrai treeId da "tree:{treeId}:metadata"
 		parts := strings.Split(key, ":")
 		if len(parts) >= 2 {
 			trees = append(trees, parts[1])

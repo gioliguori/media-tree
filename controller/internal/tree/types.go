@@ -9,60 +9,26 @@ import (
 
 // Tree rappresenta un albero completo
 type Tree struct {
-	TreeId     string             `json:"tree_id"`
+	TreeId     string             `json:"treeId"`
 	Template   string             `json:"template"`
 	Nodes      []*domain.NodeInfo `json:"nodes"`
-	NodesCount int                `json:"nodes_count"`
-	CreatedAt  time.Time          `json:"created_at"`
+	NodesCount int                `json:"nodesCount"`
+	CreatedAt  time.Time          `json:"createdAt"`
 	Status     string             `json:"status"` // creating, active, unhealthy, destroying
 }
 
 // TreeSummary è un riassunto per listing
 type TreeSummary struct {
-	TreeId         string    `json:"tree_id"`
+	TreeId         string    `json:"treeId"`
 	Template       string    `json:"template"`
-	NodesCount     int       `json:"nodes_count"`
-	InjectionCount int       `json:"injection_count"`
-	RelayCount     int       `json:"relay_count"`
-	EgressCount    int       `json:"egress_count"`
-	MaxLayer       int       `json:"max_layer"`
+	NodesCount     int       `json:"nodesCount"`
+	InjectionCount int       `json:"injectionCount"`
+	RelayCount     int       `json:"relayCount"`
+	EgressCount    int       `json:"egressCount"`
+	MaxLayer       int       `json:"maxLayer"`
 	Status         string    `json:"status"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-}
-
-// TreeStats statistiche tree
-type TreeStats struct {
-	TreeId         string `json:"tree_id"`
-	TotalNodes     int    `json:"total_nodes"`
-	HealthyNodes   int    `json:"healthy_nodes"`
-	UnhealthyNodes int    `json:"unhealthy_nodes"`
-	Layers         int    `json:"layers"`
-	MaxFanout      int    `json:"max_fanout"` // Max children per nodo
-	// Per tipo
-	InjectionCount int `json:"injection_count"`
-	RelayCount     int `json:"relay_count"`
-	EgressCount    int `json:"egress_count"`
-	// Per layer
-	NodesByLayer map[int]int `json:"nodes_by_layer"` // layer -> count
-}
-
-// TreeHealth stato salute tree
-type TreeHealth struct {
-	TreeId     string          `json:"tree_id"`
-	Healthy    bool            `json:"healthy"`
-	Issues     []string        `json:"issues,omitempty"`
-	NodeHealth map[string]bool `json:"node_health"`
-	CheckedAt  time.Time       `json:"checked_at"`
-}
-
-// TreeStatus stato generale
-type TreeStatus struct {
-	TreeId    string    `json:"tree_id"`
-	Status    string    `json:"status"`
-	Nodes     int       `json:"nodes"`
-	Sessions  int       `json:"sessions"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // TemplateConfig configurazione template
@@ -73,11 +39,11 @@ type TemplateConfig struct {
 }
 
 // TemplateNodeSpec specifica per creazione nodi nel template
-// Nota: relay-root vengono creati automaticamente per ogni injection
+// I relay-root vengono creati automaticamente per ogni injection
 type TemplateNodeSpec struct {
-	NodeType string `json:"node_type"` // injection, relay, egress
-	Layer    int    `json:"layer"`     // 0, 1, 2, 3...
-	Count    int    `json:"count"`     // Numero di nodi da creare
+	NodeType string `json:"nodeType"`
+	Layer    int    `json:"layer"`
+	Count    int    `json:"count"`
 }
 
 // Validate valida configurazione template
@@ -120,7 +86,6 @@ func (tc *TemplateConfig) Validate() error {
 
 		case "relay":
 			// Relay al layer 0 (relay-root) sono creati automaticamente
-			// Non devono essere specificati nel template
 			if spec.Layer == 0 {
 				return fmt.Errorf("relay at layer 0 are auto-created with injection (remove from template)")
 			}

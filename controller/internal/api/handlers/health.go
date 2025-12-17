@@ -38,7 +38,7 @@ func (h *HealthHandler) Ready(c *gin.Context) {
 
 	if err := h.redisClient.Ping(ctx); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status":    "not_ready",
+			"status":    "notReady",
 			"error":     "redis connection failed",
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		})
@@ -51,45 +51,6 @@ func (h *HealthHandler) Ready(c *gin.Context) {
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"checks": gin.H{
 			"redis": "ok",
-		},
-	})
-}
-
-func (h *HealthHandler) TestRedis(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	// Leggi tutti i nodi di tree-1
-	nodes, err := h.redisClient.GetAllTreeNodes(ctx, "tree-1")
-	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(200, gin.H{
-		"nodes": nodes,
-		"count": len(nodes),
-	})
-}
-
-func (h *HealthHandler) TestTopology(c *gin.Context) {
-	ctx := c.Request.Context()
-	treeId := "tree-1"
-
-	injectionChildren, _ := h.redisClient.GetNodeChildren(ctx, treeId, "injection-1")
-	relayParents, _ := h.redisClient.GetNodeParents(ctx, treeId, "relay-1")
-	relayChildren, _ := h.redisClient.GetNodeChildren(ctx, treeId, "relay-1")
-	egressParents, _ := h.redisClient.GetNodeParents(ctx, treeId, "egress-1")
-
-	c.JSON(200, gin.H{
-		"injection-1": gin.H{
-			"children": injectionChildren,
-		},
-		"relay-1": gin.H{
-			"parents":  relayParents,
-			"children": relayChildren,
-		},
-		"egress-1": gin.H{
-			"parents": egressParents,
 		},
 	})
 }

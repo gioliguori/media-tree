@@ -8,7 +8,7 @@ import (
 )
 
 // ValidateTopology verifica coerenza topologia
-// Controlla solo le relazioni Injection → RelayRoot (unica topologia statica)
+// Controlla solo le relazioni Injection -> RelayRoot (unica topologia statica)
 func (tm *TreeManager) ValidateTopology(ctx context.Context, treeId string) (bool, []string, error) {
 	issues := make([]string, 0)
 

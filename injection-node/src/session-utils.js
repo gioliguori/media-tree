@@ -1,36 +1,36 @@
 export async function saveSessionToRedis(redis, treeId, nodeId, sessionData) {
     const { sessionId, roomId, audioSsrc, videoSsrc, recipients, endpoint, createdAt } = sessionData;
 
-    const whipEndpointUrl = typeof endpoint === 'string'
-        ? endpoint
-        : (endpoint?.url || endpoint?.path || '');
+    // const whipEndpointUrl = typeof endpoint === 'string'
+    //     ? endpoint
+    //     : (endpoint?.url || endpoint?.path || '');
 
-    await redis.hset(`tree:${treeId}:session:${sessionId}`, {
-        sessionId,
-        treeId,
-        roomId: String(roomId),
-        audioSsrc: String(audioSsrc),
-        videoSsrc: String(videoSsrc),
-        recipients: JSON.stringify(recipients),
-        injectionNodeId: nodeId,
-        //whipEndpoint: endpoint,
-        active: 'true',
-        createdAt: String(createdAt),
-        updatedAt: String(createdAt)
-    });
+    // await redis.hset(`tree:${treeId}:session:${sessionId}`, {
+    //     sessionId,
+    //     treeId,
+    //     roomId: String(roomId),
+    //     audioSsrc: String(audioSsrc),
+    //     videoSsrc: String(videoSsrc),
+    //     recipients: JSON.stringify(recipients),
+    //     injectionNodeId: nodeId,
+    //     //whipEndpoint: endpoint,
+    //     active: 'true',
+    //     createdAt: String(createdAt),
+    //     updatedAt: String(createdAt)
+    // });
 
-    await redis.sadd(`tree:${treeId}:sessions`, sessionId);
+    // await redis.sadd(`tree:${treeId}:sessions`, sessionId);
 
-    await redis.sadd(`tree:${treeId}:sessions:node:${nodeId}`, sessionId);
+    // await redis.sadd(`tree:${treeId}:sessions:node:${nodeId}`, sessionId);
 }
 
 export async function deactivateSessionInRedis(redis, treeId, nodeId, sessionId) {
     // Rimuovi completamente l'hash
-    await redis.del(`tree:${treeId}:session:${sessionId}`);
+    // await redis.del(`tree:${treeId}:session:${sessionId}`);
 
-    // Rimuovi dai SET di indice
-    await redis.srem(`tree:${treeId}:sessions`, sessionId);
-    await redis.srem(`tree:${treeId}:sessions:node:${nodeId}`, sessionId);
+    // // Rimuovi dai SET di indice
+    // await redis.srem(`tree:${treeId}:sessions`, sessionId);
+    // await redis.srem(`tree:${treeId}:sessions:node:${nodeId}`, sessionId);
 
 }
 
