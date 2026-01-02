@@ -499,4 +499,93 @@ export class InjectionNode extends BaseNode {
             }
         };
     }
+    async getMetrics() {
+        const baseMetrics = await super.getMetrics();
+
+        // Mappa timestamp
+        if (!this.roomsLastActivity) {
+            this.roomsLastActivity = new Map();
+        }
+
+        // Se Janus non è connesso, ritorna subito
+        if (!this.janusVideoRoom) {
+            return { ...baseMetrics, janus: { connected: false } };
+        }
+
+        try {
+            // Ottieni lista stanze
+            const listResponse = await this.janusVideoRoom.list();
+            const rooms = listResponse.list || [];
+            const roomDetails = [];
+            const now = Date.now();
+
+            for (const room of rooms) {
+                let hasPublisher = false;
+
+                // Se ci sono partecipanti, controlliamo se almeno uno è un publisher attivo
+                if (room.num_participants > 0) {
+                    try {
+                        const participantsResponse = await this.janusVideoRoom.listParticipants({
+                            room: room.room
+                        });
+                        const participants = participantsResponse.participants || [];
+                        hasPublisher = participants.some(p => p.publisher === true);
+                    } catch (err) {
+                    }
+                }
+
+                // Se c'è un publisher attivo aggiorniamo il timestamp
+                if (hasPublisher) {
+                    this.roomsLastActivity.set(room.room, now);
+                }
+
+                // Se la stanza è nuova e non è in mappa settiamo timestamp a now
+                if (!this.roomsLastActivity.has(room.room)) {
+                    this.roomsLastActivity.set(room.room, now);
+                }
+
+                // Recuperiamo il valore sarà now se attivo
+                const lastActivityAt = this.roomsLastActivity.get(room.room);
+
+                roomDetails.push({
+                    roomId: room.room,
+                    description: room.description || `Room ${room.room}`,
+                    participants: room.num_participants,
+                    hasPublisher: hasPublisher,
+                    lastActivityAt: lastActivityAt
+                });
+            }
+
+            const activeRoomsCount = roomDetails.filter(r => r.hasPublisher).length;
+
+            // Pulizia memoria: rimuove dalla mappa le stanze che non esistono più su Janus
+            if (this.roomsLastActivity.size > rooms.length) {
+                const currentRoomIds = new Set(rooms.map(r => r.room));
+                for (const roomId of this.roomsLastActivity.keys()) {
+                    if (!currentRoomIds.has(roomId)) {
+                        this.roomsLastActivity.delete(roomId);
+                    }
+                }
+            }
+
+            return {
+                ...baseMetrics,
+                janus: {
+                    connected: true,
+                    roomsTotal: rooms.length,
+                    roomsActive: activeRoomsCount,
+                    rooms: roomDetails
+                }
+            };
+
+        } catch (error) {
+            return {
+                ...baseMetrics,
+                janus: {
+                    connected: true,
+                    error: error.message
+                }
+            };
+        }
+    }
 }

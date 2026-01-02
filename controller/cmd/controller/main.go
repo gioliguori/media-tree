@@ -10,6 +10,7 @@ import (
 
 	"controller/internal/api"
 	"controller/internal/config"
+	"controller/internal/metrics"
 	"controller/internal/redis"
 )
 
@@ -38,6 +39,16 @@ func main() {
 	}
 
 	log.Println("Connected to Redis successfully!")
+
+	metricsConfig := metrics.DefaultConfig()
+	metricsCollector, err := metrics.NewMetricsCollector(redisClient, metricsConfig)
+	if err != nil {
+		log.Printf("Metrics collector disabled: %v", err)
+	} else {
+		metricsCollector.Start(context.Background())
+		defer metricsCollector.Stop()
+		log.Println("MetricsCollector Started")
+	}
 
 	// Start API server
 	server := api.NewServer(cfg, redisClient)

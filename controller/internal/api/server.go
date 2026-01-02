@@ -98,6 +98,11 @@ func (s *Server) setupRoutes() {
 	// DELETE Rimuove sessione su un egress (debug)
 	s.router.DELETE("/api/trees/:treeId/sessions/:sessionId/egress/:egressId",
 		sessionHandler.DestroySessionPath)
+
+	metricsHandler := handlers.NewMetricsHandler(s.redisClient)
+	s.router.GET("/api/metrics/:treeId/:nodeId", metricsHandler.GetNodeMetrics)
+	s.router.GET("/api/metrics/:treeId", metricsHandler.GetTreeMetrics)
+
 	//File statici
 	s.router.GET("/", func(c *gin.Context) {
 		c.File("web/sessions.html")

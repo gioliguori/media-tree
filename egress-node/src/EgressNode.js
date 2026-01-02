@@ -318,7 +318,7 @@ export class EgressNode extends BaseNode {
                 // Rollback: rimuovi mountpoint
                 this.mountpoints.delete(sessionId);
                 // this.portPool.release(audioPort, videoPort);
-                await destroyJanusMountpoint(this.janusStreaming, this.nodeId, mountpointId);
+                await destroyJanusMountpoint(this.janusStreaming, mountpointId, this.mountpointSecret);
 
                 throw new Error(`Failed to configure forwarder: ${err.message}`);
             }
@@ -699,5 +699,74 @@ export class EgressNode extends BaseNode {
             }
             // portPool: this.portPool.getStats()
         };
+    }
+
+    async getMetrics() {
+        const baseMetrics = await super.getMetrics();
+
+        // Se Janus non è connesso, ritorna subito le metriche base
+        if (!this.janusStreaming) {
+            return { ...baseMetrics, janus: { connected: false } };
+        }
+
+        try {
+            // Ottieni la lista dei mountpoint
+            const listResponse = await this.janusStreaming.list();
+            const mountpoints = listResponse.list || [];
+            const mountpointDetails = [];
+
+            // Itera per ottenere i dettagli
+            for (const mp of mountpoints) {
+                try {
+                    const response = await this.janusStreaming.message({
+                        request: 'info',
+                        id: mp.id,
+                        secret: this.mountpointSecret
+                    });
+                    const info = response.plugindata?.data?.info || {};
+                    const viewers = info.viewers ?? 0;
+
+                    mountpointDetails.push({
+                        mountpointId: mp.id,
+                        description: info.description || mp.description,
+                        type: info.type,
+                        viewers: viewers,
+                        enabled: info.enabled !== false,
+                        ageMs: info.media?.[0]?.age_ms ?? 0 // Utile per capire se il flusso sta ricevendo dati
+                    });
+
+                } catch (error) {
+                    console.error(`[${this.nodeId}] Failed to get info for mp ${mp.id}:`, error.message);
+                    // Fallback
+                    mountpointDetails.push({
+                        mountpointId: mp.id,
+                        error: true,
+                        viewers: 0
+                    });
+                }
+            }
+
+            const totalViewers = mountpointDetails.reduce((sum, mp) => sum + (mp.viewers || 0), 0);
+
+            return {
+                ...baseMetrics,
+                janus: {
+                    connected: true,
+                    mountpointsActive: mountpoints.length,
+                    totalViewers: totalViewers,
+                    mountpoints: mountpointDetails
+                }
+            };
+
+        } catch (error) {
+            console.error(`[${this.nodeId}] Error collecting Janus metrics:`, error.message);
+            return {
+                ...baseMetrics,
+                janus: {
+                    connected: true,
+                    error: error.message
+                }
+            };
+        }
     }
 }

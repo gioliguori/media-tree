@@ -173,39 +173,39 @@ general: {
 # As such, you can use the same approach for creating regular mountpoints
 # as well (e.g., 1 audio and 1 video) in a much clearer, and cleaner, way.
 #
-multistream-test: {
-	type = "rtp"
-	id = 123
-	description = "Multistream test (1 audio, 2 video)"
-	metadata = "This is an example of a multistream mountpoint: you'll get an audio stream and two video feeds"
-	media = (
-		{
-			type = "audio"
-			mid = "a"
-			label = "Audio stream"
-			port = 5102
-			pt = 111
-			codec = "opus"
-		},
-		{
-			type = "video"
-			mid = "v1"
-			label = "Video stream #1"
-			port = 5104
-			pt = 100
-			codec = "vp8"
-		},
-		{
-			type = "video"
-			mid = "v2"
-			label = "Video stream #2"
-			port = 5106
-			pt = 100
-			codec = "vp8"
-		}
-	)
-	secret = "adminpwd"
-}
+#multistream-test: {
+#	type = "rtp"
+#	id = 123
+#	description = "Multistream test (1 audio, 2 video)"
+#	metadata = "This is an example of a multistream mountpoint: you'll get an audio stream and two video feeds"
+#	media = (
+#		{
+#			type = "audio"
+#			mid = "a"
+#			label = "Audio stream"
+#			port = 5102
+#			pt = 111
+#			codec = "opus"
+#		},
+#		{
+#			type = "video"
+#			mid = "v1"
+#			label = "Video stream #1"
+#			port = 5104
+#			pt = 100
+#			codec = "vp8"
+#		},
+#		{
+#			type = "video"
+#			mid = "v2"
+#			label = "Video stream #2"
+#			port = 5106
+#			pt = 100
+#			codec = "vp8"
+#		}
+#	)
+#	secret = "adminpwd"
+#}
 
 #
 # This is a sample of the file-based streaming support. Specifically,
@@ -214,15 +214,15 @@ multistream-test: {
 # this mountpoint will listen to the same broadcast as if it were live.
 # Notice that file-based streaming supports Opus files too, but no video.
 #
-file-live-sample: {
-	type = "live"
-	id = 2
-	description = "a-law file source (radio broadcast)"
-	filename = "/opt/janus/share/janus/streams/radio.alaw"
-	audio = true
-	video = false
-	secret = "adminpwd"
-}
+#file-live-sample: {
+#	type = "live"
+#	id = 2
+#	description = "a-law file source (radio broadcast)"
+#	filename = "/opt/janus/share/janus/streams/radio.alaw"
+#	audio = true
+#	video = false
+#	secret = "adminpwd"
+#}
 
 #
 # This is another sample of the file-based streaming support, but using

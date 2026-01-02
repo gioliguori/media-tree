@@ -102,3 +102,7 @@ func (c *Client) TreeExists(ctx context.Context, treeId string) (bool, error) {
 	exists, err := c.rdb.Exists(ctx, key).Result()
 	return exists > 0, err
 }
+
+func (c *Client) Pipeline() redis.Pipeliner {
+	return c.rdb.Pipeline()
+}
