@@ -10,11 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
-
 	"controller/internal/domain"
 	"controller/internal/redis"
+
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 )
 
 // MetricsCollector raccoglie metriche Docker periodicamente
@@ -25,6 +26,12 @@ type MetricsCollector struct {
 	config       *MetricsCollectorConfig
 	stopChan     chan struct{}
 	running      bool
+
+	//  Salva valori precedenti per calcolo CPU
+	mu             sync.Mutex
+	previousCPU    map[string]uint64 // containerID -> TotalUsage
+	previousSystem map[string]uint64 // containerID -> SystemUsage
+
 }
 
 // metricsResult rappresenta il risultato della raccolta per un singolo nodo
@@ -55,9 +62,11 @@ func NewMetricsCollector(redisClient *redis.Client, config *MetricsCollectorConf
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		config:   config,
-		stopChan: make(chan struct{}),
-		running:  false,
+		config:         config,
+		stopChan:       make(chan struct{}),
+		running:        false,
+		previousCPU:    make(map[string]uint64),
+		previousSystem: make(map[string]uint64),
 	}, nil
 }
 
@@ -135,6 +144,8 @@ func (mc *MetricsCollector) collectMetrics(ctx context.Context) error {
 		return fmt.Errorf("failed to get active nodes: %w", err)
 	}
 
+	activeContainerIDs := make(map[string]bool)
+
 	if len(activeNodes) == 0 {
 		return nil // Nessun nodo attivo
 	}
@@ -180,6 +191,13 @@ func (mc *MetricsCollector) collectMetrics(ctx context.Context) error {
 				return
 			}
 
+			if node.ContainerId != "" {
+				activeContainerIDs[node.ContainerId] = true
+			}
+			if node.JanusContainerId != "" {
+				activeContainerIDs[node.JanusContainerId] = true
+			}
+
 			// Collect metrics con timeout per nodo
 			containerCount, err := mc.collectNodeMetrics(ctx, treeID, node)
 			resultsCh <- metricsResult{
@@ -215,6 +233,8 @@ func (mc *MetricsCollector) collectMetrics(ctx context.Context) error {
 		log.Printf("[MetricsCollector] Collected metrics for %d nodes (%d containers, %d errors) in %v",
 			len(activeNodes), totalContainers, errorCount, duration)
 	}
+
+	mc.cleanupStaleCPUCache(activeContainerIDs)
 
 	return nil
 }
@@ -296,11 +316,10 @@ func (mc *MetricsCollector) collectNodeMetrics(ctx context.Context, treeID strin
 
 // getContainerMetrics ottiene metriche Docker per un singolo container
 func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerID string) (*ContainerMetrics, error) {
-	// Timeout per singolo container
-	statsCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	statsCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	// Ottieni stats da Docker
+	// una sola chiamata (stream=false)
 	stats, err := mc.dockerClient.ContainerStats(statsCtx, containerID, false)
 	if err != nil {
 		if strings.Contains(err.Error(), "No such container") ||
@@ -316,20 +335,89 @@ func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerID
 		return nil, fmt.Errorf("failed to decode stats: %w", err)
 	}
 
-	// Ottieni info container per il nome
 	containerInfo, err := mc.dockerClient.ContainerInspect(ctx, containerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect container: %w", err)
 	}
 
-	// Calcola metriche
 	metrics := &ContainerMetrics{
 		ContainerID:   containerID,
-		ContainerName: strings.TrimPrefix(containerInfo.Name, "/"), // Rimuove slash iniziale
+		ContainerName: strings.TrimPrefix(containerInfo.Name, "/"),
 	}
 
-	// CPU
-	metrics.CPUPercent = calculateCPUPercent(&v)
+	// leggi cpu limit del container
+	cpuLimit := mc.getContainerCPULimit(containerInfo)
+	if strings.Contains(containerInfo.Name, "janus-vr") {
+		log.Printf("[DEBUG] Container %s:  cpuLimit=%.2f, NanoCPUs=%d",
+			containerInfo.Name, cpuLimit, containerInfo.HostConfig.NanoCPUs)
+	}
+
+	mc.mu.Lock()
+	previousCPU, hasPrev := mc.previousCPU[containerID]
+	previousSystem, _ := mc.previousSystem[containerID]
+
+	currentCPU := v.CPUStats.CPUUsage.TotalUsage
+	currentSystem := v.CPUStats.SystemUsage
+
+	// Salva valori correnti per prossimo ciclo
+	mc.previousCPU[containerID] = currentCPU
+	mc.previousSystem[containerID] = currentSystem
+	mc.mu.Unlock()
+
+	// Calcola CPU% usando valori del ciclo precedente
+	if hasPrev && currentSystem > previousSystem && currentCPU > previousCPU {
+		cpuDelta := float64(currentCPU - previousCPU)
+		systemDelta := float64(currentSystem - previousSystem)
+
+		numCPUs := float64(v.CPUStats.OnlineCPUs)
+		if numCPUs == 0 {
+			// Fallback:  prova PercpuUsage
+			numCPUs = float64(len(v.CPUStats.CPUUsage.PercpuUsage))
+		}
+		if numCPUs == 0 {
+			if cpuLimit > 0 {
+				numCPUs = cpuLimit
+			} else {
+				numCPUs = 1.0 // Default:  1 CPU se nessun limit
+			}
+		}
+
+		// grezzo (rispetto a tutte le CPU)
+		cpuPercentRaw := (cpuDelta / systemDelta) * numCPUs * 100.0
+
+		//if strings.Contains(containerInfo.Name, "janus-vr") {
+		//	log.Printf("[DEBUG CPU] %s:  cpuDelta=%d, systemDelta=%d, numCPUs=%.0f, cpuPercentRaw=%.2f, cpuLimit=%.2f",
+		//		containerInfo.Name,
+		//		uint64(cpuDelta),
+		//		uint64(systemDelta),
+		//		numCPUs,
+		//		cpuPercentRaw,
+		//		cpuLimit)
+		//}
+		// Se container ha CPU limit, normalizza rispetto al limit
+		if cpuLimit > 0 {
+			// cpuPercentRaw rappresenta già "N CPU usate * 100"
+			// Dividi semplicemente per il limit
+			cpuPercentOfLimit := cpuPercentRaw / cpuLimit
+
+			if strings.Contains(containerInfo.Name, "janus-vr") {
+				log.Printf("[DEBUG CPU] %s: cpuPercentOfLimit=%.2f (capped at 100)",
+					containerInfo.Name, cpuPercentOfLimit)
+			}
+
+			if cpuPercentOfLimit > 100.0 {
+				cpuPercentOfLimit = 100.0
+			}
+
+			metrics.CPUPercent = cpuPercentOfLimit
+		} else {
+			// Nessun limit:  usa valore grezzo
+			metrics.CPUPercent = cpuPercentRaw
+		}
+	} else {
+		// Primo ciclo, nessun dato precedente
+		metrics.CPUPercent = 0.0
+	}
 
 	// Memory
 	metrics.MemoryUsedMB = float64(v.MemoryStats.Usage) / 1024 / 1024
@@ -338,7 +426,7 @@ func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerID
 		metrics.MemoryPercent = (float64(v.MemoryStats.Usage) / float64(v.MemoryStats.Limit)) * 100
 	}
 
-	// Network (somma tutte le interfacce)
+	// Network
 	for _, netStats := range v.Networks {
 		metrics.NetworkRxBytes += netStats.RxBytes
 		metrics.NetworkTxBytes += netStats.TxBytes
@@ -471,6 +559,12 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 		pipe.Expire(ctx, key, mc.config.MetricsTTL)
 	}
 
+	if metrics.NodeType == "injection" {
+		if err := mc.updateInactiveSessions(ctx, metrics); err != nil {
+			log.Printf("[MetricsCollector] Failed to update inactive sessions: %v", err)
+		}
+	}
+
 	// Esegui tutto
 	_, err := pipe.Exec(ctx)
 	if err != nil {
@@ -567,4 +661,86 @@ func (mc *MetricsCollector) calculateBandwidth(ctx context.Context, node *domain
 	mc.redisClient.SetWithTTL(ctx, prevKey, fmt.Sprintf("%d", currentTxBytes), mc.config.MetricsTTL)
 
 	return bitrate
+}
+
+func (mc *MetricsCollector) updateInactiveSessions(ctx context.Context, metrics *NodeMetrics) error {
+	sortedSetKey := fmt.Sprintf("inactive_sessions:%s", metrics.TreeID)
+
+	// Get Janus metrics
+	var janusMetrics *JanusMetrics
+	for containerType, containerMetrics := range metrics.Containers {
+		if containerType == string(ContainerTypeJanusVideoroom) {
+			janusMetrics = containerMetrics.JanusMetrics
+			break
+		}
+	}
+
+	if janusMetrics == nil || len(janusMetrics.Rooms) == 0 {
+		return nil
+	}
+
+	for _, room := range janusMetrics.Rooms {
+		if room.SessionId == "" {
+			continue
+		}
+
+		entryKey := fmt.Sprintf("%s:%s", metrics.TreeID, room.SessionId)
+
+		if !room.HasPublisher {
+			// inactive: Add to sorted set
+			score := float64(room.LastActivityAt)
+
+			err := mc.redisClient.ZAdd(ctx, sortedSetKey, score, entryKey)
+
+			if err != nil {
+				log.Printf("[MetricsCollector] Failed to add %s to sorted set: %v", entryKey, err)
+			}
+
+		} else {
+			// active: Remove from sorted set
+			err := mc.redisClient.ZRem(ctx, sortedSetKey, entryKey)
+
+			if err != nil {
+				log.Printf("[MetricsCollector] Failed to remove %s from sorted set: %v", entryKey, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (mc *MetricsCollector) getContainerCPULimit(info types.ContainerJSON) float64 {
+	// NanoCPU (1 CPU = 1e9 nanoCPU)
+	if info.HostConfig.NanoCPUs > 0 {
+		return float64(info.HostConfig.NanoCPUs) / 1e9
+	}
+
+	// CpuQuota e CpuPeriod (fallback)
+	if info.HostConfig.CPUQuota > 0 && info.HostConfig.CPUPeriod > 0 {
+		return float64(info.HostConfig.CPUQuota) / float64(info.HostConfig.CPUPeriod)
+	}
+
+	// Nessun limit
+	return 0.0
+}
+
+func (mc *MetricsCollector) cleanupStaleCPUCache(activeContainerIDs map[string]bool) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	staleCount := 0
+
+	// Controlla ogni entry nella map
+	for containerID := range mc.previousCPU {
+		// Se containerID non è nella lista degli attivi, rimuovi
+		if !activeContainerIDs[containerID] {
+			delete(mc.previousCPU, containerID)
+			delete(mc.previousSystem, containerID)
+			staleCount++
+		}
+	}
+
+	if staleCount > 0 {
+		log.Printf("[MetricsCollector] Cleaned %d stale CPU cache entries", staleCount)
+	}
 }

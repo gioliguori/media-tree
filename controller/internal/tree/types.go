@@ -19,16 +19,16 @@ type Tree struct {
 
 // TreeSummary è un riassunto per listing
 type TreeSummary struct {
-	TreeId         string    `json:"treeId"`
-	Template       string    `json:"template"`
-	NodesCount     int       `json:"nodesCount"`
-	InjectionCount int       `json:"injectionCount"`
-	RelayCount     int       `json:"relayCount"`
-	EgressCount    int       `json:"egressCount"`
-	MaxLayer       int       `json:"maxLayer"`
-	Status         string    `json:"status"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	TreeId          string    `json:"treeId"`
+	Template        string    `json:"template"`
+	NodesCount      int       `json:"nodesCount"`
+	InjectionCount  int       `json:"injectionCount"`
+	RelayCount      int       `json:"relayCount"`
+	EgressCount     int       `json:"egressCount"`
+	CurrentMaxLayer int       `json:"currentMaxLayer"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 // TemplateConfig configurazione template
@@ -115,14 +115,14 @@ func (tc *TemplateConfig) Validate() error {
 }
 
 // GetMaxLayer ritorna il layer più alto nel template
-func (tc *TemplateConfig) GetMaxLayer() int {
-	maxLayer := 0
-	for _, spec := range tc.Nodes {
-		if spec.Layer > maxLayer {
-			maxLayer = spec.Layer
+func GetCurrentMaxLayer(nodes []*domain.NodeInfo) int {
+	currentMaxLayer := 0
+	for _, node := range nodes {
+		if node.Layer > currentMaxLayer {
+			currentMaxLayer = node.Layer
 		}
 	}
-	return maxLayer
+	return currentMaxLayer
 }
 
 // GetTotalNodes ritorna il numero totale di nodi nel template

@@ -18,13 +18,20 @@ var Templates = map[string]TemplateConfig{
 			//{NodeType: "egress", Layer: 3, Count: 1},
 		},
 	},
-
-	"small": {
-		Name:        "small",
+	"test-overload": {
+		Name:        "test-overload",
 		Description: "1 injection + 3 egress",
 		Nodes: []TemplateNodeSpec{
 			{NodeType: "injection", Layer: 0, Count: 1},
 			{NodeType: "egress", Layer: 1, Count: 3},
+		},
+	},
+	"small": {
+		Name:        "small",
+		Description: "1 injection + 3 egress",
+		Nodes: []TemplateNodeSpec{
+			{NodeType: "injection", Layer: 0, Count: 2},
+			{NodeType: "egress", Layer: 1, Count: 2},
 		},
 	},
 

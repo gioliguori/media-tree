@@ -19,8 +19,8 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 	nodeArgs := []string{
 		"-d",
 		"--name", spec.NodeId,
-		"--cpus", "0.1",
-		"--memory", "64m",
+		"--cpus", "1.0",
+		"--memory", "512m",
 		"--hostname", spec.NodeId,
 		"--network", p.networkName,
 		"-e", fmt.Sprintf("NODE_ID=%s", spec.NodeId),

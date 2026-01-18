@@ -33,8 +33,8 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 	janusArgs := []string{
 		"-d",
 		"--name", janusName,
-		"--cpus", "0.2",
-		"--memory", "128m",
+		"--cpus", "1.0",
+		"--memory", "512m",
 		"--hostname", janusName,
 		"--network", p.networkName,
 		"-e", fmt.Sprintf("JANUS_RTP_PORT_RANGE=%d-%d", webrtcStart, webrtcEnd),
@@ -56,8 +56,8 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 	nodeArgs := []string{
 		"-d",
 		"--name", spec.NodeId,
-		"--cpus", "0.1",
-		"--memory", "64m",
+		"--cpus", "1.0",
+		"--memory", "512m",
 		"--hostname", spec.NodeId,
 		"--network", p.networkName,
 		"-e", fmt.Sprintf("NODE_ID=%s", spec.NodeId),

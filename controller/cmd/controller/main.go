@@ -12,6 +12,7 @@ import (
 	"controller/internal/config"
 	"controller/internal/metrics"
 	"controller/internal/redis"
+	"controller/internal/session"
 )
 
 func main() {
@@ -31,10 +32,10 @@ func main() {
 		redisClient.Close()
 	}()
 	// Timer 10 sec
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	pingCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel() // cleanup
 
-	if err := redisClient.Ping(ctx); err != nil {
+	if err := redisClient.Ping(pingCtx); err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
 
@@ -49,6 +50,13 @@ func main() {
 		defer metricsCollector.Stop()
 		log.Println("MetricsCollector Started")
 	}
+
+	// Start session cleanup job
+	sessionManager := session.NewSessionManager(redisClient)
+
+	ctx := context.Background()
+	sessionManager.StartCleanupJob(ctx)
+	log.Println("Session cleanup job started")
 
 	// Start API server
 	server := api.NewServer(cfg, redisClient)

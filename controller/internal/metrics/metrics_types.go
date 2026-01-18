@@ -58,6 +58,7 @@ type MountpointMetric struct {
 
 type RoomMetric struct {
 	RoomId         int    `json:"roomId"`
+	SessionId      string `json:"sessionId,omitempty"`
 	Description    string `json:"description,omitempty"`
 	HasPublisher   bool   `json:"hasPublisher"`
 	LastActivityAt int64  `json:"lastActivityAt"`

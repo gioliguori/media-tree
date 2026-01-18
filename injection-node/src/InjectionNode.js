@@ -36,6 +36,8 @@ export class InjectionNode extends BaseNode {
 
         // lock
         this.operationLocks = new Map();
+
+        this.roomsLastActivity = new Map();
     }
 
     async onInitialize() {
@@ -503,9 +505,9 @@ export class InjectionNode extends BaseNode {
         const baseMetrics = await super.getMetrics();
 
         // Mappa timestamp
-        if (!this.roomsLastActivity) {
-            this.roomsLastActivity = new Map();
-        }
+        // if (!this.roomsLastActivity) {
+        //     this.roomsLastActivity = new Map();
+        // }
 
         // Se Janus non è connesso, ritorna subito
         if (!this.janusVideoRoom) {
@@ -547,8 +549,17 @@ export class InjectionNode extends BaseNode {
                 // Recuperiamo il valore sarà now se attivo
                 const lastActivityAt = this.roomsLastActivity.get(room.room);
 
+                let sessionId = null;
+                for (const [id, sessionData] of this.sessions.entries()) {
+                    if (sessionData.roomId === room.room) {
+                        sessionId = id;
+                        break;
+                    }
+                }
+
                 roomDetails.push({
                     roomId: room.room,
+                    sessionId: sessionId,
                     description: room.description || `Room ${room.room}`,
                     participants: room.num_participants,
                     hasPublisher: hasPublisher,
