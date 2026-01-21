@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"controller/internal/domain"
@@ -36,6 +37,7 @@ type NodeProvisioningData struct {
 // SaveNodeProvisioning salva info provisioning in Redis
 func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.NodeInfo) error {
 	key := fmt.Sprintf("tree:%s:controller:node:%s", nodeInfo.TreeId, nodeInfo.NodeId)
+	indexKey := fmt.Sprintf("tree:%s:nodes", nodeInfo.TreeId)
 
 	data := NodeProvisioningData{
 		NodeId:           nodeInfo.NodeId,
@@ -53,9 +55,26 @@ func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.Node
 		CreatedAt:        time.Now().Unix(),
 	}
 
-	// HSet accetta direttamente la struct grazie ai tag redis
-	// Non serve json.Marshal
-	return c.rdb.HSet(ctx, key, data).Err()
+	// salva HASH + aggiungi a entrambi gli index
+	pipe := c.rdb.Pipeline()
+
+	// Slva HASH nodo
+	pipe.HSet(ctx, key, data)
+
+	// Aggiungi a index tree
+	pipe.SAdd(ctx, indexKey, nodeInfo.NodeId)
+
+	// Aggiungi a index globale
+	nodeRef := fmt.Sprintf("%s:%s", nodeInfo.TreeId, nodeInfo.NodeId)
+	pipe.SAdd(ctx, "global:active_nodes", nodeRef)
+
+	// Esegui atomicamente
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to save node provisioning: %w", err)
+	}
+
+	return nil
 }
 
 // GetNodeProvisioning legge info provisioning da Redis
@@ -115,51 +134,74 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string)
 	return nodeInfo, nil
 }
 
+// GetActiveNodes ritorna tutti i nodi attivi
+func (c *Client) GetActiveNodes(ctx context.Context) ([]string, error) {
+	return c.rdb.SMembers(ctx, "global:active_nodes").Result()
+}
+
 // DeleteNodeProvisioning rimuove info provisioning da Redis
 func (c *Client) DeleteNodeProvisioning(ctx context.Context, treeId, nodeId string) error {
 	key := fmt.Sprintf("tree:%s:controller:node:%s", treeId, nodeId)
-	return c.rdb.Del(ctx, key).Err()
+	indexKey := fmt.Sprintf("tree:%s:nodes", treeId)
+	nodeRef := fmt.Sprintf("%s:%s", treeId, nodeId)
+
+	// rimuovi HASH + rimuovi da entrambi gli index
+	pipe := c.rdb.Pipeline()
+
+	// Rimuovi da index globale
+	pipe.SRem(ctx, "global:active_nodes", nodeRef)
+
+	// Rimuovi da index tree
+	pipe.SRem(ctx, indexKey, nodeId)
+
+	// Rimuovi HASH nodo
+	pipe.Del(ctx, key)
+
+	// Esegui atomicamente
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to delete node provisioning: %w", err)
+	}
+
+	return nil
 }
 
 // GetAllProvisionedNodes ritorna tutti i nodi provisionati per un tree
 func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*domain.NodeInfo, error) {
-	pattern := fmt.Sprintf("tree:%s:controller:node:*", treeId)
+	indexKey := fmt.Sprintf("tree:%s:nodes", treeId)
 
-	// KEYS è lento
-	// sostituire KEYS con un SET Redis dedicato
-	keys, err := c.rdb.Keys(ctx, pattern).Result()
+	// ottieni tutti i nodeId
+	nodeIds, err := c.rdb.SMembers(ctx, indexKey).Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get keys: %w", err)
+		return nil, fmt.Errorf("failed to get node index: %w", err)
 	}
 
-	if len(keys) == 0 {
+	if len(nodeIds) == 0 {
 		return []*domain.NodeInfo{}, nil
 	}
 
-	// INIZIO PIPELINE
+	// PIPELINE per HGetAll
 	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.MapStringStringCmd, len(nodeIds))
 
-	// Accodiamo tutti i comandi HGetAll nel tubo
-	cmds := make([]*redis.MapStringStringCmd, len(keys))
-	for i, key := range keys {
+	for i, nodeId := range nodeIds {
+		key := fmt.Sprintf("tree:%s:controller:node:%s", treeId, nodeId)
 		cmds[i] = pipe.HGetAll(ctx, key)
 	}
 
-	// Eseguiamo tutto
 	_, err = pipe.Exec(ctx)
 	if err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("pipeline execution failed: %w", err)
 	}
-	// --- FINE PIPELINE ---
 
-	nodes := make([]*domain.NodeInfo, 0, len(keys))
+	// Scan risultati
+	nodes := make([]*domain.NodeInfo, 0, len(nodeIds))
 
 	for i, cmd := range cmds {
 		var data NodeProvisioningData
 
-		// Scan lavora sul risultato locale, non chiama più Redis
 		if err := cmd.Scan(&data); err != nil {
-			fmt.Printf("Error scanning key %s: %v\n", keys[i], err)
+			log.Printf("[WARN] Error scanning node %s: %v", nodeIds[i], err)
 			continue
 		}
 

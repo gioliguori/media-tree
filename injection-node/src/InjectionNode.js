@@ -36,6 +36,8 @@ export class InjectionNode extends BaseNode {
 
         // lock
         this.operationLocks = new Map();
+
+        this.roomsLastActivity = new Map();
     }
 
     async onInitialize() {
@@ -498,5 +500,100 @@ export class InjectionNode extends BaseNode {
                 list: this.getAllSessions()
             }
         };
+    }
+    async getMetrics() {
+        const baseMetrics = await super.getMetrics();
+
+        // Se Janus non è connesso, ritorna subito
+        if (!this.janusVideoRoom) {
+            return { ...baseMetrics, janus: { connected: false } };
+        }
+
+        try {
+            // Ottieni lista stanze
+            const listResponse = await this.janusVideoRoom.list();
+            const rooms = listResponse.list || [];
+            const now = Date.now();
+
+            const roomPromises = rooms.map(async (room) => {
+                let hasPublisher = false;
+
+                if (room.num_participants > 0) {
+                    try {
+                        const participantsResponse = await this.janusVideoRoom.listParticipants({
+                            room: room.room
+                        });
+                        const participants = participantsResponse.participants || [];
+                        hasPublisher = participants.some(p => p.publisher === true);
+                    } catch (err) {
+                        console.warn(`[${this.nodeId}] Failed to list participants for room ${room.room}:`, err.message);
+                    }
+                }
+
+                // Logica timestamp
+                if (hasPublisher) {
+                    this.roomsLastActivity.set(room.room, now);
+                }
+
+                if (!this.roomsLastActivity.has(room.room)) {
+                    this.roomsLastActivity.set(room.room, now);
+                }
+
+                const lastActivityAt = this.roomsLastActivity.get(room.room);
+
+                // Cerchiamo la sessionID locale corrispondente
+                let sessionId = null;
+                for (const [id, sessionData] of this.sessions.entries()) {
+                    if (sessionData.roomId === room.room) {
+                        sessionId = id;
+                        break;
+                    }
+                }
+
+                return {
+                    roomId: room.room,
+                    sessionId: sessionId,
+                    description: room.description || `Room ${room.room}`,
+                    participants: room.num_participants,
+                    hasPublisher: hasPublisher,
+                    lastActivityAt: lastActivityAt
+                };
+            });
+
+            // Attendiamo che tutte le chiamate parallele finiscano
+            const roomDetails = await Promise.all(roomPromises);
+
+            // Calcolo stanze attive
+            const activeRoomsCount = roomDetails.filter(r => r.hasPublisher).length;
+
+            // Pulizia memoria: rimuove dalla mappa le stanze che non esistono più su Janus
+            if (this.roomsLastActivity.size > rooms.length) {
+                const currentRoomIds = new Set(rooms.map(r => r.room));
+                for (const roomId of this.roomsLastActivity.keys()) {
+                    if (!currentRoomIds.has(roomId)) {
+                        this.roomsLastActivity.delete(roomId);
+                    }
+                }
+            }
+
+            return {
+                ...baseMetrics,
+                janus: {
+                    connected: true,
+                    roomsTotal: rooms.length,
+                    roomsActive: activeRoomsCount,
+                    rooms: roomDetails
+                }
+            };
+
+        } catch (error) {
+            return {
+                ...baseMetrics,
+                janus: {
+                    connected: true,
+                    error: error.message
+                }
+            };
+        }
     }
 }

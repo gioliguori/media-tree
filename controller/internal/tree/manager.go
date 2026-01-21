@@ -246,6 +246,7 @@ func (tm *TreeManager) DestroyTree(ctx context.Context, treeId string) error {
 		return fmt.Errorf("failed to get nodes: %w", err)
 	}
 
+	//log.Printf("[INFO] Found %d nodes to destroy", len(nodes))
 	// Raggruppa per layer (distruggi dal più alto al più basso)
 	nodesByLayer := make(map[int][]*domain.NodeInfo)
 	maxLayer := 0
@@ -313,7 +314,7 @@ func (tm *TreeManager) ListTrees(ctx context.Context) ([]*TreeSummary, error) {
 		// Conta nodi
 		nodes, _ := tm.redis.GetAllProvisionedNodes(ctx, treeId)
 
-		var injectionCount, relayCount, egressCount, maxLayer int
+		var injectionCount, relayCount, egressCount int
 
 		for _, node := range nodes {
 			switch node.NodeType {
@@ -324,23 +325,21 @@ func (tm *TreeManager) ListTrees(ctx context.Context) ([]*TreeSummary, error) {
 			case domain.NodeTypeEgress:
 				egressCount++
 			}
-
-			if node.Layer > maxLayer {
-				maxLayer = node.Layer
-			}
 		}
 
+		currentMaxLayer := GetCurrentMaxLayer(nodes)
+
 		summaries = append(summaries, &TreeSummary{
-			TreeId:         treeId,
-			Template:       metadata["template"],
-			NodesCount:     len(nodes),
-			InjectionCount: injectionCount,
-			RelayCount:     relayCount,
-			EgressCount:    egressCount,
-			MaxLayer:       maxLayer,
-			Status:         metadata["status"],
-			CreatedAt:      time.Unix(parseInt64(metadata["createdAt"]), 0),
-			UpdatedAt:      time.Unix(parseInt64(metadata["updatedAt"]), 0),
+			TreeId:          treeId,
+			Template:        metadata["template"],
+			NodesCount:      len(nodes),
+			InjectionCount:  injectionCount,
+			RelayCount:      relayCount,
+			EgressCount:     egressCount,
+			CurrentMaxLayer: currentMaxLayer,
+			Status:          metadata["status"],
+			CreatedAt:       time.Unix(parseInt64(metadata["createdAt"]), 0),
+			UpdatedAt:       time.Unix(parseInt64(metadata["updatedAt"]), 0),
 		})
 	}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -65,6 +66,13 @@ func (sm *SessionManager) CreateSession(
 	// Seleziona Injection
 	injectionId, err := sm.selector.SelectInjection(ctx, treeId)
 	if err != nil {
+		if errors.Is(err, ErrScalingNeeded) {
+			log.Printf("[SessionManager] Scaling needed for tree %s", treeId)
+			// TODO: Trigger autoscaling
+			// Per ora ritorna errore 503 Service Unavailable
+			return nil, fmt.Errorf("no injection nodes available, scaling in progress")
+		}
+
 		return nil, fmt.Errorf("failed to select injection: %w", err)
 	}
 
@@ -301,9 +309,12 @@ func (sm *SessionManager) provisionPath(
 			// Recupera info da Redis
 			nextNodeInfo, err := sm.redis.GetNodeProvisioning(ctx, treeId, nextHop)
 			if err != nil {
-				log.Printf("[WARN] Node info not found for %s", nextHop)
+				return fmt.Errorf("failed to get node info for %s: %w", nextHop, err)
 			}
 
+			if nextNodeInfo == nil {
+				return fmt.Errorf("node info is nil for %s", nextHop)
+			}
 			// Crea oggetto Route
 			routeFull := redis.Route{
 				TargetId:  nextHop,

@@ -568,6 +568,14 @@ export class BaseNode {
         children: this.children
       });
     });
+    this.app.get('/metrics', async (req, res) => {
+      try {
+        const metrics = await this.getMetrics();
+        res.json(metrics);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
   }
 
   async getStatus() {
@@ -586,6 +594,15 @@ export class BaseNode {
         children: this.children
       },
       uptime: Math.floor(process.uptime()),
+    };
+  }
+
+  async getMetrics() {
+    return {
+      nodeId: this.nodeId,
+      nodeType: this.nodeType,
+      timestamp: Date.now(),
+      janus: null  // Override in injection/relay
     };
   }
 
