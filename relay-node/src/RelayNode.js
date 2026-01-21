@@ -278,4 +278,29 @@ export class RelayNode extends BaseNode {
             }
         };
     }
+    async getMetrics() {
+        const baseMetrics = await super.getMetrics();
+
+        let gstreamerStats = null;
+
+        try {
+            if (this.forwarder.isReady()) {
+                gstreamerStats = await this.forwarder.getStats();
+            }
+        } catch (err) {
+            console.error(`[${this.nodeId}] Failed to get GStreamer stats:`, err.message);
+        }
+
+        return {
+            ...baseMetrics,
+            gstreamer: gstreamerStats
+            // Output esempio: 
+            // {
+            //   maxAudioQueueMs: 45.3,
+            //   maxVideoQueueMs: 120.5,
+            //   sessionCount:  3,
+            //   sessions: [...]
+            // }
+        };
+    }
 }

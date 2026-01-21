@@ -60,7 +60,7 @@ func NewMetricsCollector(redisClient *redis.Client, config *MetricsCollectorConf
 		dockerClient: dockerClient,
 		redisClient:  redisClient,
 		httpClient: &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: 10 * time.Second,
 		},
 		config:         config,
 		stopChan:       make(chan struct{}),
@@ -144,11 +144,13 @@ func (mc *MetricsCollector) collectMetrics(ctx context.Context) error {
 		return fmt.Errorf("failed to get active nodes: %w", err)
 	}
 
-	activeContainerIDs := make(map[string]bool)
-
 	if len(activeNodes) == 0 {
 		return nil // Nessun nodo attivo
 	}
+
+	// Map mutex
+	var activeContainersMu sync.Mutex
+	activeContainerIDs := make(map[string]bool)
 
 	// Channel per risultati
 	resultsCh := make(chan metricsResult, len(activeNodes))
@@ -191,12 +193,14 @@ func (mc *MetricsCollector) collectMetrics(ctx context.Context) error {
 				return
 			}
 
+			activeContainersMu.Lock()
 			if node.ContainerId != "" {
 				activeContainerIDs[node.ContainerId] = true
 			}
 			if node.JanusContainerId != "" {
 				activeContainerIDs[node.JanusContainerId] = true
 			}
+			activeContainersMu.Unlock()
 
 			// Collect metrics con timeout per nodo
 			containerCount, err := mc.collectNodeMetrics(ctx, treeID, node)
@@ -296,6 +300,16 @@ func (mc *MetricsCollector) collectNodeMetrics(ctx context.Context, treeID strin
 		nodeMetrics.ApplicationMetrics = appMetrics
 	}
 
+	// GStreamer metrics da Relay /metrics endpoint
+	if node.NodeType == "relay" {
+		gstreamerMetrics, err := mc.getGStreamerMetricsFromNode(nodeCtx, node)
+		if err != nil {
+			log.Printf("[WARN] Skip GStreamer metrics for %s:  %v", node.NodeId, err)
+		} else {
+			nodeMetrics.GStreamerMetrics = gstreamerMetrics
+		}
+	}
+
 	// Calcola bandwidth (relay)
 	if node.NodeType == "relay" && nodeMetrics.ApplicationMetrics != nil {
 		if containerMetrics, ok := nodeMetrics.Containers[string(ContainerTypeNodeJS)]; ok {
@@ -305,7 +319,7 @@ func (mc *MetricsCollector) collectNodeMetrics(ctx context.Context, treeID strin
 	}
 
 	// Salva
-	if containerCount > 0 || nodeMetrics.ApplicationMetrics != nil {
+	if containerCount > 0 || nodeMetrics.ApplicationMetrics != nil || nodeMetrics.GStreamerMetrics != nil {
 		if err := mc.saveNodeMetrics(nodeCtx, nodeMetrics); err != nil {
 			return containerCount, fmt.Errorf("failed to save metrics: %w", err)
 		}
@@ -421,33 +435,33 @@ func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerID
 
 	// Memory
 	metrics.MemoryUsedMB = float64(v.MemoryStats.Usage) / 1024 / 1024
-	metrics.MemoryLimitMB = float64(v.MemoryStats.Limit) / 1024 / 1024
+	// metrics.MemoryLimitMB = float64(v.MemoryStats.Limit) / 1024 / 1024
 	if v.MemoryStats.Limit > 0 {
 		metrics.MemoryPercent = (float64(v.MemoryStats.Usage) / float64(v.MemoryStats.Limit)) * 100
 	}
 
 	// Network
 	for _, netStats := range v.Networks {
-		metrics.NetworkRxBytes += netStats.RxBytes
+		// metrics.NetworkRxBytes += netStats.RxBytes
 		metrics.NetworkTxBytes += netStats.TxBytes
-		metrics.NetworkRxPackets += netStats.RxPackets
-		metrics.NetworkTxPackets += netStats.TxPackets
-		metrics.NetworkRxErrors += netStats.RxErrors
-		metrics.NetworkTxErrors += netStats.TxErrors
+		// metrics.NetworkRxPackets += netStats.RxPackets
+		// metrics.NetworkTxPackets += netStats.TxPackets
+		// metrics.NetworkRxErrors += netStats.RxErrors
+		// metrics.NetworkTxErrors += netStats.TxErrors
 	}
 
 	// Block I/O
-	for _, bioEntry := range v.BlkioStats.IoServiceBytesRecursive {
-		switch strings.ToLower(bioEntry.Op) {
-		case "read":
-			metrics.BlockReadBytes += bioEntry.Value
-		case "write":
-			metrics.BlockWriteBytes += bioEntry.Value
-		}
-	}
+	// for _, bioEntry := range v.BlkioStats.IoServiceBytesRecursive {
+	// 	switch strings.ToLower(bioEntry.Op) {
+	// 	case "read":
+	// 		metrics.BlockReadBytes += bioEntry.Value
+	// 	case "write":
+	// 		metrics.BlockWriteBytes += bioEntry.Value
+	// 	}
+	// }
 
 	// PIDs
-	metrics.PIDsCurrent = int(v.PidsStats.Current)
+	// metrics.PIDsCurrent = int(v.PidsStats.Current)
 
 	return metrics, nil
 }
@@ -478,22 +492,22 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 		key := fmt.Sprintf("metrics:%s:node:%s:%s", metrics.TreeID, metrics.NodeID, containerType)
 
 		metricsMap := map[string]any{
-			"containerId":      containerMetrics.ContainerID,
-			"containerName":    containerMetrics.ContainerName,
-			"cpuPercent":       fmt.Sprintf("%.2f", containerMetrics.CPUPercent),
-			"memoryUsedMb":     fmt.Sprintf("%.2f", containerMetrics.MemoryUsedMB),
-			"memoryLimitMb":    fmt.Sprintf("%.2f", containerMetrics.MemoryLimitMB),
-			"memoryPercent":    fmt.Sprintf("%.2f", containerMetrics.MemoryPercent),
-			"networkRxBytes":   fmt.Sprintf("%d", containerMetrics.NetworkRxBytes),
-			"networkTxBytes":   fmt.Sprintf("%d", containerMetrics.NetworkTxBytes),
-			"networkRxPackets": fmt.Sprintf("%d", containerMetrics.NetworkRxPackets),
-			"networkTxPackets": fmt.Sprintf("%d", containerMetrics.NetworkTxPackets),
-			"networkRxErrors":  fmt.Sprintf("%d", containerMetrics.NetworkRxErrors),
-			"networkTxErrors":  fmt.Sprintf("%d", containerMetrics.NetworkTxErrors),
-			"blockReadBytes":   fmt.Sprintf("%d", containerMetrics.BlockReadBytes),
-			"blockWriteBytes":  fmt.Sprintf("%d", containerMetrics.BlockWriteBytes),
-			"pidsCurrent":      fmt.Sprintf("%d", containerMetrics.PIDsCurrent),
-			"timestamp":        timestampReadable,
+			"containerId":   containerMetrics.ContainerID,
+			"containerName": containerMetrics.ContainerName,
+			"cpuPercent":    fmt.Sprintf("%.2f", containerMetrics.CPUPercent),
+			"memoryUsedMb":  fmt.Sprintf("%.2f", containerMetrics.MemoryUsedMB),
+			// "memoryLimitMb":    fmt.Sprintf("%.2f", containerMetrics.MemoryLimitMB),
+			"memoryPercent": fmt.Sprintf("%.2f", containerMetrics.MemoryPercent),
+			// "networkRxBytes":   fmt.Sprintf("%d", containerMetrics.NetworkRxBytes),
+			"networkTxBytes": fmt.Sprintf("%d", containerMetrics.NetworkTxBytes),
+			// "networkRxPackets": fmt.Sprintf("%d", containerMetrics.NetworkRxPackets),
+			// "networkTxPackets": fmt.Sprintf("%d", containerMetrics.NetworkTxPackets),
+			// "networkRxErrors":  fmt.Sprintf("%d", containerMetrics.NetworkRxErrors),
+			// "networkTxErrors":  fmt.Sprintf("%d", containerMetrics.NetworkTxErrors),
+			// "blockReadBytes":   fmt.Sprintf("%d", containerMetrics.BlockReadBytes),
+			// "blockWriteBytes":  fmt.Sprintf("%d", containerMetrics.BlockWriteBytes),
+			// "pidsCurrent":      fmt.Sprintf("%d", containerMetrics.PIDsCurrent),
+			"timestamp": timestampReadable,
 		}
 
 		if containerMetrics.JanusMetrics != nil {
@@ -542,6 +556,21 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 				pipe.Expire(ctx, roomKey, mc.config.MetricsTTL)
 			}
 		}
+	}
+
+	// GStreamer metrics (relay)
+	if metrics.GStreamerMetrics != nil {
+		key := fmt.Sprintf("metrics:%s:node:%s:gstreamer", metrics.TreeID, metrics.NodeID)
+
+		gstreamerMap := map[string]any{
+			"maxAudioQueueMs": fmt.Sprintf("%.2f", metrics.GStreamerMetrics.MaxAudioQueueMs),
+			"maxVideoQueueMs": fmt.Sprintf("%.2f", metrics.GStreamerMetrics.MaxVideoQueueMs),
+			"sessionCount":    fmt.Sprintf("%d", metrics.GStreamerMetrics.SessionCount),
+			"timestamp":       timestampReadable,
+		}
+
+		pipe.HMSet(ctx, key, gstreamerMap)
+		pipe.Expire(ctx, key, mc.config.MetricsTTL)
 	}
 
 	// Application metrics
@@ -630,6 +659,36 @@ func (mc *MetricsCollector) getJanusMetricsFromNode(ctx context.Context, node *d
 	}
 
 	return metricsResp.Janus, nil
+}
+
+// getGStreamerMetricsFromNode - Chiama /metrics del Relay Node. js
+func (mc *MetricsCollector) getGStreamerMetricsFromNode(ctx context.Context, node *domain.NodeInfo) (*GStreamerMetrics, error) {
+	url := fmt.Sprintf("http://%s:%d/metrics", node.InternalHost, node.InternalAPIPort)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := mc.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var metricsResp struct {
+		GStreamer *GStreamerMetrics `json:"gstreamer"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&metricsResp); err != nil {
+		return nil, fmt.Errorf("decode failed: %w", err)
+	}
+
+	return metricsResp.GStreamer, nil
 }
 
 // calculateBandwidth - Calcola Mbps da delta TX

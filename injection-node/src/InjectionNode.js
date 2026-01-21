@@ -504,11 +504,6 @@ export class InjectionNode extends BaseNode {
     async getMetrics() {
         const baseMetrics = await super.getMetrics();
 
-        // Mappa timestamp
-        // if (!this.roomsLastActivity) {
-        //     this.roomsLastActivity = new Map();
-        // }
-
         // Se Janus non è connesso, ritorna subito
         if (!this.janusVideoRoom) {
             return { ...baseMetrics, janus: { connected: false } };
@@ -518,13 +513,11 @@ export class InjectionNode extends BaseNode {
             // Ottieni lista stanze
             const listResponse = await this.janusVideoRoom.list();
             const rooms = listResponse.list || [];
-            const roomDetails = [];
             const now = Date.now();
 
-            for (const room of rooms) {
+            const roomPromises = rooms.map(async (room) => {
                 let hasPublisher = false;
 
-                // Se ci sono partecipanti, controlliamo se almeno uno è un publisher attivo
                 if (room.num_participants > 0) {
                     try {
                         const participantsResponse = await this.janusVideoRoom.listParticipants({
@@ -533,22 +526,22 @@ export class InjectionNode extends BaseNode {
                         const participants = participantsResponse.participants || [];
                         hasPublisher = participants.some(p => p.publisher === true);
                     } catch (err) {
+                        console.warn(`[${this.nodeId}] Failed to list participants for room ${room.room}:`, err.message);
                     }
                 }
 
-                // Se c'è un publisher attivo aggiorniamo il timestamp
+                // Logica timestamp
                 if (hasPublisher) {
                     this.roomsLastActivity.set(room.room, now);
                 }
 
-                // Se la stanza è nuova e non è in mappa settiamo timestamp a now
                 if (!this.roomsLastActivity.has(room.room)) {
                     this.roomsLastActivity.set(room.room, now);
                 }
 
-                // Recuperiamo il valore sarà now se attivo
                 const lastActivityAt = this.roomsLastActivity.get(room.room);
 
+                // Cerchiamo la sessionID locale corrispondente
                 let sessionId = null;
                 for (const [id, sessionData] of this.sessions.entries()) {
                     if (sessionData.roomId === room.room) {
@@ -557,16 +550,20 @@ export class InjectionNode extends BaseNode {
                     }
                 }
 
-                roomDetails.push({
+                return {
                     roomId: room.room,
                     sessionId: sessionId,
                     description: room.description || `Room ${room.room}`,
                     participants: room.num_participants,
                     hasPublisher: hasPublisher,
                     lastActivityAt: lastActivityAt
-                });
-            }
+                };
+            });
 
+            // Attendiamo che tutte le chiamate parallele finiscano
+            const roomDetails = await Promise.all(roomPromises);
+
+            // Calcolo stanze attive
             const activeRoomsCount = roomDetails.filter(r => r.hasPublisher).length;
 
             // Pulizia memoria: rimuove dalla mappa le stanze che non esistono più su Janus

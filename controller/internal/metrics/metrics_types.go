@@ -8,23 +8,23 @@ type ContainerMetrics struct {
 	ContainerName string  `json:"containerName"`
 	CPUPercent    float64 `json:"cpuPercent"`
 	MemoryUsedMB  float64 `json:"memoryUsedMb"`
-	MemoryLimitMB float64 `json:"memoryLimitMb"`
+	//MemoryLimitMB float64 `json:"memoryLimitMb"`
 	MemoryPercent float64 `json:"memoryPercent"`
 
 	// Network metrics
-	NetworkRxBytes   uint64 `json:"networkRxBytes"`
-	NetworkTxBytes   uint64 `json:"networkTxBytes"`
-	NetworkRxPackets uint64 `json:"networkRxPackets"`
-	NetworkTxPackets uint64 `json:"networkTxPackets"`
-	NetworkRxErrors  uint64 `json:"networkRxErrors"`
-	NetworkTxErrors  uint64 `json:"networkTxErrors"`
+	// NetworkRxBytes   uint64 `json:"networkRxBytes"`
+	NetworkTxBytes uint64 `json:"networkTxBytes"`
+	// NetworkRxPackets uint64 `json:"networkRxPackets"`
+	// NetworkTxPackets uint64 `json:"networkTxPackets"`
+	// NetworkRxErrors  uint64 `json:"networkRxErrors"`
+	// NetworkTxErrors  uint64 `json:"networkTxErrors"`
 
 	// Disk I/O
-	BlockReadBytes  uint64 `json:"blockReadBytes"`
-	BlockWriteBytes uint64 `json:"blockWriteBytes"`
+	// BlockReadBytes  uint64 `json:"blockReadBytes"`
+	// BlockWriteBytes uint64 `json:"blockWriteBytes"`
 
 	// PIDs
-	PIDsCurrent int `json:"pidsCurrent"`
+	// PIDsCurrent int `json:"pidsCurrent"`
 
 	JanusMetrics *JanusMetrics `json:"janus,omitempty"`
 }
@@ -35,6 +35,13 @@ type ApplicationMetrics struct {
 	SessionsForwarded int     `json:"sessionsForwarded,omitempty"` // Relay
 	TotalRoutes       int     `json:"totalRoutes,omitempty"`       // Relay
 	BandwidthTxMbps   float64 `json:"bandwidthTxMbps,omitempty"`   // Relay (calcolato)
+}
+
+// GStreamerMetrics - Metriche code GStreamer (solo relay)
+type GStreamerMetrics struct {
+	MaxAudioQueueMs float64 `json:"maxAudioQueueMs"`
+	MaxVideoQueueMs float64 `json:"maxVideoQueueMs"`
+	SessionCount    int     `json:"sessionCount"`
 }
 
 // JanusMetrics - Metriche da Janus API
@@ -80,6 +87,7 @@ type NodeMetrics struct {
 	Timestamp          int64                        `json:"timestamp"`
 	Containers         map[string]*ContainerMetrics `json:"containers"`
 	ApplicationMetrics *ApplicationMetrics          `json:"application,omitempty"`
+	GStreamerMetrics   *GStreamerMetrics            `json:"gstreamer,omitempty"`
 }
 
 // ContainerType identifica il tipo di container
@@ -105,7 +113,7 @@ func DefaultConfig() *MetricsCollectorConfig {
 	return &MetricsCollectorConfig{
 		PollInterval: pollInterval,
 		MetricsTTL:   pollInterval * 3,
-		MaxWorkers:   50,
+		MaxWorkers:   10,
 		Enabled:      true,
 	}
 }

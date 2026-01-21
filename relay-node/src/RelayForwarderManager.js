@@ -375,6 +375,28 @@ export class RelayForwarderManager {
         }
     }
 
+    /**
+    * Ottieni metriche GStreamer dal forwarder C
+    * @returns {Object} - { maxAudioQueueMs, maxVideoQueueMs, sessionCount, sessions: [... ] }
+    */
+    async getStats() {
+        const response = await this.sendCommand('STATS');
+
+        try {
+            const parsed = JSON.parse(response);
+            return parsed;
+        } catch (err) {
+            console.error(`[${this.nodeId}] Failed to parse STATS response:`, err.message);
+            console.error(`[${this.nodeId}] Raw response:`, response);
+            return {
+                maxAudioQueueMs: 0,
+                maxVideoQueueMs: 0,
+                sessionCount: 0,
+                sessions: []
+            };
+        }
+    }
+
     // HEALTH CHECK
     startHealthCheck() {
         console.log(`[${this.nodeId}] Starting health check`);

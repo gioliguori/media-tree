@@ -286,12 +286,12 @@ func (ns *NodeSelector) SelectBestEgressForSession(
 
 func (ns *NodeSelector) CanAcceptViewer(ctx context.Context, egressId string) bool {
 	// Simulazione TEST:
-	if egressId == "egress-1" || egressId == "test-1-egress-1" {
-		sessions, _ := ns.redis.GetNodeSessions(ctx, "test-1", egressId)
-		if len(sessions) >= 1 {
-			return false
-		}
-	}
+	//if egressId == "egress-1" || egressId == "test-1-egress-1" {
+	//	sessions, _ := ns.redis.GetNodeSessions(ctx, "test-1", egressId)
+	//	if len(sessions) >= 1 {
+	//		return false
+	//	}
+	//}
 	return true
 }
 

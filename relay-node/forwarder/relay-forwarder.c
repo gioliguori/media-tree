@@ -202,7 +202,7 @@ int link_target_to_tee(SessionRoute *session, TargetRoute *target) {
             }
             // Config
             g_object_set(target->audioQueue,
-                         "max-size-buffers", 20,
+                         "max-size-buffers", 1,
                          "max-size-bytes", 0,
                          "max-size-time", 0,
                          NULL);
@@ -274,7 +274,7 @@ int link_target_to_tee(SessionRoute *session, TargetRoute *target) {
 
             // Config
             g_object_set(target->videoQueue,
-                         "max-size-buffers", 10,
+                         "max-size-buffers", 1,
                          "max-size-bytes", 0,
                          "max-size-time", 0,
                          NULL);
@@ -869,6 +869,71 @@ void handle_list() {
     pthread_mutex_unlock(&sessions_mutex);
 }
 
+// metriche GStreamer
+void handle_stats() {
+    pthread_mutex_lock(&sessions_mutex);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *sessions_array = cJSON_CreateArray();
+
+    guint64 max_audio_queue_time = 0;
+    guint64 max_video_queue_time = 0;
+
+    // Itera su tutte le sessioni e targets
+    for (int i = 0; i < session_count; i++) {
+        SessionRoute *session = &sessions[i];
+
+        for (int j = 0; j < session->targetCount; j++) {
+            TargetRoute *target = &session->targets[j];
+
+            // Leggi current-level-time delle queue audio
+            if (target->audioQueue) {
+                guint64 audio_time = 0;
+                g_object_get(target->audioQueue, "current-level-time", &audio_time, NULL);
+                if (audio_time > max_audio_queue_time) {
+                    max_audio_queue_time = audio_time;
+                }
+            }
+
+            // Leggi current-level-time delle queue video
+            if (target->videoQueue) {
+                guint64 video_time = 0;
+                g_object_get(target->videoQueue, "current-level-time", &video_time, NULL);
+                if (video_time > max_video_queue_time) {
+                    max_video_queue_time = video_time;
+                }
+            }
+        }
+
+        cJSON *session_obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(session_obj, "sessionId", session->sessionId);
+        cJSON_AddNumberToObject(session_obj, "targetCount", session->targetCount);
+        cJSON_AddItemToArray(sessions_array, session_obj);
+    }
+
+    cJSON_AddItemToObject(root, "sessions", sessions_array);
+
+    // nanosec -> millisec
+    double max_audio_queue_ms = max_audio_queue_time / 1000000.0;
+    double max_video_queue_ms = max_video_queue_time / 1000000.0;
+
+    cJSON_AddNumberToObject(root, "maxAudioQueueMs", max_audio_queue_ms);
+    cJSON_AddNumberToObject(root, "maxVideoQueueMs", max_video_queue_ms);
+    cJSON_AddNumberToObject(root, "sessionCount", session_count);
+
+    char *json_string = cJSON_PrintUnformatted(root);
+    if (json_string) {
+        write(client_connection, json_string, strlen(json_string));
+        write(client_connection, "\n", 1);
+        write(client_connection, "END\n", 4);
+        free(json_string);
+    }
+
+    cJSON_Delete(root);
+
+    pthread_mutex_unlock(&sessions_mutex);
+}
+
 // SOCKET COMMAND LOOP
 
 void *command_loop(void) {
@@ -941,6 +1006,9 @@ void *command_loop(void) {
          * LIST
          *   Ritorna JSON con tutte le sessioni e route
          *
+         * STATS
+         *   Ritorna JSON con metriche GStreamer (queue saturation)
+         *
          * PING
          *   Risponde PONG
          *
@@ -965,10 +1033,10 @@ void *command_loop(void) {
 
         } else if (strcmp(cmd, "LIST") == 0) {
             handle_list();
-
+        } else if (strcmp(cmd, "STATS") == 0) {
+            handle_stats();
         } else if (strcmp(cmd, "PING") == 0) {
             write(client_connection, "PONG\n", 5);
-
         } else if (strcmp(cmd, "SHUTDOWN") == 0) {
             write(client_connection, "BYE\n", 4);
             cleanup_and_exit(0);

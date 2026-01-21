@@ -41,7 +41,7 @@ echo ""
 echo "--- BASELINE ---"
 sleep 5
 
-CPU_JANUS_BASE=$(docker exec redis redis-cli HGET metrics: $TREE_ID:node:$INJECTION_NODE:janusVideoroom cpuPercent 2>/dev/null || echo "0")
+CPU_JANUS_BASE=$(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$INJECTION_NODE:janusVideoroom cpuPercent 2>/dev/null || echo "0")
 CPU_INJ_BASE=$(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$INJECTION_NODE:nodejs cpuPercent 2>/dev/null || echo "0")
 CPU_RELAY_BASE=$(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$RELAY_ROOT:nodejs cpuPercent 2>/dev/null || echo "0")
 
@@ -52,12 +52,12 @@ echo ""
 
 # Output CSV
 OUTPUT="stress-full-$(date +%Y%m%d-%H%M%S).csv"
-echo "Sessions,Viewers,Publishers,CPU_Janus,CPU_Inj,CPU_Relay,BW_Relay_TX,Status" > $OUTPUT
+echo "Sessions,Viewers,Publishers,CPU_Janus,CPU_Inj,CPU_Relay,BW_Relay_TX,QueueAudio,QueueVideo,Status" > $OUTPUT
 
 # Header console
-printf "%-10s | %-10s | %-10s | %-12s | %-12s | %-12s | %-15s | %-10s\n" \
-    "Sessioni" "Viewers" "Pubs" "CPU Janus" "CPU Inj" "CPU Relay" "BW Relay TX" "Status"
-echo "------------------------------------------------------------------------------------------------"
+printf "%-10s | %-10s | %-10s | %-12s | %-12s | %-12s | %-15s | %-12s | %-12s | %-10s\n" \
+    "Sessioni" "Viewers" "Pubs" "CPU Janus" "CPU Inj" "CPU Relay" "BW Relay TX" "Q Audio" "Q Video" "Status"
+echo "---------------------------------------------------------------------------------------------------------------------------"
 
 SATURATED=false
 
@@ -116,6 +116,8 @@ for i in $(seq 1 $NUM_SESSIONS); do
     
     BW_RELAY_TX=$(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$RELAY_ROOT:application bandwidthTxMbps 2>/dev/null || echo "N/A")
     
+    QUEUE_AUDIO=$(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$RELAY_ROOT:gstreamer maxAudioQueueMs 2>/dev/null || echo "N/A")
+    QUEUE_VIDEO=$(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$RELAY_ROOT:gstreamer maxVideoQueueMs 2>/dev/null || echo "N/A")
     # Status check
     STATUS="OK"
     
@@ -129,12 +131,16 @@ for i in $(seq 1 $NUM_SESSIONS); do
         SATURATED=true
     fi
     
+     if (( $(echo "$QUEUE_AUDIO > 200" | bc -l 2>/dev/null || echo 0) )) || (( $(echo "$QUEUE_VIDEO > 200" | bc -l 2>/dev/null || echo 0) )); then
+        STATUS=" QUEUE_SAT"
+        SATURATED=true
+    fi
     # Console output
-    printf "%-10s | %-10s | %-10s | %-12s | %-12s | %-12s | %-15s | %-10s\n" \
-        "$i" "$TOTAL_VIEWERS" "$PUBLISHERS" "$CPU_JANUS" "$CPU_INJ" "$CPU_RELAY" "$BW_RELAY_TX" "$STATUS"
+    printf "%-10s | %-10s | %-10s | %-12s | %-12s | %-12s | %-15s | %-12s | %-12s | %-10s\n" \
+        "$i" "$TOTAL_VIEWERS" "$PUBLISHERS" "$CPU_JANUS" "$CPU_INJ" "$CPU_RELAY" "$BW_RELAY_TX" "$QUEUE_AUDIO" "$QUEUE_VIDEO" "$STATUS"
     
     # CSV
-    echo "$i,$TOTAL_VIEWERS,$PUBLISHERS,$CPU_JANUS,$CPU_INJ,$CPU_RELAY,$BW_RELAY_TX,$STATUS" >> $OUTPUT
+    echo "$i,$TOTAL_VIEWERS,$PUBLISHERS,$CPU_JANUS,$CPU_INJ,$CPU_RELAY,$BW_RELAY_TX,$QUEUE_AUDIO,$QUEUE_VIDEO,$STATUS" >> $OUTPUT
     
     if [ "$SATURATED" = true ]; then
         echo ""
@@ -160,6 +166,8 @@ echo "CPU Janus:      $(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$
 echo "CPU Injection:  $(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$INJECTION_NODE:nodejs cpuPercent)%"
 echo "CPU Relay:     $(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$RELAY_ROOT:nodejs cpuPercent)%"
 echo "BW Relay TX:   $(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$RELAY_ROOT:application bandwidthTxMbps) Mbps"
+echo "Queue Audio:   $(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$RELAY_ROOT:gstreamer maxAudioQueueMs) ms"
+echo "Queue Video:   $(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$RELAY_ROOT:gstreamer maxVideoQueueMs) ms"
 echo ""
 
 echo "Risultati:  $OUTPUT"
