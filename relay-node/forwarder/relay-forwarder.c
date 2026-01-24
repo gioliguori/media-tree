@@ -202,7 +202,7 @@ int link_target_to_tee(SessionRoute *session, TargetRoute *target) {
             }
             // Config
             g_object_set(target->audioQueue,
-                         "max-size-buffers", 1,
+                         "max-size-buffers", 100,
                          "max-size-bytes", 0,
                          "max-size-time", 0,
                          NULL);
@@ -274,7 +274,7 @@ int link_target_to_tee(SessionRoute *session, TargetRoute *target) {
 
             // Config
             g_object_set(target->videoQueue,
-                         "max-size-buffers", 1,
+                         "max-size-buffers", 120,
                          "max-size-bytes", 0,
                          "max-size-time", 0,
                          NULL);

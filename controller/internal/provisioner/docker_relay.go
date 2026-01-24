@@ -15,16 +15,17 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 		return nil, fmt.Errorf("failed to allocate API port: %w", err)
 	}
 
+	dockerName := fmt.Sprintf("%s-%s", spec.TreeId, spec.NodeId)
 	// Crea Relay Node
 	nodeArgs := []string{
 		"-d",
-		"--name", spec.NodeId,
+		"--name", dockerName,
 		"--cpus", "1.0",
 		"--memory", "512m",
-		"--hostname", spec.NodeId,
+		"--hostname", dockerName,
 		"--network", p.networkName,
 		"-e", fmt.Sprintf("NODE_ID=%s", spec.NodeId),
-		"-e", fmt.Sprintf("NODE_HOST=%s", spec.NodeId),
+		"-e", fmt.Sprintf("NODE_HOST=%s", dockerName),
 		"-e", "API_PORT=7070",
 		"-e", fmt.Sprintf("TREE_ID=%s", spec.TreeId),
 		"-e", fmt.Sprintf("LAYER=%d", spec.Layer),
@@ -38,7 +39,7 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 
 	nodeID, err := p.dockerRun(ctx, nodeArgs)
 	if err != nil {
-		p.dockerRemove(ctx, spec.NodeId)
+		p.dockerRemove(ctx, dockerName)
 		p.portAllocator.Release(apiPort)
 		return nil, fmt.Errorf("failed to create relay node: %w", err)
 
@@ -51,7 +52,7 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 		TreeId:           spec.TreeId,
 		Layer:            spec.Layer,
 		ContainerId:      nodeID,
-		InternalHost:     spec.NodeId,
+		InternalHost:     dockerName,
 		InternalAPIPort:  7070,
 		InternalRTPAudio: 5002,
 		InternalRTPVideo: 5004,
@@ -63,8 +64,8 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 	if err := p.redisClient.SaveNodeProvisioning(ctx, nodeInfo); err != nil {
 		// Rollback
 		log.Printf("[WARN] Failed to save Relay to Redis, rolling back %s...", spec.NodeId)
-		p.dockerStop(ctx, nodeInfo.NodeId)
-		p.dockerRemove(ctx, nodeInfo.NodeId)
+		p.dockerStop(ctx, dockerName)
+		p.dockerRemove(ctx, dockerName)
 		p.portAllocator.Release(apiPort)
 		return nil, fmt.Errorf("failed to save provisioning to Redis: %w", err)
 	}

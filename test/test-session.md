@@ -12,17 +12,17 @@ docker-compose up --build -d
 
 ### Crea Tree "small"
 
-curl -X POST http://localhost:8080/api/trees \
-  -H "Content-Type: application/json" \
-  -d '{"treeId":"test-1","template":"small"}' | jq
-
-**Expected Response:**
-{
-  "treeId": "test-1",
-  "template": "small",
-  "status": "active",
-  "nodes": 5
-}
+#curl -X POST http://localhost:8080/api/trees \
+#  -H "Content-Type: application/json" \
+#  -d '{"treeId":"default-tree","template":"small"}' | jq
+#
+#**Expected Response:**
+#{
+#  "treeId": "default-tree",
+#  "template": "small",
+#  "status": "active",
+#  "nodes": 5
+#}
 
 ### Crea Sessione
 
@@ -34,7 +34,7 @@ curl -X POST http://localhost:8080/api/sessions \
 json
 {
   "sessionId": "broadcaster-1",
-  "treeId": "test-1",
+  "treeId": "default-tree",
   "injectionNodeId": "injection-1",
   "audioSsrc": 10000,
   "videoSsrc": 10001,
@@ -47,7 +47,7 @@ json
 
 **Session metadata:**
 
-docker exec redis redis-cli HGETALL tree:test-1:session:broadcaster-1
+docker exec redis redis-cli HGETALL tree:default-tree:session:broadcaster-1
 
 
 **Expected:**
@@ -55,7 +55,7 @@ docker exec redis redis-cli HGETALL tree:test-1:session:broadcaster-1
 1)  "session_id"
 2)  "broadcaster-1"
 3)  "tree_id"
-4)  "test-1"
+4)  "default-tree"
 5)  "injection_node_id"
 6)  "injection-1"
 7)  "relay_root_id"
@@ -72,13 +72,13 @@ docker exec redis redis-cli HGETALL tree:test-1:session:broadcaster-1
 
 **Session index:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:sessions
 
 **Expected:** `broadcaster-1`
 
 **Injection has session:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:node:injection-1:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:node:injection-1:sessions
 
 **Expected:** `broadcaster-1`
 
@@ -98,37 +98,37 @@ docker exec redis redis-cli SMEMBERS tree:test-1:node:injection-1:sessions
 
 **Egress list:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:session:broadcaster-1:egresses
+docker exec redis redis-cli SMEMBERS tree:default-tree:session:broadcaster-1:egresses
 
 **Expected:** `egress-1`
 
 **Path stored:**
 
-docker exec redis redis-cli GET tree:test-1:session:broadcaster-1:path:egress-1
+docker exec redis redis-cli GET tree:default-tree:session:broadcaster-1:path:egress-1
 
 **Expected:** `injection-1,relay-root-1,egress-1`
 
 **Relay-root has session:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:node:relay-root-1:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:node:relay-root-1:sessions
 
 **Expected:** `broadcaster-1`
 
 **Egress-1 has session:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:node:egress-1:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:node:egress-1:sessions
 
 **Expected:** `broadcaster-1`
 
 **Routing table (relay-root -> egress-1):**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:routing:broadcaster-1:relay-root-1
+docker exec redis redis-cli SMEMBERS tree:default-tree:routing:broadcaster-1:relay-root-1
 
 **Expected:** `egress-1`
 
 **Mountpoint egress-1:**
 
-docker exec redis redis-cli HGETALL tree:test-1:mountpoint:egress-1:broadcaster-1
+docker exec redis redis-cli HGETALL tree:default-tree:mountpoint:egress-1:broadcaster-1
 
 **Expected:**
 
@@ -158,31 +158,31 @@ docker exec redis redis-cli HGETALL tree:test-1:mountpoint:egress-1:broadcaster-
 
 **Egress list (2 egress):**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:session:broadcaster-1:egresses
+docker exec redis redis-cli SMEMBERS tree:default-tree:session:broadcaster-1:egresses
 
 **Expected:** `egress-1` `egress-2`
 
 **Path 2 stored:**
 
-docker exec redis redis-cli GET tree:test-1:session:broadcaster-1:path:egress-2
+docker exec redis redis-cli GET tree:default-tree:session:broadcaster-1:path:egress-2
 
 **Expected:** `injection-1,relay-root-1,egress-2`
 
 **Egress-2 has session:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:node:egress-2:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:node:egress-2:sessions
 
 **Expected:** `broadcaster-1`
 
 **Routing table aggiornata (relay-root -> egress-1, egress-2):**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:routing:broadcaster-1:relay-root-1
+docker exec redis redis-cli SMEMBERS tree:default-tree:routing:broadcaster-1:relay-root-1
 
 **Expected:** `egress-1` `egress-2`
 
 **Mountpoint egress-2:**
 
-docker exec redis redis-cli HGETALL tree:test-1:mountpoint:egress-2:broadcaster-1
+docker exec redis redis-cli HGETALL tree:default-tree:mountpoint:egress-2:broadcaster-1
 
 **Expected:** Mountpoint creato
 
@@ -214,7 +214,7 @@ docker-compose up -d whip-client-1
 ### Destroy Path egress-2
 
 curl -X DELETE \
-  "http://localhost:8080/api/trees/test-1/sessions/broadcaster-1/egress/egress-2"
+  "http://localhost:8080/api/trees/default-tree/sessions/broadcaster-1/egress/egress-2"
 
 
 **Expected Response:**
@@ -230,43 +230,43 @@ json
 
 **Path egress-2 vuoto:**
 
-docker exec redis redis-cli GET tree:test-1:session:broadcaster-1:path:egress-2
+docker exec redis redis-cli GET tree:default-tree:session:broadcaster-1:path:egress-2
 
 **Expected:** `(nil)`
 
 **Path egress-1 ancora presente:**
 
-docker exec redis redis-cli GET tree:test-1:session:broadcaster-1:path:egress-1
+docker exec redis redis-cli GET tree:default-tree:session:broadcaster-1:path:egress-1
 
 **Expected:** `injection-1,relay-root-1,egress-1`
 
 **Egress list aggiornata (solo egress-1):**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:session:broadcaster-1:egresses
+docker exec redis redis-cli SMEMBERS tree:default-tree:session:broadcaster-1:egresses
 
 **Expected:** `egress-1` (solo)
 
 **Relay-root ha ancora session (serve egress-1):**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:node:relay-root-1:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:node:relay-root-1:sessions
 
 **Expected:** `broadcaster-1` 
 
 **Egress-2 session removed:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:node:egress-2:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:node:egress-2:sessions
 
 **Expected:** `(empty)`
 
 **Routing aggiornata (solo egress-1):**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:routing:broadcaster-1:relay-root-1
+docker exec redis redis-cli SMEMBERS tree:default-tree:routing:broadcaster-1:relay-root-1
 
 **Expected:** `egress-1` (solo)
 
 **Mountpoint egress-2 removed:**
 
-docker exec redis redis-cli HGETALL tree:test-1:mountpoint:egress-2:broadcaster-1
+docker exec redis redis-cli HGETALL tree:default-tree:mountpoint:egress-2:broadcaster-1
 
 **Expected:** `(empty)`
 
@@ -288,7 +288,7 @@ docker exec redis redis-cli HGETALL tree:test-1:mountpoint:egress-2:broadcaster-
 
 ### Destroy Entire Session
 
-curl -X DELETE "http://localhost:8080/api/trees/test-1/sessions/broadcaster-1"
+curl -X DELETE "http://localhost:8080/api/trees/default-tree/sessions/broadcaster-1"
 
 
 **Expected Response:**
@@ -296,7 +296,7 @@ json
 {
   "status": "destroyed",
   "sessionId": "broadcaster-1",
-  "treeId": "test-1"
+  "treeId": "default-tree"
 }
 ---
 
@@ -304,61 +304,61 @@ json
 
 **Session metadata vuota:**
 
-docker exec redis redis-cli EXISTS tree:test-1:session:broadcaster-1
+docker exec redis redis-cli EXISTS tree:default-tree:session:broadcaster-1
 
 **Expected:** `0`
 
 **Egress list GvuotaONE:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:session:broadcaster-1:egresses
+docker exec redis redis-cli SMEMBERS tree:default-tree:session:broadcaster-1:egresses
 
 **Expected:** `(empty)`
 
 **Path vuota:**
 
-docker exec redis redis-cli GET tree:test-1:session:broadcaster-1:path:egress-1
+docker exec redis redis-cli GET tree:default-tree:session:broadcaster-1:path:egress-1
 
 **Expected:** `(nil)`
 
 **Injection session vuota:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:node:injection-1:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:node:injection-1:sessions
 
 **Expected:** `(empty)`
 
 **Relay-root session vuota:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:node:relay-root-1:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:node:relay-root-1:sessions
 
 **Expected:** `(empty)`
 
 **Egress-1 session vuota:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:node:egress-1:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:node:egress-1:sessions
 
 **Expected:** `(empty)`
 
 **Routing table vuota:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:routing:broadcaster-1:relay-root-1
+docker exec redis redis-cli SMEMBERS tree:default-tree:routing:broadcaster-1:relay-root-1
 
 **Expected:** `(empty)`
 
 **Session tree index vuota:**
 
-docker exec redis redis-cli SMEMBERS tree:test-1:sessions
+docker exec redis redis-cli SMEMBERS tree:default-tree:sessions
 
 **Expected:** `(empty)`
 
 **Mountpoint egress-1 vuota:**
 
-docker exec redis redis-cli HGETALL tree:test-1:mountpoint:egress-1:broadcaster-1
+docker exec redis redis-cli HGETALL tree:default-tree:mountpoint:egress-1:broadcaster-1
 
 **Expected:** `(empty)`
 
 **Check residui (non devono esistere):**
 
-docker exec redis redis-cli KEYS tree:test-1:session:broadcaster-1:*
+docker exec redis redis-cli KEYS tree:default-tree:session:broadcaster-1:*
 
 **Expected:** `(empty)`
 
@@ -396,10 +396,10 @@ docker logs egress-1
 ## Cleanup
 
 # Destroy tree
-curl -X DELETE http://localhost:8080/api/trees/test-1
+curl -X DELETE http://localhost:8080/api/trees/default-tree
 
 # Verify Redis completamente pulito
-docker exec redis redis-cli KEYS tree:test-1:*
+docker exec redis redis-cli KEYS tree:default-tree:*
 
 **Expected:** `(empty)`
 

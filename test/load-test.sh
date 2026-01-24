@@ -1,0 +1,10 @@
+#!/bin/bash
+# Lancia 5 sessioni in parallelo per generare carico
+for i in {1..5}; do
+   echo "Lancio sessione load-$i..."
+   ./create-session.sh "load-$i" &
+   sleep 2 # Aspetta un attimo tra una e l'altra per non intasare l'API subito
+done
+
+wait
+echo "Tutte le sessioni lanciate."

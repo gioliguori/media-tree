@@ -49,31 +49,45 @@ func (p *DockerProvisioner) DestroyNode(ctx context.Context, nodeInfo *domain.No
 	if nodeInfo.ContainerId == "" {
 		fullInfo, err := p.redisClient.GetNodeProvisioning(ctx, nodeInfo.TreeId, nodeInfo.NodeId)
 		if err != nil {
-			return fmt.Errorf("failed to get provisioning info: %w", err)
+			// se Redis fallisce, ricostruiamo il nome fisico a mano
+			nodeInfo.InternalHost = fmt.Sprintf("%s-%s", nodeInfo.TreeId, nodeInfo.NodeId)
 		}
 		nodeInfo = fullInfo
 	}
 
+	targetContainer := nodeInfo.InternalHost
+	if nodeInfo.ContainerId != "" {
+		targetContainer = nodeInfo.ContainerId
+	}
 	// (SIGTERM)
 	log.Printf("[INFO] Stopping node %s gracefully...", nodeInfo.NodeId)
-	if err := p.dockerStop(ctx, nodeInfo.NodeId); err != nil {
-		log.Printf("[WARN] Failed to stop %s gracefully: %v", nodeInfo.NodeId, err)
+	if err := p.dockerStop(ctx, targetContainer); err != nil {
+		log.Printf("[WARN] Failed to stop %s gracefully: %v", targetContainer, err)
 	}
 
 	// Attendi che nodo si unregister (max 3s)
 	time.Sleep(3 * time.Second)
 
 	// Rimuovi container principale
-	if err := p.dockerRemove(ctx, nodeInfo.NodeId); err != nil {
+	if err := p.dockerRemove(ctx, targetContainer); err != nil {
 		return fmt.Errorf("failed to remove node container: %w", err)
 	}
 
 	// Se ha Janus, rimuovi anche quello
-	if nodeInfo.NeedsJanus() && nodeInfo.JanusHost != "" {
-		log.Printf("[INFO] Stopping Janus %s...", nodeInfo.JanusHost)
-		p.dockerStop(ctx, nodeInfo.JanusHost)
-		if err := p.dockerRemove(ctx, nodeInfo.JanusHost); err != nil {
-			log.Printf("[WARN] Failed to remove Janus: %v", err)
+	if nodeInfo.NeedsJanus() {
+		targetJanus := nodeInfo.JanusContainerId
+		if targetJanus == "" {
+			targetJanus = targetContainer + "-janus-vr"
+			if nodeInfo.IsEgress() {
+				targetJanus = targetContainer + "-janus-streaming"
+			}
+		}
+		if targetJanus != "" {
+			log.Printf("[INFO] Stopping Janus %s...", targetJanus)
+			p.dockerStop(ctx, targetJanus)
+			if err := p.dockerRemove(ctx, targetJanus); err != nil {
+				log.Printf("[WARN] Failed to remove Janus: %v", err)
+			}
 		}
 	}
 

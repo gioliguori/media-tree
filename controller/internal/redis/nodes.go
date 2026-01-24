@@ -144,3 +144,29 @@ func (c *Client) ForceDeleteNode(
 	log.Printf("[Redis] Node %s force deleted successfully", nodeId)
 	return nil
 }
+
+// SetNodeStatus imposta lo stato operativo del nodo (active, draining)
+func (c *Client) SetNodeStatus(ctx context.Context, treeId string, nodeId string, status string) error {
+	key := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
+	return c.rdb.HSet(ctx, key, "status", status).Err()
+}
+
+// GetNodeStatus legge lo stato. Default: "active"
+func (c *Client) GetNodeStatus(ctx context.Context, treeId string, nodeId string) (string, error) {
+	key := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
+
+	status, err := c.rdb.HGet(ctx, key, "status").Result()
+	if err != nil {
+		if err.Error() == "redis:nil" {
+			return "active", nil
+		}
+		return "", err
+	}
+	return status, nil
+}
+
+// GetNodeSessionCount conta le sessioni attive su un nodo
+func (c *Client) GetNodeSessionCount(ctx context.Context, treeId string, nodeId string) (int64, error) {
+	key := fmt.Sprintf("tree:%s:node:%s:sessions", treeId, nodeId)
+	return c.rdb.SCard(ctx, key).Result()
+}

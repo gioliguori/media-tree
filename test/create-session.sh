@@ -88,14 +88,14 @@ echo "  Audio:       Sine wave ${FREQ}Hz"
 echo ""
 
 # Attendi connessione
-echo "--- ATTENDO CONNESSIONE (15s) ---"
-sleep 15
+echo "--- ATTENDO CONNESSIONE (5s) ---"
+sleep 5
 
 # Verifica publisher connesso
 echo ""
 echo "--- VERIFICA STATO ---"
 
-HAS_PUBLISHER=$(curl -s http://localhost:7070/metrics 2>/dev/null | jq -r ". janus. rooms[] | select(.sessionId == \"$SESSION_ID\") | .hasPublisher")
+HAS_PUBLISHER=$(curl -s http://localhost:7070/metrics 2>/dev/null | jq -r ".janus.rooms[] | select(.sessionId == \"$SESSION_ID\") | .hasPublisher")
 
 if [ "$HAS_PUBLISHER" = "true" ]; then
     echo " Publisher CONNESSO"
@@ -107,7 +107,7 @@ else
 fi
 
 # CPU Janus
-CPU_JANUS=$(docker exec redis redis-cli HGET metrics: $TREE_ID:node:$INJECTION_NODE:janusVideoroom cpuPercent 2>/dev/null || echo "N/A")
+CPU_JANUS=$(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$INJECTION_NODE:janusVideoroom cpuPercent 2>/dev/null || echo "N/A")
 echo "CPU Janus VideoRoom:   $CPU_JANUS%"
 
 # CPU WHIP client

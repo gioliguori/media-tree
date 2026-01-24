@@ -229,10 +229,10 @@ media: {
 	#min_nack_queue = 500
 	rtp_port_range = "${JANUS_RTP_PORT_RANGE}"
 	#dtls_mtu = 1200
-	#no_media_timer = 1
+	no_media_timer = 15
 	#slowlink_threshold = 4
 	#twcc_period = 100
-	#dtls_timeout = 500
+	dtls_timeout = 500
 
 	# Janus can do some optimizations on the NACK queue, specifically when
 	# keyframes are involved. Namely, you can configure Janus so that any
@@ -290,8 +290,8 @@ nat: {
 	#nice_debug = "nice_debug option is NOT SUPPORTED ANYMORE! Please set NICE_DEBUG and G_MESSAGES_DEBUG env vars when starting Janus"
 	#full_trickle = true
 	#ice_nomination = "regular"
-	#ice_consent_freshness = true
-	#ice_keepalive_conncheck = true
+	ice_consent_freshness = true
+	ice_keepalive_conncheck = true
 	#ice_lite = true
 	#ice_tcp = true
 
@@ -301,7 +301,7 @@ nat: {
 	# failure to result in the PeerConnection being closed right away
 	# (e.g., with the help of consent freshness) then you can do that
 	# by uncommenting the following property and set it to true
-	#hangup_on_failed = true
+	hangup_on_failed = true
 
 	# By default Janus tries to resolve mDNS (.local) candidates: even
 	# though this is now done asynchronously and shouldn't keep the API

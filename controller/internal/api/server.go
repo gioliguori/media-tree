@@ -12,28 +12,37 @@ import (
 	"controller/internal/api/handlers"
 	"controller/internal/config"
 	"controller/internal/redis"
+	"controller/internal/session"
+	"controller/internal/tree"
 )
 
 type Server struct {
-	router      *gin.Engine
-	httpServer  *http.Server
-	redisClient *redis.Client
-	config      *config.Config
+	router         *gin.Engine
+	httpServer     *http.Server
+	redisClient    *redis.Client
+	config         *config.Config
+	treeManager    *tree.TreeManager
+	sessionManager *session.SessionManager
 }
 
-func NewServer(cfg *config.Config, redisClient *redis.Client) *Server {
+func NewServer(cfg *config.Config,
+	redisClient *redis.Client,
+	treeMgr *tree.TreeManager,
+	sessMgr *session.SessionManager,
+) *Server {
+
 	gin.SetMode(gin.ReleaseMode)
-
 	router := gin.New()
-
 	// Middleware
 	router.Use(gin.Recovery())
 	router.Use(loggerMiddleware())
 
 	server := &Server{
-		router:      router,
-		redisClient: redisClient,
-		config:      cfg,
+		router:         router,
+		redisClient:    redisClient,
+		config:         cfg,
+		treeManager:    treeMgr,
+		sessionManager: sessMgr,
 	}
 
 	// Setup routes
@@ -43,46 +52,22 @@ func NewServer(cfg *config.Config, redisClient *redis.Client) *Server {
 }
 
 func (s *Server) setupRoutes() {
-	// Health check endpoints
-	healthHandler := handlers.NewHealthHandler(s.redisClient)
+	s.router.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
 
-	s.router.GET("/api/health", healthHandler.Health)
-	s.router.GET("/api/ready", healthHandler.Ready)
+	// Handlers
+	treeHandler := handlers.NewTreeHandler(s.treeManager)
+	sessionHandler := handlers.NewSessionHandler(s.sessionManager, s.treeManager)
+	metricsHandler := handlers.NewMetricsHandler(s.redisClient)
 
-	testHandler := handlers.NewTestHandler()
-	s.router.GET("/api/test/domain", testHandler.TestDomainModels)
-	s.router.GET("/api/test/ports", testHandler.TestPortAllocator)
-	s.router.GET("/api/test/ports/allocation", testHandler.TestPortAllocation)
-	s.router.GET("/api/test/ports/release", testHandler.TestPortRelease)
-
-	s.router.GET("/api/test/webrtc", testHandler.TestWebRTCAllocation)
-	s.router.GET("/api/test/tree", testHandler.TestFullTreeAllocation)
-	s.router.GET("/api/test/release-range", testHandler.TestReleaseWebRTCRange)
-
-	// Provisioner tests
-	provHandler, err := handlers.NewProvisionerHandler(s.config.DockerNetwork, s.redisClient)
-	if err != nil {
-		panic("Failed to create provisioner handler: " + err.Error())
-	}
-	s.router.POST("/api/test/provision/injection", provHandler.TestCreateInjection)
-	s.router.POST("/api/test/provision/relay", provHandler.TestCreateRelay)
-	s.router.POST("/api/test/provision/egress", provHandler.TestCreateEgress)
-	s.router.POST("/api/test/provision/tree", provHandler.TestCreateTree)
-	s.router.DELETE("/api/test/provision/tree", provHandler.TestDestroyTree)
-	s.router.GET("/api/test/provision/list", provHandler.TestListProvisioned)
-	s.router.GET("/api/test/provision/:nodeId", provHandler.TestGetProvisionInfo)
-
-	// Tree handler
-	treeHandler := handlers.NewTreeHandler(s.redisClient, provHandler.GetProvisioner())
-
+	// API Trees
 	s.router.POST("/api/trees", treeHandler.CreateTree)
 	s.router.GET("/api/trees/:treeId", treeHandler.GetTree)
 	s.router.DELETE("/api/trees/:treeId", treeHandler.DestroyTree)
 	s.router.GET("/api/trees", treeHandler.ListTrees)
 
-	//  Session handler
-	sessionHandler := handlers.NewSessionHandler(s.redisClient, treeHandler.GetTreeManager())
-
+	// API Sessions
 	// Create session (ingresso)
 	s.router.POST("/api/sessions", sessionHandler.CreateSession)
 	// List session
@@ -99,7 +84,7 @@ func (s *Server) setupRoutes() {
 	s.router.DELETE("/api/trees/:treeId/sessions/:sessionId/egress/:egressId",
 		sessionHandler.DestroySessionPath)
 
-	metricsHandler := handlers.NewMetricsHandler(s.redisClient)
+	// API Metrics
 	s.router.GET("/api/metrics/:treeId/:nodeId", metricsHandler.GetNodeMetrics)
 	s.router.GET("/api/metrics/:treeId", metricsHandler.GetTreeMetrics)
 
@@ -156,8 +141,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		return fmt.Errorf("server shutdown failed: %w", err)
 	}
-
-	log.Println("API server stopped gracefully")
 	return nil
 }
 
