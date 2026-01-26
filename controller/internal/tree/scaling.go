@@ -37,6 +37,30 @@ func (tm *TreeManager) ScaleUpInjection(ctx context.Context, treeId string) erro
 func (tm *TreeManager) DestroyNode(ctx context.Context, treeId, nodeId, nodeType string) error {
 	log.Printf("[TreeManager] Scaling down: Autoscaler requested destroy for node %s (%s)", nodeId, nodeType)
 
+	// Flag stato a "destroying"
+	if err := tm.redis.SetNodeStatus(ctx, treeId, nodeId, "destroying"); err != nil {
+		log.Printf("[WARN] Failed to set status destroying for %s: %v", nodeId, err)
+	}
+	// Se è un injection, dobbiamo prima distruggere il relayroot figlio
+	if nodeType == "injection" {
+		children, err := tm.redis.GetNodeChildren(ctx, treeId, nodeId)
+		if err == nil {
+
+			for _, childId := range children {
+				tm.redis.SetNodeStatus(ctx, treeId, childId, "destroying")
+			}
+			for _, childId := range children {
+				log.Printf("[TreeManager] Cascading destroy to child relay: %s", childId)
+
+				if err := tm.DestroyNode(ctx, treeId, childId, "relay"); err != nil {
+					log.Printf("[WARN] Failed to destroy child relay %s: %v", childId, err)
+				}
+			}
+		} else {
+			log.Printf("[WARN] Failed to get children for %s: %v", nodeId, err)
+		}
+	}
+
 	partialNodeInfo := &domain.NodeInfo{
 		TreeId:   treeId,
 		NodeId:   nodeId,

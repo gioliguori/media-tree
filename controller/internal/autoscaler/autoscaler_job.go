@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
+	"strconv"
 	"time"
 
 	"controller/internal/redis"
@@ -15,11 +17,14 @@ const (
 	// TIMERS
 	ScalingCooldown = 60 * time.Second // Pausa dopo Docker Provisioning
 	RecoverCooldown = 10 * time.Second // Pausa dopo Draining->Active
+
+	// SOGLIE
+	InjectionLowThreshold = 5.0 // Se carico medio < 5%, proviamo a spegnere
+	ZombieLoadThreshold   = 1.0 // Se nodo < 1% CPU -> considerato "Zombie"
 )
 
 type ProvisionerClient interface {
 	ScaleUpInjection(ctx context.Context, treeId string) error
-	// DestroyNode servira' in futuro per lo scaling down
 	DestroyNode(ctx context.Context, treeId, nodeId, nodeType string) error
 }
 
@@ -68,7 +73,7 @@ func (job *AutoscalerJob) orchestratorLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			job.checkAllTrees(timeoutCtx)
 			cancel()
 		case <-job.stopChan:
@@ -124,9 +129,18 @@ func (job *AutoscalerJob) manageIngressScaling(ctx context.Context, treeID strin
 	var activeNodes []string
 	var drainingNodes []string
 	var saturatedCount int
+	var totalClusterLoad float64
+
+	nodeSessions := make(map[string]int64)
+	nodeLoads := make(map[string]float64)
 
 	for _, nodeID := range injections {
 		status, _ := job.redis.GetNodeStatus(ctx, treeID, nodeID)
+		if status == "destroying" {
+			continue
+		}
+		actualSessions, _ := job.redis.GetNodeSessionCount(ctx, treeID, nodeID)
+		nodeSessions[nodeID] = actualSessions
 
 		if status == "draining" {
 			drainingNodes = append(drainingNodes, nodeID)
@@ -138,10 +152,20 @@ func (job *AutoscalerJob) manageIngressScaling(ctx context.Context, treeID strin
 				log.Printf("[Autoscaler] Calc error for %s: %v", nodeID, err)
 				continue
 			}
+
+			nodeLoads[nodeID] = load
+			totalClusterLoad += load
+
 			if load >= InjectionSaturatedThreshold {
 				saturatedCount++
 			}
 		}
+	}
+
+	// Calcolo Media Carico Cluster
+	avgLoad := 0.0
+	if len(activeNodes) > 0 {
+		avgLoad = totalClusterLoad / float64(len(activeNodes))
 	}
 
 	// Scaling up se tutti i nodi attivi sono saturi
@@ -151,7 +175,7 @@ func (job *AutoscalerJob) manageIngressScaling(ctx context.Context, treeID strin
 
 		// Recupera un nodo Draining
 		if len(drainingNodes) > 0 {
-			candidate := job.findBestDrainingCandidate(ctx, treeID, drainingNodes)
+			candidate := job.findBestDrainingCandidate(drainingNodes, nodeSessions)
 			if candidate != "" {
 				log.Printf("[Autoscaler] Node %s from Draining to Active.", candidate)
 				// Riattivalo
@@ -186,24 +210,94 @@ func (job *AutoscalerJob) manageIngressScaling(ctx context.Context, treeID strin
 
 	// TODO: Scaling down
 
+	// Pulizia Draining
+	for _, drainingId := range drainingNodes {
+		if nodeSessions[drainingId] == 0 {
+			log.Printf("[Autoscaler] Draining node %s is empty. DESTROYING.", drainingId)
+			job.provisioner.DestroyNode(ctx, treeID, drainingId, "injection")
+		}
+	}
+
+	// Scaling down
+	// Condizioni:
+	//  Carico medio basso (< 5%)
+	//  Numero nodi Attivi > Minimo Template
+
+	if avgLoad < InjectionLowThreshold {
+
+		// Leggi il minimo dal Redis Metadata (salvato alla creazione)
+		minNodes := job.getMinNodesFromMetadata(ctx, treeID)
+
+		if len(activeNodes) > minNodes {
+			log.Printf("[Autoscaler] Low Load (%.2f%%). Active: %d > Min: %d. Seeking victim.", avgLoad, len(activeNodes), minNodes)
+
+			victim := job.findBestScaleDownVictim(activeNodes, nodeSessions, nodeLoads)
+			if victim != "" {
+				if nodeSessions[victim] == 0 {
+					// Vuoto -> Kill subito.
+					log.Printf("[Autoscaler] Immediate Kill for empty node: %s", victim)
+					job.provisioner.DestroyNode(ctx, treeID, victim, "injection")
+				} else {
+					// Pieno -> Draining.
+					log.Printf("[Autoscaler] Setting node %s to DRAINING (Sessions: %d)", victim, nodeSessions[victim])
+					job.redis.SetNodeStatus(ctx, treeID, victim, "draining")
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
-// findBestDrainingCandidate: Trova il nodo draining con più sessioni
-func (job *AutoscalerJob) findBestDrainingCandidate(ctx context.Context, treeID string, candidates []string) string {
+// findBestDrainingCandidate: Sceglie chi ha più sessioni
+func (job *AutoscalerJob) findBestDrainingCandidate(candidates []string, sessions map[string]int64) string {
 	best := ""
 	var maxSess int64 = -1
 	for _, id := range candidates {
-		// Se GetNodeSessionCount fallisce, assumiamo 0
-		c, err := job.redis.GetNodeSessionCount(ctx, treeID, id)
-		if err != nil {
-			c = 0
-		}
-
+		c := sessions[id]
 		if c > maxSess {
 			maxSess = c
 			best = id
 		}
 	}
 	return best
+}
+
+// findBestScaleDownVictim: Sceglie chi ha meno sessioni o zombie
+func (job *AutoscalerJob) findBestScaleDownVictim(candidates []string, sessions map[string]int64, loads map[string]float64) string {
+	best := ""
+	var minScore float64 = math.MaxFloat64
+
+	for _, id := range candidates {
+		sessCount := float64(sessions[id])
+		load := loads[id]
+
+		score := sessCount
+
+		// Se il carico è quasi zero, sottraiamo un valore enorme allo score.
+		if load < ZombieLoadThreshold {
+			score -= 1_000_000
+		}
+
+		if score < minScore {
+			minScore = score
+			best = id
+		}
+	}
+	return best
+}
+
+// getMinNodesFromMetadata legge il valore salvato in Redis da Manager
+func (job *AutoscalerJob) getMinNodesFromMetadata(ctx context.Context, treeID string) int {
+	// Legge hash field "minInjectionNodes"
+	valStr, err := job.redis.HGet(ctx, fmt.Sprintf("tree:%s:metadata", treeID), "minInjectionNodes")
+	if err != nil {
+		return 1 // Default se non trovato
+	}
+
+	val, err := strconv.Atoi(valStr)
+	if err != nil || val < 1 {
+		return 1
+	}
+	return val
 }

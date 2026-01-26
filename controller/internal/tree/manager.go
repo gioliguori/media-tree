@@ -34,6 +34,16 @@ func (tm *TreeManager) CreateTree(ctx context.Context, treeId, templateName stri
 		return nil, fmt.Errorf("invalid template: %w", err)
 	}
 
+	minInjectionNodes := 0
+	for _, node := range tmpl.Nodes {
+		if node.NodeType == "injection" {
+			minInjectionNodes += node.Count
+		}
+	}
+	if minInjectionNodes < 1 {
+		minInjectionNodes = 1
+	} // Safety
+
 	// Check tree non esiste già
 	exists, _ := tm.redis.TreeExists(ctx, treeId)
 	if exists {
@@ -41,7 +51,7 @@ func (tm *TreeManager) CreateTree(ctx context.Context, treeId, templateName stri
 	}
 
 	// Salva metadata tree
-	if err := tm.saveTreeMetadata(ctx, treeId, templateName, "creating"); err != nil {
+	if err := tm.saveTreeMetadata(ctx, treeId, templateName, "creating", minInjectionNodes); err != nil {
 		return nil, fmt.Errorf("failed to save tree metadata: %w", err)
 	}
 
@@ -357,15 +367,16 @@ func (tm *TreeManager) ListTrees(ctx context.Context) ([]*TreeSummary, error) {
 
 // HELPER PRIVATI - REDIS
 
-func (tm *TreeManager) saveTreeMetadata(ctx context.Context, treeId, template, status string) error {
+func (tm *TreeManager) saveTreeMetadata(ctx context.Context, treeId, template, status string, minNodes int) error {
 	key := fmt.Sprintf("tree:%s:metadata", treeId)
 
 	data := map[string]any{
-		"treeId":    treeId,
-		"template":  template,
-		"status":    status,
-		"createdAt": time.Now().Unix(),
-		"updatedAt": time.Now().Unix(),
+		"treeId":            treeId,
+		"template":          template,
+		"status":            status,
+		"minInjectionNodes": minNodes,
+		"createdAt":         time.Now().Unix(),
+		"updatedAt":         time.Now().Unix(),
 	}
 
 	return tm.redis.HMSet(ctx, key, data)
