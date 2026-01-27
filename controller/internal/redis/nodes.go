@@ -116,6 +116,11 @@ func (c *Client) ForceDeleteNode(
 ) error {
 	log.Printf("[Redis] Force deleting node %s from tree %s", nodeId, treeId)
 
+	// Rimuovi dalla lista globale
+	globalKey := "global:active_nodes"
+	member := fmt.Sprintf("%s:%s", treeId, nodeId)
+	c.rdb.SRem(ctx, globalKey, member)
+
 	// Rimuovi da pool
 	if err := c.RemoveNodeFromPool(ctx, treeId, nodeId); err != nil {
 		log.Printf("[WARN] Failed to remove from pool: %v", err)
@@ -143,4 +148,61 @@ func (c *Client) ForceDeleteNode(
 
 	log.Printf("[Redis] Node %s force deleted successfully", nodeId)
 	return nil
+}
+
+// SetNodeStatus imposta lo stato operativo del nodo (active, draining)
+func (c *Client) SetNodeStatus(ctx context.Context, treeId string, nodeId string, status string) error {
+	// Aggiorna stato locale del nodo
+	nodeKey := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
+	if err := c.rdb.HSet(ctx, nodeKey, "status", status).Err(); err != nil {
+		return fmt.Errorf("failed to update node status hash: %w", err)
+	}
+
+	// Sincronizza lista globale
+	globalKey := "global:active_nodes"
+	member := fmt.Sprintf("%s:%s", treeId, nodeId)
+
+	switch status {
+	case "destroying":
+		// Rimuovi dalla lista globale
+		if err := c.rdb.SRem(ctx, globalKey, member).Err(); err != nil {
+			log.Printf("[WARN] Failed to remove %s from global list: %v", member, err)
+		}
+
+	case "active":
+		// Aggiungi alla lista globale
+		if err := c.rdb.SAdd(ctx, globalKey, member).Err(); err != nil {
+			log.Printf("[WARN] Failed to add %s to global list: %v", member, err)
+		}
+
+	default:
+	}
+
+	return nil
+}
+
+// GetNodeStatus legge lo stato. Default: "active"
+func (c *Client) GetNodeStatus(ctx context.Context, treeId string, nodeId string) (string, error) {
+	key := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
+
+	status, err := c.rdb.HGet(ctx, key, "status").Result()
+	if err != nil {
+		if err.Error() == "redis:nil" {
+			return "active", nil
+		}
+		return "", err
+	}
+	return status, nil
+}
+
+// GetNodeSessionCount conta le sessioni attive su un nodo
+func (c *Client) GetNodeSessionCount(ctx context.Context, treeId string, nodeId string) (int64, error) {
+	key := fmt.Sprintf("tree:%s:node:%s:sessions", treeId, nodeId)
+	return c.rdb.SCard(ctx, key).Result()
+}
+
+// GetAllTreeNodes restituisce i nodi associati a un albero
+func (c *Client) GetAllTreeNodes(ctx context.Context, treeId string) ([]string, error) {
+	key := fmt.Sprintf("tree:%s:nodes", treeId)
+	return c.rdb.SMembers(ctx, key).Result()
 }

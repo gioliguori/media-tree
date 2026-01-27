@@ -51,6 +51,9 @@ type NodeInfo struct {
 	// WebRTC Range (solo injection/egress)
 	WebRTCPortStart int `json:"webrtcPortStart,omitempty"`
 	WebRTCPortEnd   int `json:"webrtcPortEnd,omitempty"`
+
+	StreamPortStart int `json:"streamPortStart,omitempty" redis:"streamPortStart"`
+	StreamPortEnd   int `json:"streamPortEnd,omitempty" redis:"streamPortEnd"`
 }
 
 // Helper methods per controlli veloci

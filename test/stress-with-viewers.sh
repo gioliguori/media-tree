@@ -10,7 +10,7 @@ VIEWERS_PER_SESSION=${2:-1}
 SESSION_DELAY=15
 VIEWER_DELAY=5
 
-TREE_ID="test-1"
+TREE_ID="default-tree"
 INJECTION_NODE="injection-1"
 RELAY_ROOT="relay-root-1"
 

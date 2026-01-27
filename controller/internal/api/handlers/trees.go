@@ -5,8 +5,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"controller/internal/provisioner"
-	"controller/internal/redis"
 	"controller/internal/tree"
 )
 
@@ -14,9 +12,9 @@ type TreeHandler struct {
 	treeManager *tree.TreeManager
 }
 
-func NewTreeHandler(redisClient *redis.Client, prov provisioner.Provisioner) *TreeHandler {
+func NewTreeHandler(manager *tree.TreeManager) *TreeHandler {
 	return &TreeHandler{
-		treeManager: tree.NewTreeManager(redisClient, prov),
+		treeManager: manager,
 	}
 }
 

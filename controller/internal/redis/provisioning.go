@@ -28,6 +28,8 @@ type NodeProvisioningData struct {
 	JanusWSPort     int `json:"janusWSPort,omitempty" redis:"janusWSPort"`
 	WebRTCPortStart int `json:"webrtcPortStart,omitempty" redis:"webrtcPortStart"`
 	WebRTCPortEnd   int `json:"webrtcPortEnd,omitempty" redis:"webrtcPortEnd"`
+	StreamPortStart int `json:"streamPortStart,omitempty" redis:"streamPortStart"`
+	StreamPortEnd   int `json:"streamPortEnd,omitempty" redis:"streamPortEnd"`
 
 	// Metadata
 	CreatedBy string `json:"createdBy" redis:"createdBy"`
@@ -51,6 +53,8 @@ func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.Node
 		JanusWSPort:      nodeInfo.JanusWSPort,
 		WebRTCPortStart:  nodeInfo.WebRTCPortStart,
 		WebRTCPortEnd:    nodeInfo.WebRTCPortEnd,
+		StreamPortStart:  nodeInfo.StreamPortStart,
+		StreamPortEnd:    nodeInfo.StreamPortEnd,
 		CreatedBy:        "controller",
 		CreatedAt:        time.Now().Unix(),
 	}
@@ -112,11 +116,14 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string)
 		JanusWSPort:      data.JanusWSPort,
 		WebRTCPortStart:  data.WebRTCPortStart,
 		WebRTCPortEnd:    data.WebRTCPortEnd,
+		StreamPortStart:  data.StreamPortStart,
+		StreamPortEnd:    data.StreamPortEnd,
 		ExternalHost:     "localhost",
 	}
 
 	// Internal network info (per comunicazione Docker tra nodi)
-	nodeInfo.InternalHost = data.NodeId // es: "test-1-injection-1"
+	dockerName := fmt.Sprintf("%s-%s", data.TreeId, data.NodeId)
+	nodeInfo.InternalHost = dockerName
 
 	// Porte API interne
 	nodeInfo.InternalAPIPort = 7070
@@ -126,9 +133,9 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string)
 	// JanusHost dal nodeId
 	switch nodeInfo.NodeType {
 	case domain.NodeTypeInjection:
-		nodeInfo.JanusHost = data.NodeId + "-janus-vr"
+		nodeInfo.JanusHost = dockerName + "-janus-vr"
 	case domain.NodeTypeEgress:
-		nodeInfo.JanusHost = data.NodeId + "-janus-streaming"
+		nodeInfo.JanusHost = dockerName + "-janus-streaming"
 	}
 
 	return nodeInfo, nil
@@ -222,11 +229,13 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*
 			JanusWSPort:      data.JanusWSPort,
 			WebRTCPortStart:  data.WebRTCPortStart,
 			WebRTCPortEnd:    data.WebRTCPortEnd,
+			StreamPortStart:  data.StreamPortStart,
+			StreamPortEnd:    data.StreamPortEnd,
 			ExternalHost:     "localhost",
 		}
 
-		// Internal network info (per comunicazione Docker tra nodi)
-		nodeInfo.InternalHost = data.NodeId
+		dockerName := fmt.Sprintf("%s-%s", data.TreeId, data.NodeId)
+		nodeInfo.InternalHost = dockerName
 
 		// Porte API interne
 		nodeInfo.InternalAPIPort = 7070
@@ -236,9 +245,9 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*
 		// Janus Host
 		switch nodeInfo.NodeType {
 		case domain.NodeTypeInjection:
-			nodeInfo.JanusHost = data.NodeId + "-janus-vr"
+			nodeInfo.JanusHost = dockerName + "-janus-vr"
 		case domain.NodeTypeEgress:
-			nodeInfo.JanusHost = data.NodeId + "-janus-streaming"
+			nodeInfo.JanusHost = dockerName + "-janus-streaming"
 		}
 
 		nodes = append(nodes, nodeInfo)

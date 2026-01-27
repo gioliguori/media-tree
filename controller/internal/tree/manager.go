@@ -34,6 +34,16 @@ func (tm *TreeManager) CreateTree(ctx context.Context, treeId, templateName stri
 		return nil, fmt.Errorf("invalid template: %w", err)
 	}
 
+	minInjectionNodes := 0
+	for _, node := range tmpl.Nodes {
+		if node.NodeType == "injection" {
+			minInjectionNodes += node.Count
+		}
+	}
+	if minInjectionNodes < 1 {
+		minInjectionNodes = 1
+	} // Safety
+
 	// Check tree non esiste già
 	exists, _ := tm.redis.TreeExists(ctx, treeId)
 	if exists {
@@ -41,7 +51,7 @@ func (tm *TreeManager) CreateTree(ctx context.Context, treeId, templateName stri
 	}
 
 	// Salva metadata tree
-	if err := tm.saveTreeMetadata(ctx, treeId, templateName, "creating"); err != nil {
+	if err := tm.saveTreeMetadata(ctx, treeId, templateName, "creating", minInjectionNodes); err != nil {
 		return nil, fmt.Errorf("failed to save tree metadata: %w", err)
 	}
 
@@ -49,10 +59,35 @@ func (tm *TreeManager) CreateTree(ctx context.Context, treeId, templateName stri
 
 	// Crea coppie Injection + RelayRoot
 	// Ogni injection viene automaticamente accoppiato con un relay-root dedicato
-	_, err = tm.createInjectionPairs(ctx, treeId, tmpl, &allNodes)
-	if err != nil {
+	injectionSpecs := tmpl.GetNodesByType("injection")
+	if len(injectionSpecs) == 0 {
 		tm.cleanupPartialTree(ctx, treeId, allNodes)
-		return nil, fmt.Errorf("failed to create injection pairs: %w", err)
+		return nil, fmt.Errorf("template must have injection nodes")
+	}
+
+	for _, spec := range injectionSpecs {
+		for i := 0; i < spec.Count; i++ {
+			// Genera ID
+			injId, err := tm.generateNodeID(ctx, treeId, "injection")
+			if err != nil {
+				tm.cleanupPartialTree(ctx, treeId, allNodes)
+				return nil, err
+			}
+
+			rootId, err := tm.generateNodeID(ctx, treeId, "relay-root")
+			if err != nil {
+				tm.cleanupPartialTree(ctx, treeId, allNodes)
+				return nil, err
+			}
+
+			createdNodes, err := tm.createInjectionPair(ctx, treeId, injId, rootId)
+			if err != nil {
+				tm.cleanupPartialTree(ctx, treeId, allNodes)
+				return nil, err
+			}
+
+			allNodes = append(allNodes, createdNodes...)
+		}
 	}
 
 	// Crea pool nodi (relay, egress)
@@ -76,75 +111,59 @@ func (tm *TreeManager) CreateTree(ctx context.Context, treeId, templateName stri
 	}, nil
 }
 
-// Per ogni injection specificato nel template, crea automaticamente un relay-root accoppiato
-func (tm *TreeManager) createInjectionPairs(
-	ctx context.Context,
-	treeId string,
-	tmpl TemplateConfig,
-	allNodes *[]*domain.NodeInfo,
-) ([][2]string, error) {
-	// Trova specs Injection dal template
-	injectionSpecs := tmpl.GetNodesByType("injection")
-	if len(injectionSpecs) == 0 {
-		return nil, fmt.Errorf("template must have injection nodes")
+// Crea 1 Injection + 1 RelayRoot, li collega e li mette nei pool
+// Viene usato sia all'avvio (CreateTree) sia durante lo scaling (ScaleUpInjection)
+func (tm *TreeManager) createInjectionPair(ctx context.Context, treeId, injId, rootId string) ([]*domain.NodeInfo, error) {
+	log.Printf("[TreeManager] Provisioning pair: %s <-> %s", injId, rootId)
+
+	created := []*domain.NodeInfo{}
+
+	// Crea Injection
+	injSpec := domain.NodeSpec{
+		NodeId:   injId,
+		NodeType: domain.NodeTypeInjection,
+		TreeId:   treeId,
+		Layer:    0,
 	}
-	// Conta totale injection da creare
-	injectionCount := 0
-	for _, spec := range injectionSpecs {
-		injectionCount += spec.Count
+	injNode, err := tm.provisioner.CreateNode(ctx, injSpec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create injection %s: %w", injId, err)
+	}
+	created = append(created, injNode)
+
+	// Crea Relay Root
+	relaySpec := domain.NodeSpec{
+		NodeId:   rootId,
+		NodeType: domain.NodeTypeRelay,
+		TreeId:   treeId,
+		Layer:    0,
+	}
+	relayNode, err := tm.provisioner.CreateNode(ctx, relaySpec)
+	if err != nil {
+		// Rollback
+		log.Printf("[WARN] Relay provisioning failed. Rolling back injection %s...", injId)
+		_ = tm.provisioner.DestroyNode(ctx, injNode)
+		return nil, fmt.Errorf("failed to create relay root %s: %w", rootId, err)
+	}
+	created = append(created, relayNode)
+
+	//  Redis Topology (Parent/Child)
+	if err := tm.redis.AddNodeChild(ctx, treeId, injId, rootId); err != nil {
+		log.Printf("[WARN] Failed to link child: %v", err)
+	}
+	if err := tm.redis.AddNodeParent(ctx, treeId, rootId, injId); err != nil {
+		log.Printf("[WARN] Failed to link parent: %v", err)
 	}
 
-	pairs := make([][2]string, 0, injectionCount)
-	injectionCounter := 0
-	relayRootCounter := 0
-
-	// Per ogni injection, crea la coppia injection + relay-root
-	for _, spec := range injectionSpecs {
-		for i := 0; i < spec.Count; i++ {
-			// Crea Injection
-			injectionCounter++
-			injectionId := fmt.Sprintf("injection-%d", injectionCounter)
-
-			injection, err := tm.provisioner.CreateNode(ctx, domain.NodeSpec{
-				NodeId:   injectionId,
-				NodeType: domain.NodeTypeInjection,
-				TreeId:   treeId,
-				Layer:    0,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to create injection: %w", err)
-			}
-			*allNodes = append(*allNodes, injection)
-
-			// Crea RelayRoot accoppiato
-			relayRootCounter++
-			relayRootId := fmt.Sprintf("relay-root-%d", relayRootCounter)
-
-			relayRoot, err := tm.provisioner.CreateNode(ctx, domain.NodeSpec{
-				NodeId:   relayRootId,
-				NodeType: domain.NodeTypeRelay,
-				TreeId:   treeId,
-				Layer:    0,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to create relay-root: %w", err)
-			}
-			*allNodes = append(*allNodes, relayRoot)
-
-			// Aggiungi a pool
-			tm.redis.AddNodeToPool(ctx, treeId, "injection", 0, injectionId)
-			tm.redis.AddNodeToPool(ctx, treeId, "relay", 0, relayRootId)
-
-			// - child-added per Injection
-			// - parent-added per RelayRoot
-			tm.redis.AddNodeChild(ctx, treeId, injectionId, relayRootId)
-			tm.redis.AddNodeParent(ctx, treeId, relayRootId, injectionId)
-
-			pairs = append(pairs, [2]string{injectionId, relayRootId})
-			log.Printf("[INFO] Created pair: %s <-> %s", injectionId, relayRootId)
-		}
+	// Redis Pools
+	if err := tm.redis.AddNodeToPool(ctx, treeId, "injection", 0, injId); err != nil {
+		log.Printf("[WARN] Failed to add injection to pool: %v", err)
 	}
-	return pairs, nil
+	if err := tm.redis.AddNodeToPool(ctx, treeId, "relay", 0, rootId); err != nil {
+		log.Printf("[WARN] Failed to add relay to pool: %v", err)
+	}
+
+	return created, nil
 }
 
 // createPoolNodes crea pool nodi
@@ -158,7 +177,7 @@ func (tm *TreeManager) createPoolNodes(
 	nodeCounter := make(map[string]int)
 
 	for _, spec := range tmpl.Nodes {
-		// Skip injection (già gestiti in createInjectionPairs)
+		// Skip injection (già gestiti in createInjectionPair)
 		if spec.NodeType == "injection" {
 			continue
 		}
@@ -348,15 +367,16 @@ func (tm *TreeManager) ListTrees(ctx context.Context) ([]*TreeSummary, error) {
 
 // HELPER PRIVATI - REDIS
 
-func (tm *TreeManager) saveTreeMetadata(ctx context.Context, treeId, template, status string) error {
+func (tm *TreeManager) saveTreeMetadata(ctx context.Context, treeId, template, status string, minNodes int) error {
 	key := fmt.Sprintf("tree:%s:metadata", treeId)
 
 	data := map[string]any{
-		"treeId":    treeId,
-		"template":  template,
-		"status":    status,
-		"createdAt": time.Now().Unix(),
-		"updatedAt": time.Now().Unix(),
+		"treeId":            treeId,
+		"template":          template,
+		"status":            status,
+		"minInjectionNodes": minNodes,
+		"createdAt":         time.Now().Unix(),
+		"updatedAt":         time.Now().Unix(),
 	}
 
 	return tm.redis.HMSet(ctx, key, data)

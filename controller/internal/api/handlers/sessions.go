@@ -5,7 +5,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"controller/internal/redis"
 	"controller/internal/session"
 	"controller/internal/tree"
 )
@@ -15,10 +14,10 @@ type SessionHandler struct {
 	treeManager    *tree.TreeManager
 }
 
-func NewSessionHandler(redisClient *redis.Client, treeManager *tree.TreeManager) *SessionHandler {
+func NewSessionHandler(sessionMgr *session.SessionManager, treeMgr *tree.TreeManager) *SessionHandler {
 	return &SessionHandler{
-		sessionManager: session.NewSessionManager(redisClient),
-		treeManager:    treeManager,
+		sessionManager: sessionMgr,
+		treeManager:    treeMgr,
 	}
 }
 

@@ -148,30 +148,3 @@ func (c *Client) GetNodeBandwidthTxMbps(
 
 	return bw, nil
 }
-
-// GetNodeStatus legge status field da node metadata
-// Key: tree:{treeId}:node:{nodeId}
-// Field: status
-func (c *Client) GetNodeStatus(
-	ctx context.Context,
-	treeID string,
-	nodeID string,
-) (string, error) {
-	key := fmt.Sprintf("tree:%s:node:%s", treeID, nodeID)
-
-	status, err := c.rdb.HGet(ctx, key, "status").Result()
-	if err != nil {
-		// go-redis v9: "redis: nil" significa campo non trovato
-		if err.Error() == "redis:nil" {
-			return "inactive", nil
-		}
-		return "", fmt.Errorf("failed to get status for %s:  %w", nodeID, err)
-	}
-
-	// Se status vuoto, default inactive
-	if status == "" {
-		return "inactive", nil
-	}
-
-	return status, nil
-}

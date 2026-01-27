@@ -361,10 +361,10 @@ func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerID
 
 	// leggi cpu limit del container
 	cpuLimit := mc.getContainerCPULimit(containerInfo)
-	if strings.Contains(containerInfo.Name, "janus-vr") {
-		log.Printf("[DEBUG] Container %s:  cpuLimit=%.2f, NanoCPUs=%d",
-			containerInfo.Name, cpuLimit, containerInfo.HostConfig.NanoCPUs)
-	}
+	// if strings.Contains(containerInfo.Name, "janus-vr") {
+	// 	//log.Printf("[DEBUG] Container %s:  cpuLimit=%.2f, NanoCPUs=%d",
+	// 		containerInfo.Name, cpuLimit, containerInfo.HostConfig.NanoCPUs)
+	// }
 
 	mc.mu.Lock()
 	previousCPU, hasPrev := mc.previousCPU[containerID]
@@ -414,10 +414,10 @@ func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerID
 			// Dividi semplicemente per il limit
 			cpuPercentOfLimit := cpuPercentRaw / cpuLimit
 
-			if strings.Contains(containerInfo.Name, "janus-vr") {
-				log.Printf("[DEBUG CPU] %s: cpuPercentOfLimit=%.2f (capped at 100)",
-					containerInfo.Name, cpuPercentOfLimit)
-			}
+			// if strings.Contains(containerInfo.Name, "janus-vr") {
+			// 	log.Printf("[DEBUG CPU] %s: cpuPercentOfLimit=%.2f (capped at 100)",
+			// 		containerInfo.Name, cpuPercentOfLimit)
+			// }
 
 			if cpuPercentOfLimit > 100.0 {
 				cpuPercentOfLimit = 100.0

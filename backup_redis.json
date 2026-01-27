@@ -1,663 +1,191 @@
 {
-  "tree:test-1:nodes": [
-    "injection-2",
-    "injection-1",
-    "relay-root-1",
-    "egress-2",
-    "relay-root-2",
+  "tree:default-tree:mountpoints": [
+    "egress-1:manual-1769097797"
+  ],
+  "tree:default-tree:pool:layer:0:injection": [
+    "injection-1"
+  ],
+  "tree:default-tree:sessions": [
+    "manual-1769097797"
+  ],
+  "tree:default-tree:session:manual-1769097797:egresses": [
     "egress-1"
   ],
-  "tree:test-1:session:stress-test-16": {
-    "sessionId": "stress-test-16",
-    "injectionNodeId": "injection-2",
-    "relayRootId": "relay-root-2",
-    "audioSsrc": "10320",
-    "roomId": "1160",
-    "active": "1",
-    "treeId": "test-1",
-    "videoSsrc": "10321",
-    "createdAt": "1768240296965"
-  },
-  "tree:test-1:session:stress-test-3": {
-    "injectionNodeId": "injection-1",
-    "active": "1",
-    "createdAt": "1768240281062",
-    "treeId": "test-1",
+  "tree:default-tree:node:egress-1:sessions": [
+    "manual-1769097797"
+  ],
+  "global:active_nodes": [
+    "default-tree:relay-root-1",
+    "default-tree:egress-1",
+    "default-tree:injection-1"
+  ],
+  "tree:default-tree:roomCounter": "1000",
+  "metrics:default-tree:node:relay-root-1:prevTx": "630638",
+  "tree:default-tree:session:manual-1769097797": {
+    "sessionId": "manual-1769097797",
+    "treeId": "default-tree",
     "relayRootId": "relay-root-1",
-    "audioSsrc": "10294",
-    "videoSsrc": "10295",
-    "roomId": "1147",
-    "sessionId": "stress-test-3"
+    "audioSsrc": "10000",
+    "createdAt": "1769097797686",
+    "injectionNodeId": "injection-1",
+    "videoSsrc": "10001",
+    "roomId": "1000",
+    "active": "1"
   },
-  "tree:test-1:pool:layer:1:egress": [
-    "egress-2",
-    "egress-1"
-  ],
-  "tree:test-1:controller:node:relay-root-2": {
-    "nodeId": "relay-root-2",
-    "nodeType": "relay",
-    "treeId": "test-1",
-    "layer": "0",
-    "containerId": "5781cded1c1c9b9a03f8fdd54f7ca0639235cb0a117b3c8bccf6ce50d002c394",
-    "janusContainerId": "",
-    "externalAPIPort": "7073",
-    "janusHTTPPort": "0",
-    "janusWSPort": "0",
-    "webrtcPortStart": "0",
-    "webrtcPortEnd": "0",
-    "createdBy": "controller",
-    "createdAt": "1768239190"
-  },
-  "tree:test-1:pool:layer:0:relay": [
-    "relay-root-1",
-    "relay-root-2"
-  ],
-  "metrics:test-1:node:injection-1:room:1164": {
-    "roomId": "1164",
-    "description": "Session stress-test-20",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336994",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "tree:test-1:node:relay-root-2": {
-    "nodeId": "relay-root-2",
-    "type": "relay",
-    "treeId": "test-1",
-    "host": "relay-root-2",
+  "tree:default-tree:session:manual-1769097797:path:egress-1": "injection-1,relay-root-1,egress-1",
+  "tree:default-tree:node:egress-1": {
+    "nodeId": "egress-1",
+    "type": "egress",
+    "treeId": "default-tree",
+    "host": "default-tree-egress-1",
     "port": "7070",
     "audioPort": "5002",
     "videoPort": "5004",
+    "layer": "1",
+    "status": "active",
+    "created": "1769097725185"
+  },
+  "tree:default-tree:node:injection-1": {
+    "nodeId": "injection-1",
+    "type": "injection",
+    "treeId": "default-tree",
+    "host": "default-tree-injection-1",
+    "port": "7070",
+    "audioPort": "5000",
+    "videoPort": "5002",
     "layer": "0",
     "status": "active",
-    "created": "1768239191067"
+    "created": "1769097723866"
   },
-  "tree:test-1:session:stress-test-13": {
-    "injectionNodeId": "injection-2",
-    "relayRootId": "relay-root-2",
-    "audioSsrc": "10314",
-    "sessionId": "stress-test-13",
-    "treeId": "test-1",
-    "videoSsrc": "10315",
-    "roomId": "1157",
-    "active": "1",
-    "createdAt": "1768240293243"
+  "tree:default-tree:pool:layer:1:egress": [
+    "egress-1"
+  ],
+  "tree:default-tree:node:injection-1:sessions": [
+    "manual-1769097797"
+  ],
+  "metrics:default-tree:node:injection-1:janusVideoroom": {
+    "containerId": "84f3ff607f7956175bef4f3ed0726d975a89486bea09132b0c4458a097b05138",
+    "memoryUsedMb": "20.17",
+    "memoryPercent": "3.94",
+    "janusRoomsActive": "0",
+    "janusMountpointsActive": "0",
+    "containerName": "default-tree-injection-1-janus-vr",
+    "cpuPercent": "0.39",
+    "networkTxBytes": "1178825",
+    "timestamp": "2026-01-22T16:10:45Z"
   },
-  "tree:test-1:session:stress-test-5": {
-    "active": "1",
-    "createdAt": "1768240283499",
-    "sessionId": "stress-test-5",
-    "injectionNodeId": "injection-1",
-    "relayRootId": "relay-root-1",
-    "audioSsrc": "10298",
-    "roomId": "1149",
-    "treeId": "test-1",
-    "videoSsrc": "10299"
-  },
-  "tree:test-1:controller:node:egress-2": {
-    "nodeId": "egress-2",
+  "tree:default-tree:controller:node:egress-1": {
+    "nodeId": "egress-1",
     "nodeType": "egress",
-    "treeId": "test-1",
+    "treeId": "default-tree",
     "layer": "1",
-    "containerId": "7992e9020ecb8cc73c613fc87551f7c08d3adf1329ea5e59b958090fa127f5a7",
-    "janusContainerId": "c49959d71ef75014dec5b138d9ceaf5ec617528489109eeb1ecb11cd52b3b86c",
-    "externalAPIPort": "7075",
-    "janusHTTPPort": "8091",
-    "janusWSPort": "8191",
-    "webrtcPortStart": "20300",
-    "webrtcPortEnd": "20399",
-    "createdBy": "controller",
-    "createdAt": "1768239194"
-  },
-  "tree:test-1:controller:node:injection-2": {
-    "nodeId": "injection-2",
-    "nodeType": "injection",
-    "treeId": "test-1",
-    "layer": "0",
-    "containerId": "f5a2303ddf29289433874d571f1bd669c0c2978833943f7e0697444a339cece1",
-    "janusContainerId": "fb9a0a8d254f70902fc6f30d3764e1eb9ed489b0f83f738c62b6764fad45ce05",
+    "containerId": "7f0006f38bd20a96640dbd8eb4c5fc8682eff4ac66a1f495a0405220409a0f8c",
+    "janusContainerId": "8a2d37b83c80de912c25e8f3d4f2c0eacef2578cab8abdd0e27519a37566e971",
     "externalAPIPort": "7072",
     "janusHTTPPort": "8089",
     "janusWSPort": "8189",
     "webrtcPortStart": "20100",
     "webrtcPortEnd": "20199",
     "createdBy": "controller",
-    "createdAt": "1768239190"
+    "createdAt": "1769097725"
   },
-  "tree:test-1:node:egress-1": {
-    "nodeId": "egress-1",
-    "type": "egress",
-    "treeId": "test-1",
-    "host": "egress-1",
-    "port": "7070",
-    "audioPort": "5002",
-    "videoPort": "5004",
-    "layer": "1",
-    "status": "active",
-    "created": "1768239192859"
-  },
-  "metrics:test-1:node:egress-2:nodejs": {
-    "containerName": "egress-2",
-    "networkTxBytes": "169625",
-    "networkRxErrors": "0",
-    "blockWriteBytes": "708608",
-    "memoryUsedMb": "37.94",
-    "memoryLimitMb": "512.00",
-    "networkTxErrors": "0",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "containerId": "7992e9020ecb8cc73c613fc87551f7c08d3adf1329ea5e59b958090fa127f5a7",
-    "memoryPercent": "7.41",
-    "networkRxPackets": "2208",
-    "networkTxPackets": "1457",
-    "pidsCurrent": "14",
-    "cpuPercent": "0.25",
-    "networkRxBytes": "229348",
-    "blockReadBytes": "0"
-  },
-  "tree:test-1:node:injection-2:sessions": [
-    "stress-test-14",
-    "stress-test-7",
-    "stress-test-12",
-    "stress-test-8",
-    "stress-test-9",
-    "stress-test-10",
-    "stress-test-13",
-    "stress-test-15",
-    "stress-test-11",
-    "stress-test-16"
-  ],
-  "global:active_nodes": [
-    "test-1:egress-2",
-    "test-1:injection-2",
-    "test-1:relay-root-2",
-    "test-1:relay-root-1",
-    "test-1:injection-1",
-    "test-1:egress-1"
-  ],
-  "metrics:test-1:node:relay-root-1:nodejs": {
-    "containerId": "083e4e02731daf2e5bad1c62779c17ef6f583f237e8b0a14e63e6888a171b179",
-    "containerName": "relay-root-1",
-    "blockWriteBytes": "708608",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "memoryUsedMb": "30.61",
-    "memoryPercent": "5.98",
-    "networkTxBytes": "7997",
-    "networkTxPackets": "97",
-    "networkTxErrors": "0",
-    "pidsCurrent": "14",
-    "cpuPercent": "36.31",
-    "memoryLimitMb": "512.00",
-    "networkRxBytes": "30395297",
-    "networkRxPackets": "221633",
-    "networkRxErrors": "0",
-    "blockReadBytes": "0"
-  },
-  "tree:test-1:session:stress-test-8": {
-    "sessionId": "stress-test-8",
-    "treeId": "test-1",
-    "videoSsrc": "10305",
-    "active": "1",
-    "injectionNodeId": "injection-2",
-    "relayRootId": "relay-root-2",
-    "audioSsrc": "10304",
-    "roomId": "1152",
-    "createdAt": "1768240287193"
-  },
-  "tree:test-1:session:stress-test-7": {
-    "sessionId": "stress-test-7",
-    "audioSsrc": "10302",
-    "videoSsrc": "10303",
-    "roomId": "1151",
-    "active": "1",
-    "treeId": "test-1",
-    "injectionNodeId": "injection-2",
-    "relayRootId": "relay-root-2",
-    "createdAt": "1768240285973"
-  },
-  "tree:test-1:session:stress-test-19": {
-    "sessionId": "stress-test-19",
-    "relayRootId": "relay-root-1",
-    "treeId": "test-1",
-    "injectionNodeId": "injection-1",
-    "audioSsrc": "10326",
-    "videoSsrc": "10327",
-    "roomId": "1163",
-    "active": "1",
-    "createdAt": "1768240300689"
-  },
-  "tree:test-1:session:stress-test-17": {
-    "sessionId": "stress-test-17",
-    "injectionNodeId": "injection-1",
-    "relayRootId": "relay-root-1",
-    "videoSsrc": "10323",
-    "active": "1",
-    "treeId": "test-1",
-    "audioSsrc": "10322",
-    "roomId": "1161",
-    "createdAt": "1768240298198"
-  },
-  "metrics:test-1:node:injection-2:room:1152": {
-    "roomId": "1152",
-    "description": "Session stress-test-8",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336992",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "metrics:test-1:node:injection-1:room:1161": {
-    "timestamp": "2026-01-12T17:52:13Z",
-    "roomId": "1161",
-    "description": "Session stress-test-17",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336994"
-  },
-  "tree:test-1:node:relay-root-1": {
-    "nodeId": "relay-root-1",
-    "type": "relay",
-    "treeId": "test-1",
-    "host": "relay-root-1",
-    "port": "7070",
-    "audioPort": "5002",
-    "videoPort": "5004",
-    "layer": "0",
-    "status": "active",
-    "created": "1768239189397"
-  },
-  "metrics:test-1:node:injection-2:janusVideoroom": {
-    "memoryPercent": "5.13",
-    "networkTxBytes": "35236402",
-    "networkTxPackets": "251073",
-    "networkTxErrors": "0",
-    "pidsCurrent": "24",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "janusMountpointsActive": "0",
-    "networkRxErrors": "0",
-    "cpuPercent": "86.79",
-    "memoryUsedMb": "26.29",
-    "networkRxBytes": "37187330",
-    "blockReadBytes": "0",
-    "janusRoomsActive": "10",
-    "containerId": "fb9a0a8d254f70902fc6f30d3764e1eb9ed489b0f83f738c62b6764fad45ce05",
-    "memoryLimitMb": "512.00",
-    "networkRxPackets": "252348",
-    "blockWriteBytes": "28672",
-    "containerName": "injection-2-janus-vr"
-  },
-  "metrics:test-1:node:injection-1:room:1145": {
-    "description": "Session stress-test-1",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336994",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "roomId": "1145"
-  },
-  "tree:test-1:children:injection-1": [
+  "tree:default-tree:children:injection-1": [
     "relay-root-1"
   ],
-  "tree:test-1:session:stress-test-2": {
-    "sessionId": "stress-test-2",
-    "treeId": "test-1",
-    "injectionNodeId": "injection-1",
-    "audioSsrc": "10292",
-    "videoSsrc": "10293",
-    "roomId": "1146",
-    "active": "1",
-    "relayRootId": "relay-root-1",
-    "createdAt": "1768240279835"
-  },
-  "metrics:test-1:node:relay-root-2:application": {
-    "timestamp": "2026-01-12T17:52:13Z",
-    "sessionsForwarded": "0",
-    "totalRoutes": "0",
-    "bandwidthTxMbps": "0.00"
-  },
-  "tree:test-1:session:stress-test-1": {
-    "sessionId": "stress-test-1",
-    "injectionNodeId": "injection-1",
-    "relayRootId": "relay-root-1",
-    "audioSsrc": "10290",
-    "videoSsrc": "10291",
-    "createdAt": "1768240278616",
-    "treeId": "test-1",
-    "roomId": "1145",
-    "active": "1"
-  },
-  "tree:test-1:controller:node:egress-1": {
-    "nodeId": "egress-1",
-    "nodeType": "egress",
-    "treeId": "test-1",
-    "layer": "1",
-    "containerId": "2b0c62d9afdebfa385b6e63b758e7e5a2c385935785dada6d6b73fe9554ef715",
-    "janusContainerId": "bc2f88ac4f3ad999c3ee85f3ec4b0bd6a43eea4199a4024c1d4fac055771692d",
-    "externalAPIPort": "7074",
-    "janusHTTPPort": "8090",
-    "janusWSPort": "8190",
-    "webrtcPortStart": "20200",
-    "webrtcPortEnd": "20299",
-    "createdBy": "controller",
-    "createdAt": "1768239192"
-  },
-  "metrics:test-1:node:injection-1:room:1149": {
-    "roomId": "1149",
-    "description": "Session stress-test-5",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336994",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "tree:test-1:metadata": {
-    "treeId": "test-1",
-    "template": "small",
+  "tree:default-tree:routing:manual-1769097797:relay-root-1": [
+    "egress-1"
+  ],
+  "tree:default-tree:metadata": {
+    "treeId": "default-tree",
+    "template": "minimal",
     "status": "active",
-    "createdAt": "1768239187",
-    "updatedAt": "1768239194"
+    "createdAt": "1769097722",
+    "updatedAt": "1769097725"
   },
-  "metrics:test-1:node:injection-1:room:1148": {
-    "roomId": "1148",
-    "description": "Session stress-test-4",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336994",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "tree:test-1:parents:relay-root-2": [
-    "injection-2"
+  "tree:default-tree:egress": [
+    "egress-1"
   ],
-  "tree:test-1:node:egress-2": {
-    "nodeId": "egress-2",
-    "type": "egress",
-    "treeId": "test-1",
-    "host": "egress-2",
-    "port": "7070",
-    "audioPort": "5002",
-    "videoPort": "5004",
-    "layer": "1",
-    "status": "active",
-    "created": "1768239194857"
+  "metrics:default-tree:node:relay-root-1:nodejs": {
+    "containerName": "default-tree-relay-root-1",
+    "cpuPercent": "0.06",
+    "memoryUsedMb": "34.53",
+    "memoryPercent": "6.74",
+    "networkTxBytes": "630638",
+    "timestamp": "2026-01-22T16:10:45Z",
+    "containerId": "185f9e1f4526fd922dbb0b44ffb13839244f2ac71012b6a02db6a2856b979960"
   },
-  "metrics:test-1:node:relay-root-2:nodejs": {
-    "networkTxBytes": "8521",
-    "containerName": "relay-root-2",
-    "cpuPercent": "37.23",
-    "memoryUsedMb": "31.99",
-    "memoryLimitMb": "512.00",
-    "networkRxPackets": "243532",
-    "networkTxPackets": "103",
-    "blockReadBytes": "0",
-    "blockWriteBytes": "708608",
-    "networkRxBytes": "33439539",
-    "pidsCurrent": "14",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "containerId": "5781cded1c1c9b9a03f8fdd54f7ca0639235cb0a117b3c8bccf6ce50d002c394",
-    "memoryPercent": "6.25",
-    "networkRxErrors": "0",
-    "networkTxErrors": "0"
+  "metrics:default-tree:node:egress-1:janusStreaming": {
+    "containerName": "default-tree-egress-1-janus-streaming",
+    "memoryUsedMb": "20.39",
+    "memoryPercent": "3.98",
+    "networkTxBytes": "825902",
+    "janusRoomsActive": "0",
+    "janusMountpointsActive": "1",
+    "containerId": "8a2d37b83c80de912c25e8f3d4f2c0eacef2578cab8abdd0e27519a37566e971",
+    "cpuPercent": "0.14",
+    "timestamp": "2026-01-22T16:10:45Z"
   },
-  "tree:test-1:session:stress-test-18": {
-    "audioSsrc": "10324",
-    "active": "1",
-    "injectionNodeId": "injection-1",
-    "videoSsrc": "10325",
-    "roomId": "1162",
-    "createdAt": "1768240299446",
-    "sessionId": "stress-test-18",
-    "treeId": "test-1",
-    "relayRootId": "relay-root-1"
-  },
-  "metrics:test-1:node:relay-root-2:prevTx": "8521",
-  "tree:test-1:session:stress-test-12": {
-    "treeId": "test-1",
-    "videoSsrc": "10313",
-    "roomId": "1156",
-    "createdAt": "1768240292029",
-    "sessionId": "stress-test-12",
-    "injectionNodeId": "injection-2",
-    "relayRootId": "relay-root-2",
-    "audioSsrc": "10312",
-    "active": "1"
-  },
-  "metrics:test-1:node:injection-1:room:1163": {
-    "timestamp": "2026-01-12T17:52:13Z",
-    "roomId": "1163",
-    "description": "Session stress-test-19",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336994"
-  },
-  "metrics:test-1:node:injection-2:room:1160": {
-    "roomId": "1160",
-    "description": "Session stress-test-16",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336992",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "metrics:test-1:node:relay-root-1:application": {
-    "timestamp": "2026-01-12T17:52:13Z",
-    "sessionsForwarded": "0",
-    "totalRoutes": "0",
-    "bandwidthTxMbps": "0.00"
-  },
-  "tree:test-1:parents:relay-root-1": [
-    "injection-1"
-  ],
-  "tree:test-1:node:injection-1:sessions": [
-    "stress-test-4",
-    "stress-test-20",
-    "stress-test-2",
-    "stress-test-1",
-    "stress-test-6",
-    "stress-test-17",
-    "stress-test-3",
-    "stress-test-18",
-    "stress-test-5",
-    "stress-test-19"
-  ],
-  "metrics:test-1:node:injection-1:room:1150": {
-    "roomId": "1150",
-    "description": "Session stress-test-6",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336994",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "metrics:test-1:node:injection-2:room:1159": {
-    "roomId": "1159",
-    "description": "Session stress-test-15",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336992",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "tree:test-1:children:injection-2": [
-    "relay-root-2"
-  ],
-  "metrics:test-1:node:injection-1:room:1162": {
-    "roomId": "1162",
-    "description": "Session stress-test-18",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336994",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "metrics:test-1:node:injection-1:room:1146": {
-    "roomId": "1146",
-    "description": "Session stress-test-2",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336994",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "tree:test-1:sessions": [
-    "stress-test-2",
-    "stress-test-8",
-    "stress-test-15",
-    "stress-test-5",
-    "stress-test-7",
-    "stress-test-10",
-    "stress-test-13",
-    "stress-test-19",
-    "stress-test-12",
-    "stress-test-3",
-    "stress-test-11",
-    "stress-test-16",
-    "stress-test-18",
-    "stress-test-4",
-    "stress-test-14",
-    "stress-test-9",
-    "stress-test-1",
-    "stress-test-6",
-    "stress-test-17",
-    "stress-test-20"
-  ],
-  "tree:test-1:session:stress-test-6": {
-    "audioSsrc": "10300",
-    "videoSsrc": "10301",
-    "roomId": "1150",
-    "injectionNodeId": "injection-1",
-    "active": "1",
-    "createdAt": "1768240284758",
-    "sessionId": "stress-test-6",
-    "treeId": "test-1",
-    "relayRootId": "relay-root-1"
-  },
-  "tree:test-1:session:stress-test-9": {
-    "sessionId": "stress-test-9",
-    "relayRootId": "relay-root-2",
-    "audioSsrc": "10306",
-    "active": "1",
-    "createdAt": "1768240288401",
-    "treeId": "test-1",
-    "injectionNodeId": "injection-2",
-    "videoSsrc": "10307",
-    "roomId": "1153"
-  },
-  "tree:test-1:session:stress-test-20": {
-    "audioSsrc": "10328",
-    "videoSsrc": "10329",
-    "active": "1",
-    "createdAt": "1768240301983",
-    "sessionId": "stress-test-20",
-    "roomId": "1164",
-    "treeId": "test-1",
-    "injectionNodeId": "injection-1",
-    "relayRootId": "relay-root-1"
-  },
-  "metrics:test-1:node:injection-2:room:1156": {
-    "roomId": "1156",
-    "description": "Session stress-test-12",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336992",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "tree:test-1:session:stress-test-14": {
-    "sessionId": "stress-test-14",
-    "treeId": "test-1",
-    "injectionNodeId": "injection-2",
-    "relayRootId": "relay-root-2",
-    "audioSsrc": "10316",
-    "videoSsrc": "10317",
-    "active": "1",
-    "createdAt": "1768240294466",
-    "roomId": "1158"
-  },
-  "metrics:test-1:node:injection-2:room:1153": {
-    "description": "Session stress-test-9",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336992",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "roomId": "1153"
-  },
-  "tree:test-1:session:stress-test-15": {
-    "roomId": "1159",
-    "sessionId": "stress-test-15",
-    "treeId": "test-1",
-    "active": "1",
-    "createdAt": "1768240295711",
-    "injectionNodeId": "injection-2",
-    "relayRootId": "relay-root-2",
-    "audioSsrc": "10318",
-    "videoSsrc": "10319"
-  },
-  "metrics:test-1:node:injection-2:room:1151": {
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336992",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "roomId": "1151",
-    "description": "Session stress-test-7"
-  },
-  "tree:test-1:session:stress-test-10": {
-    "roomId": "1154",
-    "sessionId": "stress-test-10",
-    "injectionNodeId": "injection-2",
-    "relayRootId": "relay-root-2",
-    "videoSsrc": "10309",
-    "active": "1",
-    "createdAt": "1768240289614",
-    "treeId": "test-1",
-    "audioSsrc": "10308"
-  },
-  "tree:test-1:controller:node:injection-1": {
+  "tree:default-tree:controller:node:injection-1": {
     "nodeId": "injection-1",
     "nodeType": "injection",
-    "treeId": "test-1",
+    "treeId": "default-tree",
     "layer": "0",
-    "containerId": "4ceb9375963596ebb61161b90425f2b8019f7a18a7dd8c5b3a2d21eaa4f1feea",
-    "janusContainerId": "14bce461ce58b3c913bc709b3bfc93c722fb0b7ee393cebfad2c2b1078ca507b",
+    "containerId": "f9337f3d56d17dfa38253dc72d98610f51573d89c05e1edc60a7ab4f2deb9e33",
+    "janusContainerId": "84f3ff607f7956175bef4f3ed0726d975a89486bea09132b0c4458a097b05138",
     "externalAPIPort": "7070",
     "janusHTTPPort": "8088",
     "janusWSPort": "8188",
     "webrtcPortStart": "20000",
     "webrtcPortEnd": "20099",
     "createdBy": "controller",
-    "createdAt": "1768239189"
+    "createdAt": "1769097723"
   },
-  "metrics:test-1:node:relay-root-1:prevTx": "7997",
-  "tree:test-1:relay": [
-    "relay-root-1",
-    "relay-root-2"
+  "tree:default-tree:node:relay-root-1:sessions": [
+    "manual-1769097797"
   ],
-  "metrics:test-1:node:injection-2:room:1155": {
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336992",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "roomId": "1155",
-    "description": "Session stress-test-11"
+  "tree:default-tree:relay": [
+    "relay-root-1"
+  ],
+  "tree:default-tree:injection": [
+    "injection-1"
+  ],
+  "metrics:default-tree:node:relay-root-1:gstreamer": {
+    "maxVideoQueueMs": "0.00",
+    "sessionCount": "1",
+    "timestamp": "2026-01-22T16:10:45Z",
+    "maxAudioQueueMs": "0.00"
   },
-  "tree:test-1:node:injection-1": {
-    "nodeId": "injection-1",
-    "type": "injection",
-    "treeId": "test-1",
-    "host": "injection-1",
-    "port": "7070",
-    "audioPort": "5000",
-    "videoPort": "5002",
-    "layer": "0",
-    "status": "active",
-    "created": "1768239189552"
+  "metrics:default-tree:node:injection-1:nodejs": {
+    "cpuPercent": "0.05",
+    "memoryUsedMb": "46.21",
+    "memoryPercent": "9.03",
+    "networkTxBytes": "113522",
+    "timestamp": "2026-01-22T16:10:45Z",
+    "containerId": "f9337f3d56d17dfa38253dc72d98610f51573d89c05e1edc60a7ab4f2deb9e33",
+    "containerName": "default-tree-injection-1"
   },
-  "metrics:test-1:node:injection-1:room:1147": {
-    "lastActivityAt": "1768240336994",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "roomId": "1147",
-    "description": "Session stress-test-3",
-    "hasPublisher": "true"
+  "tree:default-tree:mountpoints:node:egress-1": [
+    "manual-1769097797"
+  ],
+  "tree:default-tree:mountpoint:egress-1:manual-1769097797": {
+    "sessionId": "manual-1769097797",
+    "treeId": "default-tree",
+    "mountpointId": "1000",
+    "audioSsrc": "10000",
+    "videoSsrc": "10001",
+    "janusAudioPort": "6000",
+    "janusVideoPort": "6001",
+    "egressNodeId": "egress-1",
+    "active": "true",
+    "createdAt": "1769097809985",
+    "updatedAt": "1769097809985"
   },
-  "metrics:test-1:node:injection-1:janusVideoroom": {
-    "cpuPercent": "87.79",
-    "memoryUsedMb": "23.28",
-    "memoryPercent": "4.55",
-    "networkRxPackets": "230066",
-    "networkTxPackets": "228892",
-    "networkRxErrors": "0",
-    "janusMountpointsActive": "0",
-    "networkTxBytes": "32100075",
-    "containerId": "14bce461ce58b3c913bc709b3bfc93c722fb0b7ee393cebfad2c2b1078ca507b",
-    "memoryLimitMb": "512.00",
-    "networkTxErrors": "0",
-    "blockReadBytes": "0",
-    "janusRoomsActive": "10",
-    "containerName": "injection-1-janus-vr",
-    "networkRxBytes": "33843508",
-    "blockWriteBytes": "28672",
-    "pidsCurrent": "24",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "tree:test-1:controller:node:relay-root-1": {
+  "tree:default-tree:controller:node:relay-root-1": {
     "nodeId": "relay-root-1",
     "nodeType": "relay",
-    "treeId": "test-1",
+    "treeId": "default-tree",
     "layer": "0",
-    "containerId": "083e4e02731daf2e5bad1c62779c17ef6f583f237e8b0a14e63e6888a171b179",
+    "containerId": "185f9e1f4526fd922dbb0b44ffb13839244f2ac71012b6a02db6a2856b979960",
     "janusContainerId": "",
     "externalAPIPort": "7071",
     "janusHTTPPort": "0",
@@ -665,169 +193,66 @@
     "webrtcPortStart": "0",
     "webrtcPortEnd": "0",
     "createdBy": "controller",
-    "createdAt": "1768239189"
+    "createdAt": "1769097723"
   },
-  "tree:test-1:roomCounter": "1164",
-  "metrics:test-1:node:egress-1:nodejs": {
-    "memoryUsedMb": "39.19",
-    "networkRxErrors": "0",
-    "blockReadBytes": "139264",
-    "blockWriteBytes": "708608",
-    "pidsCurrent": "14",
-    "containerName": "egress-1",
-    "networkTxPackets": "1523",
-    "networkTxErrors": "0",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "cpuPercent": "0.28",
-    "networkRxBytes": "252595",
-    "containerId": "2b0c62d9afdebfa385b6e63b758e7e5a2c385935785dada6d6b73fe9554ef715",
-    "memoryLimitMb": "512.00",
-    "memoryPercent": "7.65",
-    "networkTxBytes": "191146",
-    "networkRxPackets": "2272"
+  "tree:default-tree:parents:relay-root-1": [
+    "injection-1"
+  ],
+  "tree:default-tree:pool:layer:0:relay": [
+    "relay-root-1"
+  ],
+  "metrics:default-tree:node:relay-root-1:application": {
+    "totalRoutes": "1",
+    "bandwidthTxMbps": "0.00",
+    "timestamp": "2026-01-22T16:10:45Z",
+    "sessionsForwarded": "1"
   },
-  "metrics:test-1:node:injection-1:nodejs": {
-    "networkTxErrors": "0",
-    "blockReadBytes": "0",
-    "blockWriteBytes": "8192",
-    "memoryUsedMb": "67.54",
-    "networkRxPackets": "4067",
-    "cpuPercent": "0.57",
-    "networkRxBytes": "1455429",
-    "networkTxPackets": "3294",
-    "networkTxBytes": "591621",
-    "pidsCurrent": "23",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "containerId": "4ceb9375963596ebb61161b90425f2b8019f7a18a7dd8c5b3a2d21eaa4f1feea",
-    "containerName": "injection-1",
-    "memoryLimitMb": "512.00",
-    "memoryPercent": "13.19",
-    "networkRxErrors": "0"
-  },
-  "tree:test-1:node:injection-2": {
-    "nodeId": "injection-2",
-    "type": "injection",
-    "treeId": "test-1",
-    "host": "injection-2",
+  "tree:default-tree:node:relay-root-1": {
+    "nodeId": "relay-root-1",
+    "type": "relay",
+    "treeId": "default-tree",
+    "host": "default-tree-relay-root-1",
     "port": "7070",
-    "audioPort": "5000",
-    "videoPort": "5002",
+    "audioPort": "5002",
+    "videoPort": "5004",
     "layer": "0",
     "status": "active",
-    "created": "1768239191303"
+    "created": "1769097723817"
   },
-  "metrics:test-1:node:injection-2:nodejs": {
-    "containerId": "f5a2303ddf29289433874d571f1bd669c0c2978833943f7e0697444a339cece1",
-    "memoryUsedMb": "66.15",
-    "blockWriteBytes": "12288",
-    "containerName": "injection-2",
-    "cpuPercent": "0.35",
-    "networkTxPackets": "3677",
-    "networkRxErrors": "0",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "memoryPercent": "12.92",
-    "networkRxBytes": "1566530",
-    "networkTxBytes": "671726",
-    "networkTxErrors": "0",
-    "memoryLimitMb": "512.00",
-    "networkRxPackets": "4416",
-    "blockReadBytes": "0",
-    "pidsCurrent": "23"
-  },
-  "tree:test-1:ssrcCounter": "10329",
-  "metrics:test-1:node:injection-2:room:1154": {
-    "description": "Session stress-test-10",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336992",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "roomId": "1154"
-  },
-  "tree:test-1:session:stress-test-11": {
-    "treeId": "test-1",
-    "injectionNodeId": "injection-2",
-    "relayRootId": "relay-root-2",
-    "audioSsrc": "10310",
-    "createdAt": "1768240290822",
-    "sessionId": "stress-test-11",
-    "videoSsrc": "10311",
-    "roomId": "1155",
-    "active": "1"
-  },
-  "metrics:test-1:node:egress-1:janusStreaming": {
-    "cpuPercent": "0.07",
-    "blockWriteBytes": "28672",
-    "pidsCurrent": "12",
-    "containerId": "bc2f88ac4f3ad999c3ee85f3ec4b0bd6a43eea4199a4024c1d4fac055771692d",
-    "memoryPercent": "3.94",
-    "networkTxBytes": "84415",
-    "networkTxPackets": "491",
-    "networkRxErrors": "0",
-    "networkTxErrors": "0",
-    "janusMountpointsActive": "0",
-    "containerName": "egress-1-janus-streaming",
-    "memoryLimitMb": "512.00",
-    "networkRxBytes": "232665",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "janusRoomsActive": "0",
-    "memoryUsedMb": "20.15",
-    "networkRxPackets": "2328",
-    "blockReadBytes": "81920"
-  },
-  "metrics:test-1:node:injection-2:room:1158": {
-    "roomId": "1158",
-    "description": "Session stress-test-14",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336992",
-    "timestamp": "2026-01-12T17:52:13Z"
-  },
-  "metrics:test-1:node:egress-2:janusStreaming": {
-    "janusMountpointsActive": "0",
-    "cpuPercent": "0.07",
-    "networkRxBytes": "186127",
-    "networkRxErrors": "0",
-    "networkTxErrors": "0",
-    "containerId": "c49959d71ef75014dec5b138d9ceaf5ec617528489109eeb1ecb11cd52b3b86c",
-    "memoryPercent": "3.79",
-    "networkTxBytes": "70962",
-    "blockReadBytes": "0",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "containerName": "egress-2-janus-streaming",
-    "memoryUsedMb": "19.39",
-    "networkTxPackets": "436",
-    "memoryLimitMb": "512.00",
-    "networkRxPackets": "2038",
-    "blockWriteBytes": "28672",
-    "pidsCurrent": "11",
-    "janusRoomsActive": "0"
-  },
-  "metrics:test-1:node:injection-2:room:1157": {
-    "description": "Session stress-test-13",
-    "hasPublisher": "true",
-    "lastActivityAt": "1768240336992",
-    "timestamp": "2026-01-12T17:52:13Z",
-    "roomId": "1157"
-  },
-  "tree:test-1:egress": [
-    "egress-2",
-    "egress-1"
+  "tree:default-tree:nodes": [
+    "egress-1",
+    "injection-1",
+    "relay-root-1"
   ],
-  "tree:test-1:injection": [
-    "injection-2",
-    "injection-1"
-  ],
-  "tree:test-1:session:stress-test-4": {
-    "active": "1",
-    "createdAt": "1768240282279",
-    "injectionNodeId": "injection-1",
-    "relayRootId": "relay-root-1",
-    "audioSsrc": "10296",
-    "videoSsrc": "10297",
-    "roomId": "1148",
-    "sessionId": "stress-test-4",
-    "treeId": "test-1"
+  "metrics:default-tree:node:egress-1:nodejs": {
+    "memoryPercent": "7.39",
+    "networkTxBytes": "705506",
+    "timestamp": "2026-01-22T16:10:45Z",
+    "containerId": "7f0006f38bd20a96640dbd8eb4c5fc8682eff4ac66a1f495a0405220409a0f8c",
+    "containerName": "default-tree-egress-1",
+    "cpuPercent": "0.04",
+    "memoryUsedMb": "37.86"
   },
-  "tree:test-1:pool:layer:0:injection": [
-    "injection-2",
-    "injection-1"
-  ]
+  "tree:default-tree:ssrcCounter": "10001",
+  "inactive_sessions:default-tree": [
+    [
+      "default-tree:manual-1769097797",
+      1769098248781.0
+    ]
+  ],
+  "metrics:default-tree:node:injection-1:room:1000": {
+    "roomId": "1000",
+    "description": "Session manual-1769097797",
+    "hasPublisher": "false",
+    "lastActivityAt": "1769098248781",
+    "timestamp": "2026-01-22T16:10:45Z"
+  },
+  "metrics:default-tree:node:egress-1:mountpoint:1000": {
+    "timestamp": "2026-01-22T16:10:45Z",
+    "mountpointId": "1000",
+    "description": "Session mountpoint 1000",
+    "viewers": "1",
+    "enabled": "true",
+    "ageMs": "424071"
+  }
 }

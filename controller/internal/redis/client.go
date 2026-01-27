@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"controller/internal/config"
 
@@ -80,6 +81,16 @@ func (c *Client) HSet(ctx context.Context, key, field string, value any) error {
 // HGetAll legge tutti campi hash
 func (c *Client) HGetAll(ctx context.Context, key string) (map[string]string, error) {
 	return c.rdb.HGetAll(ctx, key).Result()
+}
+
+// SetNX imposta una chiave solo se non esiste (Locking)
+func (c *Client) SetNX(ctx context.Context, key string, value any, ttl time.Duration) (bool, error) {
+	return c.rdb.SetNX(ctx, key, value, ttl).Result()
+}
+
+// HGet legge un singolo campo hash
+func (c *Client) HGet(ctx context.Context, key, field string) (string, error) {
+	return c.rdb.HGet(ctx, key, field).Result()
 }
 
 // KEY OPERATIONS

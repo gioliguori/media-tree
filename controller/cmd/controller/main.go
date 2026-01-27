@@ -5,20 +5,25 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"controller/internal/api"
+	"controller/internal/autoscaler"
 	"controller/internal/config"
+	"controller/internal/domain"
 	"controller/internal/metrics"
+	"controller/internal/provisioner"
 	"controller/internal/redis"
 	"controller/internal/session"
+	"controller/internal/tree"
 )
 
 func main() {
 	log.Println("Starting Media Tree Controller...")
 
-	// Config redis
+	// Config e Database
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -26,21 +31,48 @@ func main() {
 
 	log.Printf("Connecting to Redis at %s:%d...", cfg.RedisHost, cfg.RedisPort)
 	redisClient := redis.NewClient(cfg)
+	defer redisClient.Close()
 
-	defer func() {
-		log.Println("Closing Redis connection...")
-		redisClient.Close()
-	}()
-	// Timer 10 sec
 	pingCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel() // cleanup
-
 	if err := redisClient.Ping(pingCtx); err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
-
 	log.Println("Connected to Redis successfully!")
 
+	// Creazione entità
+
+	// Provisioner (Docker)
+	dockerProvisioner, err := provisioner.NewDockerProvisioner(cfg.DockerNetwork, redisClient)
+	if err != nil {
+		log.Fatalf("Failed to create Docker Provisioner: %v", err)
+	}
+
+	// Tree Manager
+	treeManager := tree.NewTreeManager(redisClient, dockerProvisioner)
+
+	// Session Manager
+	sessionManager := session.NewSessionManager(redisClient)
+
+	log.Println("Core Managers Initialized")
+
+	// Albero di Default
+	ctx := context.Background()
+	defaultTreeID := "default-tree"
+	if exists, _ := redisClient.TreeExists(ctx, defaultTreeID); !exists {
+		log.Printf("Bootstrapping default tree: %s...", defaultTreeID)
+		if _, err := treeManager.CreateTree(ctx, defaultTreeID, "minimal"); err != nil {
+			log.Printf("Warning: Failed to create default tree: %v", err)
+		} else {
+			log.Println("Default tree created successfully")
+		}
+	} else {
+		log.Println("Default tree already exists")
+	}
+
+	// Avvio background jobs
+
+	// Metrics Collector
 	metricsConfig := metrics.DefaultConfig()
 	metricsCollector, err := metrics.NewMetricsCollector(redisClient, metricsConfig)
 	if err != nil {
@@ -51,39 +83,90 @@ func main() {
 		log.Println("MetricsCollector Started")
 	}
 
-	// Start session cleanup job
-	sessionManager := session.NewSessionManager(redisClient)
-
-	ctx := context.Background()
+	// Session Cleanup
 	sessionManager.StartCleanupJob(ctx)
 	log.Println("Session cleanup job started")
 
-	// Start API server
-	server := api.NewServer(cfg, redisClient)
+	// Autoscaler Job
+	autoscalerJob := autoscaler.NewAutoscalerJob(redisClient, treeManager)
+	if err := autoscalerJob.Start(ctx); err != nil {
+		log.Fatalf("Failed to start autoscaler: %v", err)
+	}
+	log.Println("Autoscaler job started")
 
-	// Go routine perchè server.Start() è bloccante
+	// Api Server
+	server := api.NewServer(cfg, redisClient, treeManager, sessionManager)
+
 	go func() {
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start API server: %v", err)
 		}
 	}()
 
+	// Shutdown
 	// Channel OS
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
 	// Si blocca qui in attesa di shutdown
 	<-quit
-
 	log.Println("Shutting down")
-
 	// Shutdown con timeout
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer shutdownCancel()
 
+	autoscalerJob.Stop()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server shutdown failed: %v", err)
 	}
+	log.Println("Resource cleanup")
 
+	// Recupera tutti gli alberi
+	trees, err := redisClient.GetAllTrees(shutdownCtx)
+	if err != nil {
+		log.Printf("[ERROR] Failed to get trees for cleanup: %v", err)
+	} else {
+		for _, treeID := range trees {
+			log.Printf("Cleanup: Scanning tree %s", treeID)
+
+			// Recupera i nodi dell'albero
+			nodeIDs, err := redisClient.GetAllTreeNodes(shutdownCtx, treeID)
+			if err != nil {
+				log.Printf("[WARN] Failed to get nodes for tree %s: %v", treeID, err)
+				continue
+			}
+
+			if len(nodeIDs) == 0 {
+				continue
+			}
+
+			// WaitGroup per questo albero
+			var wg sync.WaitGroup
+			log.Printf("Cleanup: Found %d nodes in tree %s. Destroying", len(nodeIDs), treeID)
+
+			for _, nodeID := range nodeIDs {
+				wg.Add(1)
+
+				go func(tID, nID string) {
+					defer wg.Done()
+
+					// Recupera info (o crea dummy)
+					nodeInfo, err := redisClient.GetNodeProvisioning(shutdownCtx, tID, nID)
+					if err != nil {
+						// Fallback per nodi zombie
+						nodeInfo = &domain.NodeInfo{TreeId: tID, NodeId: nID}
+					}
+
+					log.Printf("Cleanup: Destroying node %s", nID)
+					if err := dockerProvisioner.DestroyNode(shutdownCtx, nodeInfo); err != nil {
+						log.Printf("[ERROR] Failed to destroy node %s: %v", nID, err)
+					}
+				}(treeID, nodeID)
+			}
+
+			// Aspetta che tutti i nodi di questo albero siano distrutti
+			wg.Wait()
+			log.Printf("Cleanup: Tree %s cleaned.", treeID)
+		}
+	}
 	log.Println("Controller stopped")
 }
