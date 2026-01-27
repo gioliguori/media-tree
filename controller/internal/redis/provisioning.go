@@ -28,6 +28,8 @@ type NodeProvisioningData struct {
 	JanusWSPort     int `json:"janusWSPort,omitempty" redis:"janusWSPort"`
 	WebRTCPortStart int `json:"webrtcPortStart,omitempty" redis:"webrtcPortStart"`
 	WebRTCPortEnd   int `json:"webrtcPortEnd,omitempty" redis:"webrtcPortEnd"`
+	StreamPortStart int `json:"streamPortStart,omitempty" redis:"streamPortStart"`
+	StreamPortEnd   int `json:"streamPortEnd,omitempty" redis:"streamPortEnd"`
 
 	// Metadata
 	CreatedBy string `json:"createdBy" redis:"createdBy"`
@@ -51,6 +53,8 @@ func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.Node
 		JanusWSPort:      nodeInfo.JanusWSPort,
 		WebRTCPortStart:  nodeInfo.WebRTCPortStart,
 		WebRTCPortEnd:    nodeInfo.WebRTCPortEnd,
+		StreamPortStart:  nodeInfo.StreamPortStart,
+		StreamPortEnd:    nodeInfo.StreamPortEnd,
 		CreatedBy:        "controller",
 		CreatedAt:        time.Now().Unix(),
 	}
@@ -112,6 +116,8 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string)
 		JanusWSPort:      data.JanusWSPort,
 		WebRTCPortStart:  data.WebRTCPortStart,
 		WebRTCPortEnd:    data.WebRTCPortEnd,
+		StreamPortStart:  data.StreamPortStart,
+		StreamPortEnd:    data.StreamPortEnd,
 		ExternalHost:     "localhost",
 	}
 
@@ -223,6 +229,8 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*
 			JanusWSPort:      data.JanusWSPort,
 			WebRTCPortStart:  data.WebRTCPortStart,
 			WebRTCPortEnd:    data.WebRTCPortEnd,
+			StreamPortStart:  data.StreamPortStart,
+			StreamPortEnd:    data.StreamPortEnd,
 			ExternalHost:     "localhost",
 		}
 

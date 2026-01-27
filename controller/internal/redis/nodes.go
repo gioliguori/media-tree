@@ -200,3 +200,9 @@ func (c *Client) GetNodeSessionCount(ctx context.Context, treeId string, nodeId 
 	key := fmt.Sprintf("tree:%s:node:%s:sessions", treeId, nodeId)
 	return c.rdb.SCard(ctx, key).Result()
 }
+
+// GetAllTreeNodes restituisce i nodi associati a un albero
+func (c *Client) GetAllTreeNodes(ctx context.Context, treeId string) ([]string, error) {
+	key := fmt.Sprintf("tree:%s:nodes", treeId)
+	return c.rdb.SMembers(ctx, key).Result()
+}

@@ -60,9 +60,9 @@ func (p *DockerProvisioner) DestroyNode(ctx context.Context, nodeInfo *domain.No
 		targetContainer = nodeInfo.ContainerId
 	}
 	// (SIGTERM)
-	log.Printf("[INFO] Stopping node %s gracefully...", nodeInfo.NodeId)
+	log.Printf("[INFO] Stopping node %s", nodeInfo.NodeId)
 	if err := p.dockerStop(ctx, targetContainer); err != nil {
-		log.Printf("[WARN] Failed to stop %s gracefully: %v", targetContainer, err)
+		log.Printf("[WARN] Failed to stop %s: %v", targetContainer, err)
 	}
 
 	// Attendi che nodo si unregister (max 3s)
@@ -112,6 +112,9 @@ func (p *DockerProvisioner) DestroyNode(ctx context.Context, nodeInfo *domain.No
 		}
 		if nodeInfo.WebRTCPortStart > 0 && nodeInfo.WebRTCPortEnd > 0 {
 			p.portAllocator.ReleaseRange(nodeInfo.WebRTCPortStart, nodeInfo.WebRTCPortEnd)
+		}
+		if nodeInfo.StreamPortStart > 0 && nodeInfo.StreamPortEnd > 0 {
+			p.portAllocator.ReleaseRange(nodeInfo.StreamPortStart, nodeInfo.StreamPortEnd)
 		}
 	}
 	// Cleanup Redis provisioning info

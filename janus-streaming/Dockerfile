@@ -81,12 +81,13 @@ RUN git clone https://github.com/meetecho/janus-gateway.git \
     && rm -rf janus-gateway
 
 # Copy config files (static)
-COPY config/janus.plugin.streaming.jcfg /opt/janus/etc/janus/
+# COPY config/janus.plugin.streaming.jcfg /opt/janus/etc/janus/
 COPY config/janus.transport.http.jcfg /opt/janus/etc/janus/
 COPY config/janus.transport.websockets.jcfg /opt/janus/etc/janus/
 
-# Copy main config template (dynamic)
+# Copy config template (dynamic)
 COPY config/janus.jcfg.template /opt/janus/etc/janus/janus.jcfg.template
+COPY config/janus.plugin.streaming.jcfg.template /opt/janus/etc/janus/janus.plugin.streaming.jcfg.template
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh /docker-entrypoint.sh

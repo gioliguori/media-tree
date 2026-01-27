@@ -26,6 +26,10 @@ type PortAllocator struct {
 	webrtcRangeStart int // 20000
 	webrtcRangeSize  int // 100 porte per istanza
 	webrtcRangeMax   int // 25000
+
+	streamRangeStart int
+	streamRangeSize  int
+	streamRangeMax   int
 }
 
 // NewPortAllocator inizializza l'allocatore
@@ -44,6 +48,11 @@ func NewPortAllocator() *PortAllocator {
 		// Janus WS: 8188-8220 (30 istanze)
 		janusWSMin: 8188,
 		janusWSMax: 8220,
+
+		// Streaming Range 10000-15000
+		streamRangeStart: 10000,
+		streamRangeSize:  200,
+		streamRangeMax:   15000,
 
 		// WebRTC: 20000-25000 (50 istanze × 100 porte)
 		webrtcRangeStart: 20000,
@@ -128,6 +137,35 @@ func (pa *PortAllocator) AllocateWebRTCRange() (int, int, error) {
 	}
 
 	return 0, 0, fmt.Errorf("no WebRTC ranges available")
+}
+
+func (pa *PortAllocator) AllocateStreamingRange() (int, int, error) {
+	pa.mu.Lock()
+	defer pa.mu.Unlock()
+
+	// Scansiona a blocchi
+	for start := pa.streamRangeStart; start <= pa.streamRangeMax; start += pa.streamRangeSize {
+		end := start + pa.streamRangeSize - 1
+
+		// Controlla se il blocco è libero
+		isBlockFree := true
+		for p := start; p <= end; p++ {
+			if pa.usedPorts[p] {
+				isBlockFree = false
+				break
+			}
+		}
+
+		if isBlockFree {
+			// Blocca tutte le porte del range
+			for p := start; p <= end; p++ {
+				pa.usedPorts[p] = true
+			}
+			return start, end, nil
+		}
+	}
+
+	return 0, 0, fmt.Errorf("no streaming input ranges available")
 }
 
 // Release libera una porta
@@ -269,11 +307,28 @@ func (pa *PortAllocator) GetStats() map[string]any {
 		}
 	}
 
+	// Calcolo Streaming Ranges liberi
+	streamRanges := 0
+	for start := pa.streamRangeStart; start <= pa.streamRangeMax; start += pa.streamRangeSize {
+		end := start + pa.streamRangeSize - 1
+		isBlockFree := true
+		for p := start; p <= end; p++ {
+			if pa.usedPorts[p] {
+				isBlockFree = false
+				break
+			}
+		}
+		if isBlockFree {
+			streamRanges++
+		}
+	}
+
 	return map[string]any{
-		"totalUsedPorts":          len(pa.usedPorts),
-		"apiPortsAvailable":       apiFree,
-		"janusInstancesAvailable": janusInstances,
-		"webrtcRangesAvailable":   webrtcRanges,
+		"totalUsedPorts":           len(pa.usedPorts),
+		"apiPortsAvailable":        apiFree,
+		"janusInstancesAvailable":  janusInstances,
+		"webrtcRangesAvailable":    webrtcRanges,
+		"streamingRangesAvailable": streamRanges,
 	}
 }
 

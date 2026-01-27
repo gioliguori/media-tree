@@ -27,6 +27,13 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		return nil, fmt.Errorf("failed to allocate WebRTC range: %w", err)
 	}
 
+	streamStart, streamEnd, err := p.portAllocator.AllocateStreamingRange()
+	if err != nil {
+		p.portAllocator.ReleasePorts(apiPort, janusHTTP, janusWS)
+		p.portAllocator.ReleaseRange(webrtcStart, webrtcEnd)
+		return nil, fmt.Errorf("failed to allocate Streaming range: %w", err)
+	}
+
 	// Crea Janus Streaming
 	dockerName := fmt.Sprintf("%s-%s", spec.TreeId, spec.NodeId)
 	janusDockerName := dockerName + "-janus-streaming"
@@ -39,6 +46,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		"--hostname", janusDockerName,
 		"--network", p.networkName,
 		"-e", fmt.Sprintf("JANUS_RTP_PORT_RANGE=%d-%d", webrtcStart, webrtcEnd),
+		"-e", fmt.Sprintf("JANUS_STREAMING_RTP_PORT_RANGE=%d-%d", streamStart, streamEnd),
 		"-e", "JANUS_LOG_LEVEL=4",
 		"-p", fmt.Sprintf("%d:8088/tcp", janusHTTP),
 		"-p", fmt.Sprintf("%d:8188/tcp", janusWS),
@@ -50,6 +58,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 	if err != nil {
 		p.portAllocator.ReleasePorts(apiPort, janusHTTP, janusWS)
 		p.portAllocator.ReleaseRange(webrtcStart, webrtcEnd)
+		p.portAllocator.ReleaseRange(streamStart, streamEnd)
 		return nil, fmt.Errorf("failed to create Janus container: %w", err)
 	}
 
@@ -86,6 +95,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		p.dockerRemove(ctx, janusDockerName)
 		p.portAllocator.ReleasePorts(apiPort, janusHTTP, janusWS)
 		p.portAllocator.ReleaseRange(webrtcStart, webrtcEnd)
+		p.portAllocator.ReleaseRange(streamStart, streamEnd)
 		return nil, fmt.Errorf("failed to create egress node: %w", err)
 	}
 
@@ -108,6 +118,8 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		JanusHTTPPort:    janusHTTP,
 		WebRTCPortStart:  webrtcStart,
 		WebRTCPortEnd:    webrtcEnd,
+		StreamPortStart:  streamStart,
+		StreamPortEnd:    streamEnd,
 	}
 	// Salva in Redis
 	if err := p.redisClient.SaveNodeProvisioning(ctx, nodeInfo); err != nil {
@@ -119,6 +131,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		p.dockerRemove(ctx, janusDockerName)
 		p.portAllocator.ReleasePorts(apiPort, janusHTTP, janusWS)
 		p.portAllocator.ReleaseRange(webrtcStart, webrtcEnd)
+		p.portAllocator.ReleaseRange(streamStart, streamEnd)
 		return nil, fmt.Errorf("failed to save provisioning to Redis: %w", err)
 	}
 

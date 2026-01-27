@@ -5,12 +5,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"controller/internal/api"
 	"controller/internal/autoscaler"
 	"controller/internal/config"
+	"controller/internal/domain"
 	"controller/internal/metrics"
 	"controller/internal/provisioner"
 	"controller/internal/redis"
@@ -109,13 +111,62 @@ func main() {
 	<-quit
 	log.Println("Shutting down")
 	// Shutdown con timeout
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer shutdownCancel()
 
 	autoscalerJob.Stop()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server shutdown failed: %v", err)
 	}
+	log.Println("Resource cleanup")
 
+	// Recupera tutti gli alberi
+	trees, err := redisClient.GetAllTrees(shutdownCtx)
+	if err != nil {
+		log.Printf("[ERROR] Failed to get trees for cleanup: %v", err)
+	} else {
+		for _, treeID := range trees {
+			log.Printf("Cleanup: Scanning tree %s", treeID)
+
+			// Recupera i nodi dell'albero
+			nodeIDs, err := redisClient.GetAllTreeNodes(shutdownCtx, treeID)
+			if err != nil {
+				log.Printf("[WARN] Failed to get nodes for tree %s: %v", treeID, err)
+				continue
+			}
+
+			if len(nodeIDs) == 0 {
+				continue
+			}
+
+			// WaitGroup per questo albero
+			var wg sync.WaitGroup
+			log.Printf("Cleanup: Found %d nodes in tree %s. Destroying", len(nodeIDs), treeID)
+
+			for _, nodeID := range nodeIDs {
+				wg.Add(1)
+
+				go func(tID, nID string) {
+					defer wg.Done()
+
+					// Recupera info (o crea dummy)
+					nodeInfo, err := redisClient.GetNodeProvisioning(shutdownCtx, tID, nID)
+					if err != nil {
+						// Fallback per nodi zombie
+						nodeInfo = &domain.NodeInfo{TreeId: tID, NodeId: nID}
+					}
+
+					log.Printf("Cleanup: Destroying node %s", nID)
+					if err := dockerProvisioner.DestroyNode(shutdownCtx, nodeInfo); err != nil {
+						log.Printf("[ERROR] Failed to destroy node %s: %v", nID, err)
+					}
+				}(treeID, nodeID)
+			}
+
+			// Aspetta che tutti i nodi di questo albero siano distrutti
+			wg.Wait()
+			log.Printf("Cleanup: Tree %s cleaned.", treeID)
+		}
+	}
 	log.Println("Controller stopped")
 }
