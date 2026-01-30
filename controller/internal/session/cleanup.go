@@ -12,6 +12,7 @@ import (
 
 const (
 	SessionInactiveThreshold = 1 * time.Minute  // 5min (1min per test)
+	PathInactiveThreshold    = 1 * time.Minute  // 5min (1min per test)
 	CleanupInterval          = 30 * time.Second // Check ogni 30s
 )
 
@@ -40,9 +41,11 @@ func (sm *SessionManager) cleanupLoop(ctx context.Context) {
 
 			// Cleanup per ogni tree
 			for _, treeID := range trees {
-				if err := sm.cleanupInactiveSessions(ctx, treeID); err != nil {
-					log.Printf("[SessionCleanup] Failed for tree %s: %v", treeID, err)
-				}
+				// Pulisce sessioni globali (Injection)
+				sm.cleanupInactiveSessions(ctx, treeID)
+
+				// Pulisce path specifici (Egress)
+				sm.cleanupInactiveEgressPaths(ctx, treeID)
 			}
 
 		case <-ctx.Done():
@@ -129,4 +132,48 @@ func (sm *SessionManager) getAllTrees(ctx context.Context) ([]string, error) {
 	}
 
 	return trees, nil
+}
+
+// cleanupInactiveEgressPaths scansiona i path che hanno 0 viewer da troppo tempo
+func (sm *SessionManager) cleanupInactiveEgressPaths(ctx context.Context, treeID string) error {
+	// Definiamo la soglia
+	thresholdMs := time.Now().Add(-PathInactiveThreshold).UnixMilli()
+	sortedSetKey := fmt.Sprintf("inactive_paths:%s", treeID)
+
+	// Prendiamo i path scaduti (score tra -infinito e threshold)
+	expiredEntries, err := sm.redis.GetRedisClient().ZRangeByScore(ctx, sortedSetKey, &redis.ZRangeBy{
+		Min: "-inf",
+		Max: fmt.Sprintf("%d", thresholdMs),
+	}).Result()
+
+	if err != nil || len(expiredEntries) == 0 {
+		return err
+	}
+
+	log.Printf("[SessionCleanup] Tree %s: found %d idle paths to remove", treeID, len(expiredEntries))
+
+	for _, entry := range expiredEntries {
+		// entry format: "nodeId:sessionId"
+		parts := strings.Split(entry, ":")
+		if len(parts) != 2 {
+			continue
+		}
+		nodeID := parts[0]
+		sessionID := parts[1]
+
+		log.Printf("[SessionCleanup] Path %s for session %s has 0 viewers. Cleaning up.", nodeID, sessionID)
+
+		// Chiamiamo il backtracking (DestroySessionPath)
+		// Questo rimuove la sessione dall'Egress e risale i Relay intermedi
+		err := sm.DestroySessionPath(ctx, treeID, sessionID, nodeID)
+		if err != nil {
+			log.Printf("[SessionCleanup] Error cleaning path %s: %v", entry, err)
+			continue
+		}
+
+		// Rimuoviamo l'entry dal Sorted Set
+		sm.redis.GetRedisClient().ZRem(ctx, sortedSetKey, entry)
+	}
+
+	return nil
 }

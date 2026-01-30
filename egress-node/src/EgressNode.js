@@ -50,6 +50,8 @@ export class EgressNode extends BaseNode {
 
         // Lock per operazioni per sessione
         this.operationLocks = new Map();
+        this.mountpointsLastActivity = new Map();
+
 
 
         // ForwarderManager per gestire processo C
@@ -725,13 +727,32 @@ export class EgressNode extends BaseNode {
                     });
                     const info = response.plugindata?.data?.info || {};
                     const viewers = info.viewers ?? 0;
+                    const now = Date.now();
+
+                    let sessionId = null;
+                    for (const [sid, mpData] of this.mountpoints.entries()) {
+                        if (mpData.mountpointId === mp.id) {
+                            sessionId = sid;
+                            break;
+                        }
+                    }
+                    if (viewers > 0) {
+                        this.mountpointsLastActivity.set(mp.id, now); // Aggiorna solo se attivo
+                    }
+                    if (!this.mountpointsLastActivity.has(mp.id)) {
+                        this.mountpointsLastActivity.set(mp.id, now);
+                    }
+
+                    const lastActivityAt = this.mountpointsLastActivity.get(mp.id);
 
                     mountpointDetails.push({
                         mountpointId: mp.id,
+                        sessionId: sessionId,
                         description: info.description || mp.description,
                         type: info.type,
                         viewers: viewers,
                         enabled: info.enabled !== false,
+                        lastActivityAt: lastActivityAt,
                         ageMs: info.media?.[0]?.age_ms ?? 0 // Utile per capire se il flusso sta ricevendo dati
                     });
 

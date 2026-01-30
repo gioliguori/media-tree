@@ -33,6 +33,36 @@ func (tm *TreeManager) ScaleUpInjection(ctx context.Context, treeId string) erro
 	return nil
 }
 
+func (tm *TreeManager) ScaleUpEgress(ctx context.Context, treeId string) error {
+	log.Printf("[TreeManager] Scaling up: Provisioning new Egress for tree %s", treeId)
+
+	// Genera ID
+	nodeId, err := tm.generateNodeID(ctx, treeId, "egress")
+	if err != nil {
+		return err
+	}
+
+	// Crea il nodo (Layer -1)
+	node, err := tm.provisioner.CreateNode(ctx, domain.NodeSpec{
+		NodeId:   nodeId,
+		NodeType: domain.NodeTypeEgress,
+		TreeId:   treeId,
+		Layer:    -1,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create egress container: %w", err)
+	}
+
+	// Registra nel pool
+	if err := tm.redis.AddEgressToPool(ctx, treeId, nodeId); err != nil {
+		tm.provisioner.DestroyNode(ctx, node)
+		return err
+	}
+
+	log.Printf("[SUCCESS] Scale Up Egress Complete: %s", nodeId)
+	return nil
+}
+
 // Converte le stringhe dell'Autoscaler in una struct NodeInfo per il Provisioner e chiama DestroyNode()
 func (tm *TreeManager) DestroyNode(ctx context.Context, treeId, nodeId, nodeType string) error {
 	log.Printf("[TreeManager] Scaling down: Autoscaler requested destroy for node %s (%s)", nodeId, nodeType)
@@ -41,6 +71,18 @@ func (tm *TreeManager) DestroyNode(ctx context.Context, treeId, nodeId, nodeType
 	if err := tm.redis.SetNodeStatus(ctx, treeId, nodeId, "destroying"); err != nil {
 		log.Printf("[WARN] Failed to set status destroying for %s: %v", nodeId, err)
 	}
+
+	// Recupera info complete se possibile prima di distruggere
+	nodeInfo, err := tm.redis.GetNodeProvisioning(ctx, treeId, nodeId)
+	if err != nil || nodeInfo == nil {
+		// Se non lo trova, crea un oggetto parziale per il provisioner
+		nodeInfo = &domain.NodeInfo{
+			TreeId:   treeId,
+			NodeId:   nodeId,
+			NodeType: domain.NodeType(nodeType),
+		}
+	}
+
 	// Se è un injection, dobbiamo prima distruggere il relayroot figlio
 	if nodeType == "injection" {
 		children, err := tm.redis.GetNodeChildren(ctx, treeId, nodeId)
@@ -61,14 +103,8 @@ func (tm *TreeManager) DestroyNode(ctx context.Context, treeId, nodeId, nodeType
 		}
 	}
 
-	partialNodeInfo := &domain.NodeInfo{
-		TreeId:   treeId,
-		NodeId:   nodeId,
-		NodeType: domain.NodeType(nodeType),
-	}
-
 	// Chiamiamo il provisioner che gestisce: Stop Docker -> Remove Docker -> Clean Redis
-	if err := tm.provisioner.DestroyNode(ctx, partialNodeInfo); err != nil {
+	if err := tm.provisioner.DestroyNode(ctx, nodeInfo); err != nil {
 		return fmt.Errorf("failed to destroy node %s: %w", nodeId, err)
 	}
 

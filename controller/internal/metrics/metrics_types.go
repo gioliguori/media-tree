@@ -52,15 +52,18 @@ type JanusMetrics struct {
 
 	// Streaming (egress)
 	MountpointsActive int                `json:"mountpointsActive,omitempty"` // Numero mountpoint attivi
+	TotalViewers      int                `json:"totalViewers,omitempty"`      // viewer totali su Egress
 	Mountpoints       []MountpointMetric `json:"mountpoints,omitempty"`       // Dettaglio mountpoint
 }
 
 type MountpointMetric struct {
-	MountpointId int    `json:"mountpointId"`
-	Description  string `json:"description,omitempty"`
-	Viewers      int    `json:"viewers"`
-	Enabled      bool   `json:"enabled"`
-	AgeMs        int64  `json:"ageMs"`
+	MountpointId   int    `json:"mountpointId"`
+	SessionId      string `json:"sessionId"`
+	Description    string `json:"description,omitempty"`
+	Viewers        int    `json:"viewers"`
+	Enabled        bool   `json:"enabled"`
+	LastActivityAt int64  `json:"lastActivityAt"`
+	AgeMs          int64  `json:"ageMs"`
 }
 
 type RoomMetric struct {

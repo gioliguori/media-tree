@@ -206,3 +206,19 @@ func (c *Client) GetAllTreeNodes(ctx context.Context, treeId string) ([]string, 
 	key := fmt.Sprintf("tree:%s:nodes", treeId)
 	return c.rdb.SMembers(ctx, key).Result()
 }
+
+func (c *Client) AddEgressToPool(ctx context.Context, treeId string, nodeId string) error {
+	key := fmt.Sprintf("tree:%s:pool:egress", treeId)
+	return c.rdb.SAdd(ctx, key, nodeId).Err()
+}
+
+// GetEgressPool recupera tutti i nodi egress disponibili per l'albero
+func (c *Client) GetEgressPool(ctx context.Context, treeId string) ([]string, error) {
+	key := fmt.Sprintf("tree:%s:pool:egress", treeId)
+	return c.rdb.SMembers(ctx, key).Result()
+}
+
+func (c *Client) RemoveEgressFromPool(ctx context.Context, treeId string, nodeId string) error {
+	key := fmt.Sprintf("tree:%s:pool:egress", treeId)
+	return c.rdb.SRem(ctx, key, nodeId).Err()
+}

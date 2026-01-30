@@ -54,6 +54,7 @@ func (h *SessionHandler) CreateSession(c *gin.Context) {
 }
 
 //	GET /api/sessions/:sessionId/view
+//
 // Provisiona egress on-demand per viewer
 func (h *SessionHandler) ViewSession(c *gin.Context) {
 	sessionId := c.Param("sessionId")

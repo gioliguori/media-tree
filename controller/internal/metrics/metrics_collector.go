@@ -509,10 +509,14 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 			// "pidsCurrent":      fmt.Sprintf("%d", containerMetrics.PIDsCurrent),
 			"timestamp": timestampReadable,
 		}
-
 		if containerMetrics.JanusMetrics != nil {
-			metricsMap["janusRoomsActive"] = fmt.Sprintf("%d", containerMetrics.JanusMetrics.RoomsActive)
-			metricsMap["janusMountpointsActive"] = fmt.Sprintf("%d", containerMetrics.JanusMetrics.MountpointsActive)
+			switch metrics.NodeType {
+			case "injection":
+				metricsMap["janusRoomsActive"] = fmt.Sprintf("%d", containerMetrics.JanusMetrics.RoomsActive)
+			case "egress":
+				metricsMap["janusMountpointsActive"] = fmt.Sprintf("%d", containerMetrics.JanusMetrics.MountpointsActive)
+				metricsMap["janusTotalViewers"] = fmt.Sprintf("%d", containerMetrics.JanusMetrics.TotalViewers)
+			}
 		}
 
 		pipe.HMSet(ctx, key, metricsMap)
@@ -526,6 +530,7 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 
 				mpMap := map[string]any{
 					"mountpointId": fmt.Sprintf("%d", mp.MountpointId),
+					"sessionId":    mp.SessionId,
 					"description":  mp.Description,
 					"viewers":      fmt.Sprintf("%d", mp.Viewers),
 					"enabled":      fmt.Sprintf("%t", mp.Enabled),
@@ -591,6 +596,12 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 	if metrics.NodeType == "injection" {
 		if err := mc.updateInactiveSessions(ctx, metrics); err != nil {
 			log.Printf("[MetricsCollector] Failed to update inactive sessions: %v", err)
+		}
+	}
+
+	if metrics.NodeType == "egress" {
+		if err := mc.updateInactiveEgressPaths(ctx, metrics); err != nil {
+			log.Printf("[MetricsCollector] Failed to update inactive egress paths: %v", err)
 		}
 	}
 
@@ -765,6 +776,42 @@ func (mc *MetricsCollector) updateInactiveSessions(ctx context.Context, metrics 
 		}
 	}
 
+	return nil
+}
+
+func (mc *MetricsCollector) updateInactiveEgressPaths(ctx context.Context, metrics *NodeMetrics) error {
+	sortedSetKey := fmt.Sprintf("inactive_paths:%s", metrics.TreeID)
+
+	var janusMetrics *JanusMetrics
+	for containerType, containerMetrics := range metrics.Containers {
+		if containerType == string(ContainerTypeJanusStreaming) {
+			janusMetrics = containerMetrics.JanusMetrics
+			break
+		}
+	}
+
+	if janusMetrics == nil || len(janusMetrics.Mountpoints) == 0 {
+		return nil
+	}
+
+	for _, mp := range janusMetrics.Mountpoints {
+		if mp.SessionId == "" {
+			continue
+		}
+
+		// Chiave nel set: "nodeId:sessionId"
+		entryKey := fmt.Sprintf("%s:%s", metrics.NodeID, mp.SessionId)
+
+		if mp.Viewers == 0 {
+			// Aggiungi ai candidati (pulizia)
+			score := float64(mp.LastActivityAt)
+
+			mc.redisClient.ZAdd(ctx, sortedSetKey, score, entryKey)
+		} else {
+			// Ci sono viewer: rimuovi il path dal set degli inattivi
+			mc.redisClient.ZRem(ctx, sortedSetKey, entryKey)
+		}
+	}
 	return nil
 }
 

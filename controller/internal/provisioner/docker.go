@@ -53,6 +53,12 @@ func (p *DockerProvisioner) DestroyNode(ctx context.Context, nodeInfo *domain.No
 			nodeInfo.InternalHost = fmt.Sprintf("%s-%s", nodeInfo.TreeId, nodeInfo.NodeId)
 		}
 		nodeInfo = fullInfo
+	} else {
+		// Fallback: Se Redis non ha info (nodo zombie), ricostruiamo il nome container standard
+		log.Printf("[Provisioner] Warning: node info not found in Redis for %s, using fallback identifiers", nodeInfo.NodeId)
+		if nodeInfo.InternalHost == "" {
+			nodeInfo.InternalHost = fmt.Sprintf("%s-%s", nodeInfo.TreeId, nodeInfo.NodeId)
+		}
 	}
 
 	targetContainer := nodeInfo.InternalHost

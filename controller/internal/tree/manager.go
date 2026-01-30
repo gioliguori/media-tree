@@ -35,14 +35,22 @@ func (tm *TreeManager) CreateTree(ctx context.Context, treeId, templateName stri
 	}
 
 	minInjectionNodes := 0
+	minEgressNodes := 0
+
 	for _, node := range tmpl.Nodes {
 		if node.NodeType == "injection" {
 			minInjectionNodes += node.Count
+		}
+		if node.NodeType == "egress" {
+			minEgressNodes += node.Count
 		}
 	}
 	if minInjectionNodes < 1 {
 		minInjectionNodes = 1
 	} // Safety
+	if minEgressNodes < 1 {
+		minEgressNodes = 1
+	}
 
 	// Check tree non esiste già
 	exists, _ := tm.redis.TreeExists(ctx, treeId)
@@ -51,7 +59,7 @@ func (tm *TreeManager) CreateTree(ctx context.Context, treeId, templateName stri
 	}
 
 	// Salva metadata tree
-	if err := tm.saveTreeMetadata(ctx, treeId, templateName, "creating", minInjectionNodes); err != nil {
+	if err := tm.saveTreeMetadata(ctx, treeId, templateName, "creating", minInjectionNodes, minEgressNodes); err != nil {
 		return nil, fmt.Errorf("failed to save tree metadata: %w", err)
 	}
 
@@ -191,27 +199,35 @@ func (tm *TreeManager) createPoolNodes(
 			// Genera nodeId
 			nodeId := fmt.Sprintf("%s-%d", spec.NodeType, counter)
 
+			actualLayer := spec.Layer
+			if spec.NodeType == "egress" {
+				actualLayer = -1
+			}
+
 			// Crea nodo via provisioner
 			node, err := tm.provisioner.CreateNode(ctx, domain.NodeSpec{
 				NodeId:   nodeId,
 				NodeType: domain.NodeType(spec.NodeType),
 				TreeId:   treeId,
-				Layer:    spec.Layer,
+				Layer:    actualLayer,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to create node: %w", err)
 			}
 			*allNodes = append(*allNodes, node)
 
-			// Aggiungi a pool
-			if err := tm.redis.AddNodeToPool(ctx, treeId, spec.NodeType, spec.Layer, nodeId); err != nil {
-				return fmt.Errorf("failed to add to pool: %w", err)
+			if spec.NodeType == "egress" {
+				if err := tm.redis.AddEgressToPool(ctx, treeId, nodeId); err != nil {
+					return err
+				}
+			} else {
+				if err := tm.redis.AddNodeToPool(ctx, treeId, spec.NodeType, spec.Layer, nodeId); err != nil {
+					return err
+				}
+				log.Printf("[INFO] Created pool node: %s (layer %d)", nodeId, spec.Layer)
 			}
-
-			log.Printf("[INFO] Created pool node: %s (layer %d)", nodeId, spec.Layer)
 		}
 	}
-
 	return nil
 }
 
@@ -367,14 +383,15 @@ func (tm *TreeManager) ListTrees(ctx context.Context) ([]*TreeSummary, error) {
 
 // HELPER PRIVATI - REDIS
 
-func (tm *TreeManager) saveTreeMetadata(ctx context.Context, treeId, template, status string, minNodes int) error {
+func (tm *TreeManager) saveTreeMetadata(ctx context.Context, treeId, template, status string, minInjection int, minEgress int) error {
 	key := fmt.Sprintf("tree:%s:metadata", treeId)
 
 	data := map[string]any{
 		"treeId":            treeId,
 		"template":          template,
 		"status":            status,
-		"minInjectionNodes": minNodes,
+		"minInjectionNodes": minInjection,
+		"minEgressNodes":    minEgress,
 		"createdAt":         time.Now().Unix(),
 		"updatedAt":         time.Now().Unix(),
 	}

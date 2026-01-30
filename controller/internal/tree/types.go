@@ -95,9 +95,9 @@ func (tc *TemplateConfig) Validate() error {
 
 		case "egress":
 			// Egress possono iniziare dal layer 1 (direttamente sotto relay-root)
-			if spec.Layer < 1 {
-				return fmt.Errorf("egress nodes must be at layer >= 1")
-			}
+			// if spec.Layer < 1 {
+			// 	return fmt.Errorf("egress nodes must be at layer >= 1")
+			// }
 			hasEgress = true
 		}
 	}

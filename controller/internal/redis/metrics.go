@@ -148,3 +148,16 @@ func (c *Client) GetNodeBandwidthTxMbps(
 
 	return bw, nil
 }
+
+// GetNodeTotalViewers legge il totale dei viewer su un egress
+func (c *Client) GetNodeTotalViewers(ctx context.Context, treeId string, nodeId string) (int, error) {
+	key := fmt.Sprintf("metrics:%s:node:%s:janusStreaming", treeId, nodeId)
+	val, err := c.rdb.HGet(ctx, key, "janusTotalViewers").Result()
+	if err != nil {
+		if err.Error() == "redis:nil" {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return strconv.Atoi(val)
+}

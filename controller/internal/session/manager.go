@@ -196,7 +196,7 @@ func (sm *SessionManager) ProvisionViewer(
 
 		// Riusa egress se disponibile
 		for _, egressId := range existingEgress {
-			if sm.selector.CanAcceptViewer(ctx, egressId) {
+			if sm.selector.CanAcceptViewer(ctx, treeId, egressId) {
 				log.Printf("[SessionManager] Reusing egress %s (multicast)", egressId)
 
 				egressNode, _ := sm.redis.GetNodeProvisioning(ctx, treeId, egressId)

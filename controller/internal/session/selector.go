@@ -17,9 +17,9 @@ var ErrScalingNeeded = errors.New("all injection nodes saturated, scaling needed
 
 // NodeSelector gestisce la selezione automatica di nodi con round-robin
 type NodeSelector struct {
-	redis    *redis.Client
-	loadCalc *autoscaler.InjectionLoadCalculator
-
+	redis             *redis.Client
+	loadCalcInjection *autoscaler.InjectionLoadCalculator
+	loadCalcEgress    *autoscaler.EgressLoadCalculator
 	// Round-robin counters
 	mu               sync.Mutex
 	treeCounter      int
@@ -30,10 +30,11 @@ type NodeSelector struct {
 // NewNodeSelector crea nuovo NodeSelector
 func NewNodeSelector(redisClient *redis.Client) *NodeSelector {
 	return &NodeSelector{
-		redis:            redisClient,
-		loadCalc:         autoscaler.NewInjectionLoadCalculator(redisClient),
-		injectionCounter: make(map[string]int),
-		egressCounter:    make(map[string]map[int]int),
+		redis:             redisClient,
+		loadCalcInjection: autoscaler.NewInjectionLoadCalculator(redisClient),
+		loadCalcEgress:    autoscaler.NewEgressLoadCalculator(redisClient),
+		injectionCounter:  make(map[string]int),
+		egressCounter:     make(map[string]map[int]int),
 	}
 }
 
@@ -83,7 +84,7 @@ func (ns *NodeSelector) SelectInjection(ctx context.Context, treeId string) (str
 		return "", ErrNoInjectionAvailable
 	}
 
-	// SELEZIONE:  least-loaded CPU
+	// Selezione  least-loaded CPU
 	selectedInjection, err := ns.selectLeastLoadedInjection(ctx, treeId, activeInjections)
 	if err != nil {
 		return "", err // Propaga ErrScalingNeeded o altri errori
@@ -129,8 +130,8 @@ func (ns *NodeSelector) selectLeastLoadedInjection(
 	loadScores := make(map[string]float64)
 
 	for _, injectionId := range injections {
-		// Usa InjectionLoadCalculator
-		loadScore, err := ns.loadCalc.CalculateInjectionLoad(ctx, treeId, injectionId)
+
+		loadScore, err := ns.loadCalcInjection.CalculateInjectionLoad(ctx, treeId, injectionId)
 		if err != nil {
 			log.Printf("[WARN] Failed to get load for %s: %v (assuming saturated)", injectionId, err)
 			continue
@@ -170,62 +171,70 @@ func (ns *NodeSelector) selectLeastLoadedInjection(
 }
 
 // SelectBestEgressForSession seleziona egress per viewer
-func (ns *NodeSelector) SelectBestEgressForSession(
-	ctx context.Context,
-	treeId string,
-	sessionId string,
-) (string, error) {
+func (ns *NodeSelector) SelectBestEgressForSession(ctx context.Context, treeId string, sessionId string) (string, error) {
 	ns.mu.Lock()
 	defer ns.mu.Unlock()
 
-	// Check egress esistenti (riuso)
-	// lo facciamo già in ProvisionViewer, commento per il mom
-	// existingEgress, err := ns.redis.FindEgressServingSession(ctx, treeId, sessionId)
-	// if err == nil && len(existingEgress) > 0 {
-	// 	for _, egressId := range existingEgress {
-	// 		if ns.CanAcceptViewer(ctx, egressId) {
-	// 			log.Printf("[NodeSelector] Reusing egress %s (multicast)", egressId)
-	// 			return egressId, nil
-	// 		}
-	// 	}
-	// }
-	// Breadth-first Selection (Layer by Layer)
-	for layer := 1; layer <= 10; layer++ {
-		egresses, err := ns.redis.GetNodesAtLayer(ctx, treeId, "egress", layer)
-		if err != nil || len(egresses) == 0 {
-			continue
-		}
+	egressNodeIDs, err := ns.redis.GetEgressPool(ctx, treeId)
+	if err != nil || len(egressNodeIDs) == 0 {
+		return "", fmt.Errorf("no egress available in pool")
+	}
 
-		if ns.egressCounter[treeId] == nil {
-			ns.egressCounter[treeId] = make(map[int]int)
-		}
+	bestCandidate := ""
+	maxLoad := -1.0
 
-		startOffset := ns.egressCounter[treeId][layer]
-		count := len(egresses)
-
-		for i := 0; i < count; i++ {
-			idx := (startOffset + i) % count
-			candidate := egresses[idx]
-
-			if ns.CanAcceptViewer(ctx, candidate) {
-				ns.egressCounter[treeId][layer] = idx + 1
-				log.Printf("[NodeSelector] Selected egress %s at layer %d", candidate, layer)
-				return candidate, nil
+	// Cerca prima tra i nodi che hanno già la sessione
+	// Tra questi, prendi quello più carico che può ancora accettare viewer
+	existingEgresses, _ := ns.redis.FindEgressServingSession(ctx, treeId, sessionId)
+	for _, nodeId := range existingEgresses {
+		if ns.CanAcceptViewer(ctx, treeId, nodeId) {
+			load, _ := ns.loadCalcEgress.CalculateEgressLoad(ctx, treeId, nodeId)
+			if load > maxLoad {
+				maxLoad = load
+				bestCandidate = nodeId
 			}
 		}
 	}
 
-	return "", fmt.Errorf("no egress available in tree %s - scaling needed", treeId)
+	if bestCandidate != "" {
+		log.Printf("[NodeSelector] Reusing egress %s (Fill-First Load: %.2f%%)", bestCandidate, maxLoad)
+		return bestCandidate, nil
+	}
+
+	// Se nessun nodo esistente può ospitare il viewer, cerchiamo nel pool
+	// Strategia Fill-First: prendi il più carico tra quelli non saturi
+	for _, nodeId := range egressNodeIDs {
+		if ns.CanAcceptViewer(ctx, treeId, nodeId) {
+			load, _ := ns.loadCalcEgress.CalculateEgressLoad(ctx, treeId, nodeId)
+			if load > maxLoad {
+				maxLoad = load
+				bestCandidate = nodeId
+			}
+		}
+	}
+
+	if bestCandidate != "" {
+		log.Printf("[NodeSelector] Selected egress %s (Fill-First New, Load: %.2f%%)", bestCandidate, maxLoad)
+		return bestCandidate, nil
+	}
+
+	return "", fmt.Errorf("all egress nodes are saturated")
 }
 
-func (ns *NodeSelector) CanAcceptViewer(ctx context.Context, egressId string) bool {
-	// Simulazione TEST:
-	//if egressId == "egress-1" || egressId == "test-1-egress-1" {
-	//	sessions, _ := ns.redis.GetNodeSessions(ctx, "test-1", egressId)
-	//	if len(sessions) >= 1 {
-	//		return false
-	//	}
-	//}
+func (ns *NodeSelector) CanAcceptViewer(ctx context.Context, treeId string, nodeId string) bool {
+	// Chiediamo il carico attuale del nodo
+	load, err := ns.loadCalcEgress.CalculateEgressLoad(ctx, treeId, nodeId)
+	if err != nil {
+		// assumiamo che il nodo sia disponibile
+		log.Printf("[NodeSelector] Warning: could not calculate load for %s: %v", nodeId, err)
+		return true
+	}
+
+	// Confrontiamo con la soglia definita nell'autoscaler
+	if load >= autoscaler.EgressSaturatedThreshold {
+		log.Printf("[NodeSelector] Node %s is saturated (Load: %.2f%%), rejecting viewer", nodeId, load)
+		return false
+	}
 	return true
 }
 
