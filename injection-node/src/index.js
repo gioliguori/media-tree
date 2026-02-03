@@ -5,8 +5,6 @@ const config = {
     nodeType: 'injection',
     host: process.env.NODE_HOST || 'injection-1',
     port: parseInt(process.env.API_PORT) || 7070,
-    treeId: process.env.TREE_ID,
-    layer: process.env.LAYER,
 
     // RTP Ports solo per registrazione Redis
     rtp: {

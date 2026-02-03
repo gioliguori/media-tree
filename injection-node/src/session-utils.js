@@ -1,6 +1,6 @@
-export async function saveSessionToRedis(redis, treeId, nodeId, sessionData) {
+export async function saveSessionToRedis(redis, nodeId, sessionData) {
     const { sessionId, roomId, audioSsrc, videoSsrc, recipients, endpoint, createdAt } = sessionData;
-
+    // ci pensa il controller
     // const whipEndpointUrl = typeof endpoint === 'string'
     //     ? endpoint
     //     : (endpoint?.url || endpoint?.path || '');
@@ -24,7 +24,8 @@ export async function saveSessionToRedis(redis, treeId, nodeId, sessionData) {
     // await redis.sadd(`tree:${treeId}:sessions:node:${nodeId}`, sessionId);
 }
 
-export async function deactivateSessionInRedis(redis, treeId, nodeId, sessionId) {
+export async function deactivateSessionInRedis(redis, nodeId, sessionId) {
+    // ci pensa il controller
     // Rimuovi completamente l'hash
     // await redis.del(`tree:${treeId}:session:${sessionId}`);
 
@@ -40,7 +41,6 @@ export function getSessionInfo(sessionsMap, sessionId) {
 
     return {
         sessionId: session.sessionId,
-        treeId: session.treeId,
         roomId: session.roomId,
         audioSsrc: session.audioSsrc,
         videoSsrc: session.videoSsrc,
@@ -57,7 +57,6 @@ export function getAllSessionsInfo(sessionsMap) {
     for (const [sessionId, session] of sessionsMap.entries()) {
         sessions.push({
             sessionId: session.sessionId,
-            treeId: session.treeId,
             roomId: session.roomId,
             audioSsrc: session.audioSsrc,
             videoSsrc: session.videoSsrc,

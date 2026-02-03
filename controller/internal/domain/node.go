@@ -15,8 +15,6 @@ const (
 type NodeSpec struct {
 	NodeId   string   `json:"nodeId"`
 	NodeType NodeType `json:"nodeType"`
-	TreeId   string   `json:"treeId"`
-	Layer    int      `json:"layer"`
 }
 
 // NodeInfo è quello che ritorna il provisioner dopo aver creato un nodo
@@ -24,8 +22,6 @@ type NodeSpec struct {
 type NodeInfo struct {
 	NodeId   string   `json:"nodeId"`
 	NodeType NodeType `json:"nodeType"`
-	TreeId   string   `json:"treeId"`
-	Layer    int      `json:"layer"`
 
 	// Container info
 	ContainerId string `json:"containerId"`

@@ -13,7 +13,6 @@ import (
 func BuildPath(
 	ctx context.Context,
 	redisClient *redis.Client,
-	treeId string,
 	sessionId string,
 	injectionId string,
 	relayRootId string,
@@ -54,47 +53,6 @@ func BuildPath(
 	log.Printf("[BuildPath] Complete path: %v (%d hops)", path, len(path)-1)
 	return path, nil
 }
-
-// SelectBestRelayAtLayer seleziona ID del relay migliore a layer specifico
-// func SelectBestRelayAtLayer(
-// 	ctx context.Context,
-// 	redisClient *redis.Client,
-// 	treeId string,
-// 	layer int,
-// 	sessionId string,
-// ) (string, error) {
-
-// 	// Get Relay a questo livello
-// 	relayIds, err := redisClient.GetNodesAtLayer(ctx, treeId, "relay", layer)
-// 	if err != nil || len(relayIds) == 0 {
-// 		return "", fmt.Errorf("no relay at layer %d", layer)
-// 	}
-// 	log.Printf("[SelectRelay] Found %d relay at layer %d:  %v", len(relayIds), layer, relayIds)
-
-// 	// Preferisci Relay con sessione attiva
-// 	// Relay già forwarda stream, aggiungi solo nuovo target
-// 	for _, relayId := range relayIds {
-// 		sessions, err := redisClient.GetNodeSessions(ctx, treeId, relayId)
-// 		if err != nil {
-// 			continue
-// 		}
-// 		// Check se ha già questa sessione
-// 		for _, sid := range sessions {
-// 			if sid == sessionId {
-// 				// TODO: Check load/capacity
-// 				log.Printf("[SelectRelay] REUSING relay %s (already has session %s)",
-// 					relayId, sessionId)
-// 				return relayId, nil
-// 			}
-// 		}
-// 	}
-// 	// Nessun relay ha sessione
-// 	// Round-robin (TODO: Load-based selection)
-// 	// Per ora primo relay disponibile
-// 	log.Printf("[SelectRelay] Selected NEW relay %s at layer %d (round-robin)",
-// 		relayIds[0], layer)
-// 	return relayIds[0], nil
-// }
 
 // Path utilities
 

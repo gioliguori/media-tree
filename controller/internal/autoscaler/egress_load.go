@@ -31,15 +31,15 @@ func NewEgressLoadCalculator(redisClient *redis.Client) *EgressLoadCalculator {
 }
 
 // CalculateEgressLoad calcola il carico basandosi su CPU, Viewers e Sessioni
-func (calc *EgressLoadCalculator) CalculateEgressLoad(ctx context.Context, treeID string, nodeID string) (float64, error) {
+func (calc *EgressLoadCalculator) CalculateEgressLoad(ctx context.Context, nodeId string) (float64, error) {
 	// Carico CPU Janus Streaming
-	cpuJanus, err := calc.redis.GetNodeCPUPercent(ctx, treeID, nodeID, "janusStreaming")
+	cpuJanus, err := calc.redis.GetNodeCPUPercent(ctx, nodeId, "janusStreaming")
 	if err != nil {
 		cpuJanus = 0
 	}
 
 	// carico cpu egress nodejs
-	cpuNodejs, err := calc.redis.GetNodeCPUPercent(ctx, treeID, nodeID, "nodejs")
+	cpuNodejs, err := calc.redis.GetNodeCPUPercent(ctx, nodeId, "nodejs")
 	if err != nil {
 		cpuNodejs = 0
 	}
@@ -48,7 +48,7 @@ func (calc *EgressLoadCalculator) CalculateEgressLoad(ctx context.Context, treeI
 	loadCPU := (cpuJanus / EgressJanusCPULimitPercent) * 100.0
 
 	// Carico basato sui Viewer e Sessioni
-	key := fmt.Sprintf("metrics:%s:node:%s:janusStreaming", treeID, nodeID)
+	key := fmt.Sprintf("metrics:node:%s:janusStreaming", nodeId)
 
 	metrics, err := calc.redis.HGetAll(ctx, key)
 	if err != nil {

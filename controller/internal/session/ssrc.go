@@ -7,14 +7,12 @@ import (
 	"controller/internal/redis"
 )
 
-// GenerateSSRC genera SSRC univoco per tree
-// Range: 10000-999999999 (counter incrementale)
+// GenerateSSRC genera SSRC univoco globale
 func GenerateSSRC(
 	ctx context.Context,
 	redisClient *redis.Client,
-	treeId string,
 ) (int, error) {
-	ssrc, err := redisClient.GetNextSSRC(ctx, treeId)
+	ssrc, err := redisClient.GetNextSSRC(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to generate SSRC: %w", err)
 	}
@@ -31,16 +29,15 @@ func GenerateSSRC(
 func GenerateSSRCPair(
 	ctx context.Context,
 	redisClient *redis.Client,
-	treeId string,
 ) (audioSsrc int, videoSsrc int, err error) {
 	// Genera audio SSRC
-	audioSsrc, err = GenerateSSRC(ctx, redisClient, treeId)
+	audioSsrc, err = GenerateSSRC(ctx, redisClient)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to generate audio SSRC: %w", err)
 	}
 
 	// Genera video SSRC
-	videoSsrc, err = GenerateSSRC(ctx, redisClient, treeId)
+	videoSsrc, err = GenerateSSRC(ctx, redisClient)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to generate video SSRC: %w", err)
 	}
@@ -48,19 +45,18 @@ func GenerateSSRCPair(
 	return audioSsrc, videoSsrc, nil
 }
 
-// GenerateRoomId genera room ID univoco per tree
+// GenerateRoomId genera room Id univoco per tree
 func GenerateRoomId(
 	ctx context.Context,
 	redisClient *redis.Client,
-	treeId string,
 ) (int, error) {
-	roomId, err := redisClient.GetNextRoomId(ctx, treeId)
+	roomId, err := redisClient.GetNextRoomId(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to generate room ID: %w", err)
+		return 0, fmt.Errorf("failed to generate room Id: %w", err)
 	}
 
 	if roomId > 999999 {
-		return 0, fmt.Errorf("room ID overflow: %d", roomId)
+		return 0, fmt.Errorf("room Id overflow: %d", roomId)
 	}
 
 	return roomId, nil

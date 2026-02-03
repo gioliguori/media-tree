@@ -10,12 +10,10 @@ import (
 type NodeData struct {
 	NodeId    string `redis:"nodeId"`
 	NodeType  string `redis:"type"`
-	TreeId    string `redis:"treeId"`
 	Host      string `redis:"host"`
 	Port      int    `redis:"port"`
 	AudioPort int    `redis:"audioPort"`
 	VideoPort int    `redis:"videoPort"`
-	Layer     int    `redis:"layer"`
 	Status    string `redis:"status"`
 	Created   int64  `redis:"created"`
 }
@@ -23,15 +21,13 @@ type NodeData struct {
 // Pool
 
 // AddNodeToPool
-// Struttura: tree:{treeId}:pool:layer:{layer}:{nodeType}
+// struttura: pool:{nodeType}
 func (c *Client) AddNodeToPool(
 	ctx context.Context,
-	treeId string,
 	nodeType string,
-	layer int,
 	nodeId string,
 ) error {
-	key := fmt.Sprintf("tree:%s:pool:layer:%d:%s", treeId, layer, nodeType)
+	key := fmt.Sprintf("pool:%s", nodeType)
 
 	if err := c.rdb.SAdd(ctx, key, nodeId).Err(); err != nil {
 		return fmt.Errorf("failed to add node to pool:  %w", err)
@@ -41,50 +37,18 @@ func (c *Client) AddNodeToPool(
 	return nil
 }
 
-// GetNodesAtLayer recupera tutti i nodi di un tipo a layer specifico
-// Struttura: tree:{treeId}:pool:layer:{layer}:{nodeType}
-func (c *Client) GetNodesAtLayer(
-	ctx context.Context,
-	treeId string,
-	nodeType string,
-	layer int,
-) ([]string, error) {
-	key := fmt.Sprintf("tree:%s:pool:layer:%d:%s", treeId, layer, nodeType)
-
-	nodeIds, err := c.rdb.SMembers(ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get nodes at layer %d: %w", layer, err)
-	}
-
-	return nodeIds, nil
-}
-
 // RemoveNodeFromPool rimuove nodo da tutti i pool
 func (c *Client) RemoveNodeFromPool(
 	ctx context.Context,
-	treeId string,
+	nodeType string,
 	nodeId string,
 ) error {
-	// Pattern: tree:{treeId}:pool:layer:*
-	pattern := fmt.Sprintf("tree:%s:pool:layer:*", treeId)
-	keys, err := c.Keys(ctx, pattern)
-	if err != nil {
-		return fmt.Errorf("failed to find pool keys: %w", err)
-	}
-
-	// Rimuovi da tutti i pool trovati
-	for _, key := range keys {
-		c.rdb.SRem(ctx, key, nodeId)
-	}
-
-	log.Printf("[Redis] Removed %s from all pools in tree %s", nodeId, treeId)
-	return nil
+	key := fmt.Sprintf("pool:%s", nodeType)
+	return c.rdb.SRem(ctx, key, nodeId).Err()
 }
 
-// GetNode legge info salvate al momento della registrazione
-// Chiave: tree:{treeId}:node:{nodeId}
-func (c *Client) GetNode(ctx context.Context, treeId, nodeId string) (*NodeData, error) {
-	key := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
+func (c *Client) GetNode(ctx context.Context, nodeId string) (*NodeData, error) {
+	key := fmt.Sprintf("node:%s", nodeId)
 
 	var node NodeData
 
@@ -99,9 +63,8 @@ func (c *Client) GetNode(ctx context.Context, treeId, nodeId string) (*NodeData,
 	return &node, nil
 }
 
-// GetInjectionNodes recupera tutti i nodi injection di un tree
-func (c *Client) GetInjectionNodes(ctx context.Context, treeId string) ([]string, error) {
-	key := fmt.Sprintf("tree:%s:pool:layer:0:injection", treeId)
+func (c *Client) GetNodePool(ctx context.Context, poolName string) ([]string, error) {
+	key := fmt.Sprintf("pool:%s", poolName)
 	return c.rdb.SMembers(ctx, key).Result()
 }
 
@@ -110,69 +73,54 @@ func (c *Client) GetInjectionNodes(ctx context.Context, treeId string) ([]string
 // ForceDeleteNode rimuove completamente un nodo da Redis
 func (c *Client) ForceDeleteNode(
 	ctx context.Context,
-	treeId string,
 	nodeId string,
 	nodeType string,
 ) error {
-	log.Printf("[Redis] Force deleting node %s from tree %s", nodeId, treeId)
+	log.Printf("[Redis] Force deleting node %s", nodeId)
 
 	// Rimuovi dalla lista globale
-	globalKey := "global:active_nodes"
-	member := fmt.Sprintf("%s:%s", treeId, nodeId)
-	c.rdb.SRem(ctx, globalKey, member)
+	c.rdb.SRem(ctx, "global:active_nodes", nodeId)
 
 	// Rimuovi da pool
-	if err := c.RemoveNodeFromPool(ctx, treeId, nodeId); err != nil {
-		log.Printf("[WARN] Failed to remove from pool: %v", err)
-	}
+	c.RemoveNodeFromPool(ctx, nodeType, nodeId)
 
 	// Rimuovi provisioning info (salvato da Provisioner)
-	provisioningKey := fmt.Sprintf("tree:%s:controller:node:%s", treeId, nodeId)
-	if err := c.rdb.Del(ctx, provisioningKey).Err(); err != nil {
-		log.Printf("[WARN] Failed to delete provisioning info: %v", err)
-	}
+	c.rdb.Del(ctx, fmt.Sprintf("node:%s:provisioning", nodeId))
+	c.rdb.Del(ctx, fmt.Sprintf("node:%s", nodeId))
 
 	// Rimuovi runtime info (salvato da BaseNode.js)
-	runtimeKey := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
-	if err := c.rdb.Del(ctx, runtimeKey).Err(); err != nil {
-		log.Printf("[WARN] Failed to delete runtime info: %v", err)
-	}
+	c.rdb.Del(ctx, fmt.Sprintf("node:%s:children", nodeId))
+	c.rdb.Del(ctx, fmt.Sprintf("node:%s:parents", nodeId))
 
-	// Rimuovi children
-	childrenKey := fmt.Sprintf("tree:%s:children:%s", treeId, nodeId)
-	c.rdb.Del(ctx, childrenKey)
-
-	// Rimuovi parents
-	parentsKey := fmt.Sprintf("tree:%s:parents:%s", treeId, nodeId)
-	c.rdb.Del(ctx, parentsKey)
+	// Rimuovi indice sessioni locali al nodo
+	c.rdb.Del(ctx, fmt.Sprintf("node:%s:sessions", nodeId))
 
 	log.Printf("[Redis] Node %s force deleted successfully", nodeId)
 	return nil
 }
 
 // SetNodeStatus imposta lo stato operativo del nodo (active, draining)
-func (c *Client) SetNodeStatus(ctx context.Context, treeId string, nodeId string, status string) error {
+func (c *Client) SetNodeStatus(ctx context.Context, nodeId string, status string) error {
 	// Aggiorna stato locale del nodo
-	nodeKey := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
-	if err := c.rdb.HSet(ctx, nodeKey, "status", status).Err(); err != nil {
+	key := fmt.Sprintf("node:%s", nodeId)
+	if err := c.rdb.HSet(ctx, key, "status", status).Err(); err != nil {
 		return fmt.Errorf("failed to update node status hash: %w", err)
 	}
 
 	// Sincronizza lista globale
 	globalKey := "global:active_nodes"
-	member := fmt.Sprintf("%s:%s", treeId, nodeId)
 
 	switch status {
 	case "destroying":
 		// Rimuovi dalla lista globale
-		if err := c.rdb.SRem(ctx, globalKey, member).Err(); err != nil {
-			log.Printf("[WARN] Failed to remove %s from global list: %v", member, err)
+		if err := c.rdb.SRem(ctx, globalKey, nodeId).Err(); err != nil {
+			log.Printf("[WARN] Failed to remove %s from global list: %v", nodeId, err)
 		}
 
 	case "active":
 		// Aggiungi alla lista globale
-		if err := c.rdb.SAdd(ctx, globalKey, member).Err(); err != nil {
-			log.Printf("[WARN] Failed to add %s to global list: %v", member, err)
+		if err := c.rdb.SAdd(ctx, globalKey, nodeId).Err(); err != nil {
+			log.Printf("[WARN] Failed to add %s to global list: %v", nodeId, err)
 		}
 
 	default:
@@ -182,8 +130,8 @@ func (c *Client) SetNodeStatus(ctx context.Context, treeId string, nodeId string
 }
 
 // GetNodeStatus legge lo stato. Default: "active"
-func (c *Client) GetNodeStatus(ctx context.Context, treeId string, nodeId string) (string, error) {
-	key := fmt.Sprintf("tree:%s:node:%s", treeId, nodeId)
+func (c *Client) GetNodeStatus(ctx context.Context, nodeId string) (string, error) {
+	key := fmt.Sprintf("node:%s", nodeId)
 
 	status, err := c.rdb.HGet(ctx, key, "status").Result()
 	if err != nil {
@@ -196,29 +144,7 @@ func (c *Client) GetNodeStatus(ctx context.Context, treeId string, nodeId string
 }
 
 // GetNodeSessionCount conta le sessioni attive su un nodo
-func (c *Client) GetNodeSessionCount(ctx context.Context, treeId string, nodeId string) (int64, error) {
-	key := fmt.Sprintf("tree:%s:node:%s:sessions", treeId, nodeId)
+func (c *Client) GetNodeSessionCount(ctx context.Context, nodeId string) (int64, error) {
+	key := fmt.Sprintf("node:%s:sessions", nodeId)
 	return c.rdb.SCard(ctx, key).Result()
-}
-
-// GetAllTreeNodes restituisce i nodi associati a un albero
-func (c *Client) GetAllTreeNodes(ctx context.Context, treeId string) ([]string, error) {
-	key := fmt.Sprintf("tree:%s:nodes", treeId)
-	return c.rdb.SMembers(ctx, key).Result()
-}
-
-func (c *Client) AddEgressToPool(ctx context.Context, treeId string, nodeId string) error {
-	key := fmt.Sprintf("tree:%s:pool:egress", treeId)
-	return c.rdb.SAdd(ctx, key, nodeId).Err()
-}
-
-// GetEgressPool recupera tutti i nodi egress disponibili per l'albero
-func (c *Client) GetEgressPool(ctx context.Context, treeId string) ([]string, error) {
-	key := fmt.Sprintf("tree:%s:pool:egress", treeId)
-	return c.rdb.SMembers(ctx, key).Result()
-}
-
-func (c *Client) RemoveEgressFromPool(ctx context.Context, treeId string, nodeId string) error {
-	key := fmt.Sprintf("tree:%s:pool:egress", treeId)
-	return c.rdb.SRem(ctx, key, nodeId).Err()
 }

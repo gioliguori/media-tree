@@ -28,7 +28,7 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 	}
 
 	// Crea Janus Videoroom
-	dockerName := fmt.Sprintf("%s-%s", spec.TreeId, spec.NodeId)
+	dockerName := spec.NodeId
 	janusDockerName := dockerName + "-janus-vr"
 
 	janusArgs := []string{
@@ -64,8 +64,6 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 		"-e", fmt.Sprintf("NODE_ID=%s", spec.NodeId),
 		"-e", fmt.Sprintf("NODE_HOST=%s", dockerName),
 		"-e", "API_PORT=7070",
-		"-e", fmt.Sprintf("TREE_ID=%s", spec.TreeId),
-		"-e", fmt.Sprintf("LAYER=%d", spec.Layer),
 		"-e", "RTP_AUDIO_PORT=5000",
 		"-e", "RTP_VIDEO_PORT=5002",
 		"-e", "REDIS_HOST=redis",
@@ -93,8 +91,6 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 	nodeInfo := &domain.NodeInfo{
 		NodeId:           spec.NodeId,
 		NodeType:         spec.NodeType,
-		TreeId:           spec.TreeId,
-		Layer:            spec.Layer,
 		ContainerId:      nodeID,
 		InternalHost:     dockerName,
 		InternalAPIPort:  7070,

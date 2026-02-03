@@ -7,103 +7,52 @@ import (
 	"log"
 )
 
-// ScaleUpInjection implementa l'interfaccia ProvisionerClient richiesta dall'autoscaler
-func (tm *TreeManager) ScaleUpInjection(ctx context.Context, treeId string) error {
-	log.Printf("[TreeManager] Scaling up: Provisioning new Injection+Relay pair for tree %s", treeId)
+func (tm *TreeManager) ScaleUp(ctx context.Context, nodeType domain.NodeType) error {
+	log.Printf("[PoolManager] Scaling up: Provisioning new %s node", nodeType)
 
-	injectionId, err := tm.generateNodeID(ctx, treeId, "injection")
+	// CreateNode gestisce già internamente la differenza tra Injection (coppia) e gli altri
+	_, err := tm.CreateNode(ctx, nodeType)
 	if err != nil {
-		return fmt.Errorf("failed to generate injection ID: %w", err)
+		return fmt.Errorf("scale up failed for %s: %w", nodeType, err)
 	}
 
-	relayRootId, err := tm.generateNodeID(ctx, treeId, "relay-root")
-	if err != nil {
-		return fmt.Errorf("failed to generate relay-root ID: %w", err)
-	}
-
-	log.Printf("[TreeManager] ID Assigned: %s <-> %s", injectionId, relayRootId)
-
-	// Crea la coppia usando la funzione del manager
-	_, err = tm.createInjectionPair(ctx, treeId, injectionId, relayRootId)
-	if err != nil {
-		return fmt.Errorf("scale up failed: %w", err)
-	}
-
-	log.Printf("[SUCCESS] Scale Up Complete: Pair %s <-> %s created active", injectionId, relayRootId)
 	return nil
 }
 
-func (tm *TreeManager) ScaleUpEgress(ctx context.Context, treeId string) error {
-	log.Printf("[TreeManager] Scaling up: Provisioning new Egress for tree %s", treeId)
+// DestroyNode gestisce la rimozione controllata di un nodo.
+func (tm *TreeManager) DestroyNode(ctx context.Context, nodeId, nodeType string) error {
+	log.Printf("[PoolManager] Scaling down: Destroying node %s (%s)", nodeId, nodeType)
 
-	// Genera ID
-	nodeId, err := tm.generateNodeID(ctx, treeId, "egress")
-	if err != nil {
-		return err
-	}
-
-	// Crea il nodo (Layer -1)
-	node, err := tm.provisioner.CreateNode(ctx, domain.NodeSpec{
-		NodeId:   nodeId,
-		NodeType: domain.NodeTypeEgress,
-		TreeId:   treeId,
-		Layer:    -1,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create egress container: %w", err)
-	}
-
-	// Registra nel pool
-	if err := tm.redis.AddEgressToPool(ctx, treeId, nodeId); err != nil {
-		tm.provisioner.DestroyNode(ctx, node)
-		return err
-	}
-
-	log.Printf("[SUCCESS] Scale Up Egress Complete: %s", nodeId)
-	return nil
-}
-
-// Converte le stringhe dell'Autoscaler in una struct NodeInfo per il Provisioner e chiama DestroyNode()
-func (tm *TreeManager) DestroyNode(ctx context.Context, treeId, nodeId, nodeType string) error {
-	log.Printf("[TreeManager] Scaling down: Autoscaler requested destroy for node %s (%s)", nodeId, nodeType)
-
-	// Flag stato a "destroying"
-	if err := tm.redis.SetNodeStatus(ctx, treeId, nodeId, "destroying"); err != nil {
+	// Imposta lo stato a "destroying" su Redis
+	if err := tm.redis.SetNodeStatus(ctx, nodeId, "destroying"); err != nil {
 		log.Printf("[WARN] Failed to set status destroying for %s: %v", nodeId, err)
 	}
 
-	// Recupera info complete se possibile prima di distruggere
-	nodeInfo, err := tm.redis.GetNodeProvisioning(ctx, treeId, nodeId)
+	// Recupera le info dal database
+	nodeInfo, err := tm.redis.GetNodeProvisioning(ctx, nodeId)
 	if err != nil || nodeInfo == nil {
-		// Se non lo trova, crea un oggetto parziale per il provisioner
+		// Fallback se le info non sono più in Redis: creiamo un oggetto parziale per il provisioner
 		nodeInfo = &domain.NodeInfo{
-			TreeId:   treeId,
 			NodeId:   nodeId,
 			NodeType: domain.NodeType(nodeType),
 		}
 	}
 
-	// Se è un injection, dobbiamo prima distruggere il relayroot figlio
-	if nodeType == "injection" {
-		children, err := tm.redis.GetNodeChildren(ctx, treeId, nodeId)
+	// Se il nodo è un Injection, dobbiamo distruggere anche il RelayRoot figlio
+	if nodeType == string(domain.NodeTypeInjection) {
+		children, err := tm.redis.GetNodeChildren(ctx, nodeId)
 		if err == nil {
-
 			for _, childId := range children {
-				tm.redis.SetNodeStatus(ctx, treeId, childId, "destroying")
-			}
-			for _, childId := range children {
-				log.Printf("[TreeManager] Cascading destroy to child relay: %s", childId)
-
-				if err := tm.DestroyNode(ctx, treeId, childId, "relay"); err != nil {
+				log.Printf("[PoolManager] Cascading destroy to static child relay: %s", childId)
+				// Chiamata ricorsiva o diretta al provisioner
+				if err := tm.DestroyNode(ctx, childId, string(domain.NodeTypeRelay)); err != nil {
 					log.Printf("[WARN] Failed to destroy child relay %s: %v", childId, err)
 				}
 			}
-		} else {
-			log.Printf("[WARN] Failed to get children for %s: %v", nodeId, err)
 		}
 	}
 
-	// Chiamiamo il provisioner che gestisce: Stop Docker -> Remove Docker -> Clean Redis
+	// Chiamata al Provisioner (Stop -> Remove -> Cleanup Redis)
 	if err := tm.provisioner.DestroyNode(ctx, nodeInfo); err != nil {
 		return fmt.Errorf("failed to destroy node %s: %w", nodeId, err)
 	}

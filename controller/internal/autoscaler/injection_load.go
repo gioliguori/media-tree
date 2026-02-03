@@ -30,26 +30,25 @@ func NewInjectionLoadCalculator(redisClient *redis.Client) *InjectionLoadCalcula
 // Injection Load = MAX(CPU Nodejs, CPU Janus, Carico Relay Figlio)
 func (calc *InjectionLoadCalculator) CalculateInjectionLoad(
 	ctx context.Context,
-	treeID string,
-	injectionID string,
+	injectionId string,
 ) (float64, error) {
 
-	cpuInjection, err := calc.redis.GetNodeCPUPercent(ctx, treeID, injectionID, "nodejs")
+	cpuInjection, err := calc.redis.GetNodeCPUPercent(ctx, injectionId, "nodejs")
 	if err != nil {
 		return 100.0, fmt.Errorf("failed to get injection CPU: %w", err)
 	}
 
-	cpuJanus, err := calc.redis.GetNodeCPUPercent(ctx, treeID, injectionID, "janusVideoroom")
+	cpuJanus, err := calc.redis.GetNodeCPUPercent(ctx, injectionId, "janusVideoroom")
 	if err != nil {
 		return 100.0, fmt.Errorf("failed to get janus CPU: %w", err)
 	}
 
-	relayRootID, err := calc.getRelayRootForInjection(ctx, treeID, injectionID)
+	relayRootId, err := calc.getRelayRootForInjection(ctx, injectionId)
 	if err != nil {
 		return 100.0, fmt.Errorf("failed to find relay-root: %w", err)
 	}
 
-	relayRootLoad, err := calc.relayCalc.CalculateRelayRootLoad(ctx, treeID, relayRootID)
+	relayRootLoad, err := calc.relayCalc.CalculateRelayRootLoad(ctx, relayRootId)
 	if err != nil {
 		return 100.0, fmt.Errorf("failed to calculate relay-root load: %w", err)
 	}
@@ -65,13 +64,12 @@ func (calc *InjectionLoadCalculator) CalculateInjectionLoad(
 	return maxLoad, nil
 }
 
-// getRelayRootForInjection recupera l'ID del nodo figlio diretto (Relay Root)
+// getRelayRootForInjection recupera l'Id del nodo figlio diretto (Relay Root)
 func (calc *InjectionLoadCalculator) getRelayRootForInjection(
 	ctx context.Context,
-	treeID string,
-	injectionID string,
+	injectionId string,
 ) (string, error) {
-	children, err := calc.redis.GetNodeChildren(ctx, treeID, injectionID)
+	children, err := calc.redis.GetNodeChildren(ctx, injectionId)
 	if err != nil {
 		return "", err
 	}

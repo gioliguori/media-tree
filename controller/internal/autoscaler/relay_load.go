@@ -27,16 +27,15 @@ func NewRelayRootLoadCalculator(redisClient *redis.Client) *RelayRootLoadCalcula
 // Worst Case: il carico è il massimo tra CPU e Latenza Code
 func (calc *RelayRootLoadCalculator) CalculateRelayRootLoad(
 	ctx context.Context,
-	treeID string,
-	relayRootID string,
+	relayRootId string,
 ) (float64, error) {
 
-	cpuRelayRoot, err := calc.redis.GetNodeCPUPercent(ctx, treeID, relayRootID, "nodejs")
+	cpuRelayRoot, err := calc.redis.GetNodeCPUPercent(ctx, relayRootId, "nodejs")
 	if err != nil {
 		return 100.0, fmt.Errorf("failed to get relay-root CPU: %w", err)
 	}
 
-	maxQueueLatency, err := calc.getQueueLatency(ctx, treeID, relayRootID)
+	maxQueueLatency, err := calc.getQueueLatency(ctx, relayRootId)
 	if err != nil {
 		maxQueueLatency = 0.0
 	}
@@ -56,10 +55,9 @@ func (calc *RelayRootLoadCalculator) CalculateRelayRootLoad(
 // getQueueLatency legge le metriche specifiche di GStreamer da Redis
 func (calc *RelayRootLoadCalculator) getQueueLatency(
 	ctx context.Context,
-	treeID string,
-	relayRootID string,
+	relayRootId string,
 ) (float64, error) {
-	key := fmt.Sprintf("metrics:%s:node:%s:gstreamer", treeID, relayRootID)
+	key := fmt.Sprintf("metrics:node:%s:gstreamer", relayRootId)
 
 	audioQueueStr, err := calc.redis.HGet(ctx, key, "maxAudioQueueMs")
 	if err != nil {

@@ -15,8 +15,6 @@ import (
 type NodeProvisioningData struct {
 	NodeId   string `json:"nodeId" redis:"nodeId"`
 	NodeType string `json:"nodeType" redis:"nodeType"`
-	TreeId   string `json:"treeId" redis:"treeId"`
-	Layer    int    `json:"layer" redis:"layer"`
 
 	// Docker
 	ContainerId      string `json:"containerId" redis:"containerId"`
@@ -38,14 +36,13 @@ type NodeProvisioningData struct {
 
 // SaveNodeProvisioning salva info provisioning in Redis
 func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.NodeInfo) error {
-	key := fmt.Sprintf("tree:%s:controller:node:%s", nodeInfo.TreeId, nodeInfo.NodeId)
-	indexKey := fmt.Sprintf("tree:%s:nodes", nodeInfo.TreeId)
+	key := fmt.Sprintf("node:%s:provisioning", nodeInfo.NodeId)
+	// Indice globale di tutti i nodi gestiti dal controller
+	indexKey := "nodes:provisioned"
 
 	data := NodeProvisioningData{
 		NodeId:           nodeInfo.NodeId,
 		NodeType:         string(nodeInfo.NodeType),
-		TreeId:           nodeInfo.TreeId,
-		Layer:            nodeInfo.Layer,
 		ContainerId:      nodeInfo.ContainerId,
 		JanusContainerId: nodeInfo.JanusContainerId,
 		ExternalAPIPort:  nodeInfo.ExternalAPIPort,
@@ -65,12 +62,11 @@ func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.Node
 	// Slva HASH nodo
 	pipe.HSet(ctx, key, data)
 
-	// Aggiungi a index tree
+	// Aggiungi a index globale nodi provisionati
 	pipe.SAdd(ctx, indexKey, nodeInfo.NodeId)
 
-	// Aggiungi a index globale
-	nodeRef := fmt.Sprintf("%s:%s", nodeInfo.TreeId, nodeInfo.NodeId)
-	pipe.SAdd(ctx, "global:active_nodes", nodeRef)
+	// Aggiungi a index globale nodi attivi
+	pipe.SAdd(ctx, "global:active_nodes", nodeInfo.NodeId)
 
 	// Esegui atomicamente
 	_, err := pipe.Exec(ctx)
@@ -82,8 +78,8 @@ func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.Node
 }
 
 // GetNodeProvisioning legge info provisioning da Redis
-func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string) (*domain.NodeInfo, error) {
-	key := fmt.Sprintf("tree:%s:controller:node:%s", treeId, nodeId)
+func (c *Client) GetNodeProvisioning(ctx context.Context, nodeId string) (*domain.NodeInfo, error) {
+	key := fmt.Sprintf("node:%s:provisioning", nodeId)
 
 	// Leggi tutto l'hash
 	cmd := c.rdb.HGetAll(ctx, key)
@@ -107,8 +103,6 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string)
 	nodeInfo := &domain.NodeInfo{
 		NodeId:           data.NodeId,
 		NodeType:         domain.NodeType(data.NodeType),
-		TreeId:           data.TreeId,
-		Layer:            data.Layer,
 		ContainerId:      data.ContainerId,
 		JanusContainerId: data.JanusContainerId,
 		ExternalAPIPort:  data.ExternalAPIPort,
@@ -122,8 +116,7 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string)
 	}
 
 	// Internal network info (per comunicazione Docker tra nodi)
-	dockerName := fmt.Sprintf("%s-%s", data.TreeId, data.NodeId)
-	nodeInfo.InternalHost = dockerName
+	nodeInfo.InternalHost = data.NodeId
 
 	// Porte API interne
 	nodeInfo.InternalAPIPort = 7070
@@ -133,9 +126,9 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, treeId, nodeId string)
 	// JanusHost dal nodeId
 	switch nodeInfo.NodeType {
 	case domain.NodeTypeInjection:
-		nodeInfo.JanusHost = dockerName + "-janus-vr"
+		nodeInfo.JanusHost = nodeInfo.InternalHost + "-janus-vr"
 	case domain.NodeTypeEgress:
-		nodeInfo.JanusHost = dockerName + "-janus-streaming"
+		nodeInfo.JanusHost = nodeInfo.InternalHost + "-janus-streaming"
 	}
 
 	return nodeInfo, nil
@@ -147,18 +140,17 @@ func (c *Client) GetActiveNodes(ctx context.Context) ([]string, error) {
 }
 
 // DeleteNodeProvisioning rimuove info provisioning da Redis
-func (c *Client) DeleteNodeProvisioning(ctx context.Context, treeId, nodeId string) error {
-	key := fmt.Sprintf("tree:%s:controller:node:%s", treeId, nodeId)
-	indexKey := fmt.Sprintf("tree:%s:nodes", treeId)
-	nodeRef := fmt.Sprintf("%s:%s", treeId, nodeId)
+func (c *Client) DeleteNodeProvisioning(ctx context.Context, nodeId string) error {
+	key := fmt.Sprintf("node:%s:provisioning", nodeId)
+	indexKey := "nodes:provisioned"
 
 	// rimuovi HASH + rimuovi da entrambi gli index
 	pipe := c.rdb.Pipeline()
 
-	// Rimuovi da index globale
-	pipe.SRem(ctx, "global:active_nodes", nodeRef)
+	// Rimuovi da index globale attivi
+	pipe.SRem(ctx, "global:active_nodes", nodeId)
 
-	// Rimuovi da index tree
+	// Rimuovi da index globale provisionati
 	pipe.SRem(ctx, indexKey, nodeId)
 
 	// Rimuovi HASH nodo
@@ -173,9 +165,9 @@ func (c *Client) DeleteNodeProvisioning(ctx context.Context, treeId, nodeId stri
 	return nil
 }
 
-// GetAllProvisionedNodes ritorna tutti i nodi provisionati per un tree
-func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*domain.NodeInfo, error) {
-	indexKey := fmt.Sprintf("tree:%s:nodes", treeId)
+// GetAllProvisionedNodes ritorna tutti i nodi provisionati
+func (c *Client) GetAllProvisionedNodes(ctx context.Context) ([]*domain.NodeInfo, error) {
+	indexKey := "nodes:provisioned"
 
 	// ottieni tutti i nodeId
 	nodeIds, err := c.rdb.SMembers(ctx, indexKey).Result()
@@ -192,7 +184,7 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*
 	cmds := make([]*redis.MapStringStringCmd, len(nodeIds))
 
 	for i, nodeId := range nodeIds {
-		key := fmt.Sprintf("tree:%s:controller:node:%s", treeId, nodeId)
+		key := fmt.Sprintf("node:%s:provisioning", nodeId)
 		cmds[i] = pipe.HGetAll(ctx, key)
 	}
 
@@ -220,8 +212,6 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*
 		nodeInfo := &domain.NodeInfo{
 			NodeId:           data.NodeId,
 			NodeType:         domain.NodeType(data.NodeType),
-			TreeId:           data.TreeId,
-			Layer:            data.Layer,
 			ContainerId:      data.ContainerId,
 			JanusContainerId: data.JanusContainerId,
 			ExternalAPIPort:  data.ExternalAPIPort,
@@ -234,8 +224,7 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*
 			ExternalHost:     "localhost",
 		}
 
-		dockerName := fmt.Sprintf("%s-%s", data.TreeId, data.NodeId)
-		nodeInfo.InternalHost = dockerName
+		nodeInfo.InternalHost = data.NodeId
 
 		// Porte API interne
 		nodeInfo.InternalAPIPort = 7070
@@ -245,9 +234,9 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context, treeId string) ([]*
 		// Janus Host
 		switch nodeInfo.NodeType {
 		case domain.NodeTypeInjection:
-			nodeInfo.JanusHost = dockerName + "-janus-vr"
+			nodeInfo.JanusHost = nodeInfo.InternalHost + "-janus-vr"
 		case domain.NodeTypeEgress:
-			nodeInfo.JanusHost = dockerName + "-janus-streaming"
+			nodeInfo.JanusHost = nodeInfo.InternalHost + "-janus-streaming"
 		}
 
 		nodes = append(nodes, nodeInfo)

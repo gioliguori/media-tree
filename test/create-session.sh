@@ -39,11 +39,9 @@ fi
 
 WHIP_ENDPOINT=$(echo $RESPONSE | jq -r '.whipEndpoint')
 INJECTION_NODE=$(echo $RESPONSE | jq -r '.injectionNodeId')
-TREE_ID=$(echo $RESPONSE | jq -r '.treeId')
 ROOM_ID=$(echo $RESPONSE | jq -r '.roomId')
 
 echo "  Sessione creata"
-echo "  Tree:        $TREE_ID"
 echo "  Injection:  $INJECTION_NODE"
 echo "  Room ID:    $ROOM_ID"
 echo "  Endpoint:   $WHIP_ENDPOINT"
@@ -95,19 +93,17 @@ sleep 5
 echo ""
 echo "--- VERIFICA STATO ---"
 
-HAS_PUBLISHER=$(curl -s http://localhost:7070/metrics 2>/dev/null | jq -r ".janus.rooms[] | select(.sessionId == \"$SESSION_ID\") | .hasPublisher")
+HAS_PUBLISHER=$(docker exec redis redis-cli HGET metrics:node:$INJECTION_NODE:room:$ROOM_ID hasPublisher 2>/dev/null || echo "false")
 
-if [ "$HAS_PUBLISHER" = "true" ]; then
-    echo " Publisher CONNESSO"
+if [ "$HAS_PUBLISHER" == "true" ]; then
+    echo " STATUS: Publisher connesso"
 else
-    echo "  Publisher NON connesso (hasPublisher=$HAS_PUBLISHER)"
-    echo ""
-    echo "Verifica errori:"
-    echo "  docker logs whip-$SESSION_ID | tail -20"
+    echo " STATUS: Publisher in attesa o errore (hasPublisher=$HAS_PUBLISHER)"
+    echo " Controlla i log con: docker logs whip-$SESSION_ID"
 fi
 
 # CPU Janus
-CPU_JANUS=$(docker exec redis redis-cli HGET metrics:$TREE_ID:node:$INJECTION_NODE:janusVideoroom cpuPercent 2>/dev/null || echo "N/A")
+CPU_JANUS=$(docker exec redis redis-cli HGET metrics:node:$INJECTION_NODE:janusVideoroom cpuPercent 2>/dev/null || echo "0")
 echo "CPU Janus VideoRoom:   $CPU_JANUS%"
 
 # CPU WHIP client
@@ -120,26 +116,5 @@ PUBLISHERS_TOTAL=$(curl -s http://localhost:7070/metrics 2>/dev/null | jq '[.jan
 echo "Rooms attive:         $ROOMS_TOTAL"
 echo "Publishers totali:    $PUBLISHERS_TOTAL"
 
-echo ""
-echo "=================================================="
-echo "COMPLETATO"
-echo "=================================================="
-echo ""
-echo "Comandi utili:"
-echo ""
-echo "  # Log whip client"
-echo "  docker logs whip-$SESSION_ID -f"
-echo ""
-echo "  # Stats live"
-echo "  docker stats whip-$SESSION_ID"
-echo ""
-echo "  # Verifica publisher"
-echo "  curl -s http://localhost:7070/metrics | jq '.janus.rooms[] | select(.sessionId == \"$SESSION_ID\")'"
-echo ""
-echo "  # CPU Janus corrente"
-echo "  docker exec redis redis-cli HGET metrics:$TREE_ID:node:$INJECTION_NODE:janusVideoroom cpuPercent"
-echo ""
-echo "  # Cleanup"
-echo "  docker stop whip-$SESSION_ID && docker rm whip-$SESSION_ID"
-echo "  curl -X DELETE $CONTROLLER_URL/api/sessions/$SESSION_ID"
-echo ""
+echo " Cleanup command:"
+echo " docker rm -f whip-$SESSION_ID && curl -X DELETE $CONTROLLER_URL/api/sessions/$SESSION_ID"
