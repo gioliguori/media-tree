@@ -21,13 +21,13 @@ type Server struct {
 	httpServer     *http.Server
 	redisClient    *redis.Client
 	config         *config.Config
-	treeManager    *tree.TreeManager
+	nodeManager    *tree.TreeManager
 	sessionManager *session.SessionManager
 }
 
 func NewServer(cfg *config.Config,
 	redisClient *redis.Client,
-	treeMgr *tree.TreeManager,
+	nodeMgr *tree.TreeManager,
 	sessMgr *session.SessionManager,
 ) *Server {
 
@@ -41,7 +41,7 @@ func NewServer(cfg *config.Config,
 		router:         router,
 		redisClient:    redisClient,
 		config:         cfg,
-		treeManager:    treeMgr,
+		nodeManager:    nodeMgr,
 		sessionManager: sessMgr,
 	}
 
@@ -57,36 +57,26 @@ func (s *Server) setupRoutes() {
 	})
 
 	// Handlers
-	treeHandler := handlers.NewTreeHandler(s.treeManager)
-	sessionHandler := handlers.NewSessionHandler(s.sessionManager, s.treeManager)
+	nodeHandler := handlers.NewNodeHandler(s.nodeManager)
+	sessionHandler := handlers.NewSessionHandler(s.sessionManager)
 	metricsHandler := handlers.NewMetricsHandler(s.redisClient)
 
-	// API Trees
-	s.router.POST("/api/trees", treeHandler.CreateTree)
-	s.router.GET("/api/trees/:treeId", treeHandler.GetTree)
-	s.router.DELETE("/api/trees/:treeId", treeHandler.DestroyTree)
-	s.router.GET("/api/trees", treeHandler.ListTrees)
+	// API Nodes
+	s.router.GET("/api/nodes", nodeHandler.ListNodes)
+	s.router.DELETE("/api/nodes/:nodeId", nodeHandler.DestroyNode)
 
 	// API Sessions
-	// Create session (ingresso)
-	s.router.POST("/api/sessions", sessionHandler.CreateSession)
-	// List session
-	s.router.GET("/api/sessions", sessionHandler.ListSessions)
-	// Watch session (create session uscita)
-	s.router.GET("/api/sessions/:sessionId/view", sessionHandler.ViewSession)
-	// GET Sessioni
-	s.router.GET("/api/trees/:treeId/sessions", sessionHandler.ListSessions)
-	// GET Sessione
-	s.router.GET("/api/trees/:treeId/sessions/:sessionId", sessionHandler.GetSession)
-	// DELETE Rimuove intera sessione
-	s.router.DELETE("/api/trees/:treeId/sessions/:sessionId", sessionHandler.DestroySession)
-	// DELETE Rimuove sessione su un egress (debug)
-	s.router.DELETE("/api/trees/:treeId/sessions/:sessionId/egress/:egressId",
-		sessionHandler.DestroySessionPath)
+	s.router.POST("/api/sessions", sessionHandler.CreateSession)               // Crea broadcaster
+	s.router.GET("/api/sessions", sessionHandler.ListSessions)                 // Lista globale
+	s.router.GET("/api/sessions/:sessionId", sessionHandler.GetSession)        // Dettaglio
+	s.router.GET("/api/sessions/:sessionId/view", sessionHandler.ViewSession)  // Viewer on-demand
+	s.router.DELETE("/api/sessions/:sessionId", sessionHandler.DestroySession) // Kill totale
+
+	s.router.DELETE("/api/sessions/:sessionId/path/:egressId", sessionHandler.DestroySessionPath)
 
 	// API Metrics
-	s.router.GET("/api/metrics/:treeId/:nodeId", metricsHandler.GetNodeMetrics)
-	s.router.GET("/api/metrics/:treeId", metricsHandler.GetTreeMetrics)
+	s.router.GET("/api/metrics", metricsHandler.GetGlobalMetrics)
+	s.router.GET("/api/metrics/:nodeId", metricsHandler.GetNodeMetrics)
 
 	//File statici
 	s.router.GET("/", func(c *gin.Context) {
@@ -105,7 +95,7 @@ func (s *Server) setupRoutes() {
 			"status":  "running",
 			"endpoints": gin.H{
 				"health":   "/api/health",
-				"trees":    "/api/trees",
+				"nodes":    "/api/nodes",
 				"sessions": "/api/sessions",
 				"ui":       "/sessions.html",
 			},

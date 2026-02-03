@@ -1,33 +1,30 @@
-export async function saveMountpointToRedis(redis, treeId, nodeId, mountpointData) {
-    const { sessionId, mountpointId, audioSsrc, videoSsrc, janusAudioPort, janusVideoPort, endpoint, createdAt } = mountpointData;
+export async function saveMountpointToRedis(redis, nodeId, mountpointData) {
+    const { sessionId, mountpointId, audioSsrc, videoSsrc, janusAudioPort, janusVideoPort, createdAt } = mountpointData;
 
     // hset -> hash set, di redis
-    await redis.hset(`tree:${treeId}:mountpoint:${nodeId}:${sessionId}`, {
+    await redis.hset(`mountpoint:${nodeId}:${sessionId}`, {
         sessionId,
-        treeId,
         mountpointId: String(mountpointId),
         audioSsrc: String(audioSsrc),
         videoSsrc: String(videoSsrc),
         janusAudioPort: String(janusAudioPort),
         janusVideoPort: String(janusVideoPort),
         egressNodeId: nodeId,
-        //whepEndpoint: endpoint,
         active: 'true',
         createdAt: String(createdAt),
-        updatedAt: String(createdAt)
+        updatedAt: String(Date.now())
     });
 
-    await redis.sadd(`tree:${treeId}:mountpoints`, `${nodeId}:${sessionId}`);
-    await redis.sadd(`tree:${treeId}:mountpoints:node:${nodeId}`, sessionId);
+    // Indice dei mountpoint per questo specifico nodo
+    await redis.sadd(`node:${nodeId}:mountpoints`, sessionId);
+    // Indice globale
+    await redis.sadd(`mountpoints:global`, `${nodeId}:${sessionId}`);
 }
 
-export async function deactivateMountpointInRedis(redis, treeId, nodeId, sessionId) {
-    // Rimuovi completamente l'hash
-    await redis.del(`tree:${treeId}:mountpoint:${nodeId}:${sessionId}`);
-
-    // Rimuovi dai SET di indice
-    await redis.srem(`tree:${treeId}:mountpoints`, `${nodeId}:${sessionId}`);
-    await redis.srem(`tree:${treeId}:mountpoints:node:${nodeId}`, sessionId);
+export async function deactivateMountpointInRedis(redis, nodeId, sessionId) {
+    await redis.del(`mountpoint:${nodeId}:${sessionId}`);
+    await redis.srem(`node:${nodeId}:mountpoints`, sessionId);
+    await redis.srem(`mountpoints:global`, `${nodeId}:${sessionId}`);
 }
 
 export function getMountpointInfo(mountpointsMap, sessionId) {
@@ -36,7 +33,6 @@ export function getMountpointInfo(mountpointsMap, sessionId) {
 
     return {
         sessionId: mountpoint.sessionId,
-        treeId: mountpoint.treeId,
         mountpointId: mountpoint.mountpointId,
         audioSsrc: mountpoint.audioSsrc,
         videoSsrc: mountpoint.videoSsrc,
@@ -55,7 +51,6 @@ export function getAllMountpointsInfo(mountpointsMap) {
     for (const [sessionId, mountpoint] of mountpointsMap.entries()) {
         mountpoints.push({
             sessionId: mountpoint.sessionId,
-            treeId: mountpoint.treeId,
             mountpointId: mountpoint.mountpointId,
             audioSsrc: mountpoint.audioSsrc,
             videoSsrc: mountpoint.videoSsrc,

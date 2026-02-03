@@ -48,33 +48,9 @@ export class RelayNode extends BaseNode {
     }
 
 
-    // SESSION EVENTS
-    /**
-     * Handler: session-created
-     * Pubblicato su: sessions:{treeId}:{nodeId}
-     * Controller invia configurazione solo ai relay coinvolti nel path
-     * 
-     * Event format:
-     * {
-     *   type: "session-created",
-     *   sessionId: "broadcaster-1",
-     *   audioSsrc: 1111,
-     *   videoSsrc: 2222,
-     *   treeId: "tree-1",
-     *   routes: [
-     *     {targetId: "egress-1", host: "egress-1", audioPort: 5002, videoPort: 5004},
-     *     {targetId: "egress-3", host: "egress-3", audioPort: 5002, videoPort: 5004}
-     *   ]
-     * }
-     */
     async onSessionCreated(event) {
-        const { sessionId, audioSsrc, videoSsrc, treeId, routes } = event;
-
-        // Verifica tree
-        if (treeId !== this.treeId) {
-            console.log(`[${this.nodeId}] Wrong tree: ${treeId} !== ${this.treeId}`);
-            return;
-        }
+        const { sessionId, audioSsrc, videoSsrc, routes } = event;
+        console.log(`[${this.nodeId}] Handling session-created for ${sessionId} with ${routes?.length || 0} routes`);
 
         if (!routes || routes.length === 0) {
             console.log(`[${this.nodeId}] No route configured`);
@@ -102,27 +78,8 @@ export class RelayNode extends BaseNode {
             console.error(`[${this.nodeId}] Failed to configure session ${sessionId}:`, err.message);
         }
     }
-    /**
-     * Handler: session-destroyed
-     * Pubblicato su: sessions:{treeId}
-     * o su: sessions:{treeId}:{nodeId} (ma è raro)
-     * i nodi interessati ricevono questo evento per fare cleanup
-     * 
-     * Event format:
-     * {
-     *   type: "session-destroyed",
-     *   sessionId: "broadcaster-1",
-     *   treeId: "tree-1"
-     * }
-     */
     async onSessionDestroyed(event) {
-        const { sessionId, treeId } = event;
-
-        // Verifica tree
-        if (treeId !== this.treeId) {
-            console.log(`[${this.nodeId}] Wrong tree: ${treeId} !== ${this.treeId}`);
-            return;
-        }
+        const { sessionId } = event;
 
         try {
             // Rimuovi session dal forwarder (rimuove automaticamente tutte le route)
@@ -139,26 +96,8 @@ export class RelayNode extends BaseNode {
             }
         }
     }
-    /**
-     * Handler: route-added
-     * Pubblicato su: sessions:{treeId}:{nodeId}
-     * Controller aggiunge route
-     * 
-     * Event format:
-     * {
-     *   type: "route-added",
-     *   sessionId: "broadcaster-1",
-     *   treeId: "tree-1",
-     *   targetId
-     * }
-     */
     async onRouteAdded(event) {
-        const { sessionId, treeId, targetId } = event;
-
-        if (treeId !== this.treeId) {
-            console.log(`[${this.nodeId}] Wrong tree: ${treeId} !== ${this.treeId}`);
-            return;
-        }
+        const { sessionId, targetId } = event;
 
         // relay ha in cache i figli quindi check potrebbe essere valido, ma il controller ha 
         // topologia completa quindi lasciamo a lui la decisione (magari si è verificata race condition)
@@ -181,27 +120,8 @@ export class RelayNode extends BaseNode {
         }
     }
 
-    /**
-     * Handler: route-removed
-     * Pubblicato su: sessions:{treeId}:{nodeId}
-     * Controller rimuove route
-     * 
-     * Event format:
-     * {
-     *   type: "route-removed",
-     *   sessionId: "broadcaster-1",
-     *   treeId: "tree-1",
-     *   targetId: "egress-1"
-     * }
-     */
     async onRouteRemoved(event) {
-        const { sessionId, treeId, targetId } = event;
-
-        // Verificatree
-        if (treeId !== this.treeId) {
-            console.log(`[${this.nodeId}] Wrong tree: ${treeId} !== ${this.treeId}`);
-            return;
-        }
+        const { sessionId, targetId } = event;
 
         // if (!this.children.includes(targetId)) return;
 
@@ -228,7 +148,6 @@ export class RelayNode extends BaseNode {
             await this.redis.publish('relay:ready', JSON.stringify({
                 type: 'relay-ready',
                 nodeId: this.nodeId,
-                treeId: this.treeId,
                 timestamp: Date.now()
             }));
         } catch (err) {
@@ -247,7 +166,6 @@ export class RelayNode extends BaseNode {
             await this.redis.publish('relay:recovery', JSON.stringify({
                 type: 'relay-recovery',
                 nodeId: this.nodeId,
-                treeId: this.treeId,
                 timestamp: Date.now()
             }));
         } catch (err) {

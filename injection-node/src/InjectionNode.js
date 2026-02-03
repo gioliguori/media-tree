@@ -171,7 +171,7 @@ export class InjectionNode extends BaseNode {
             });
 
             // salva su Redis
-            await saveSessionToRedis(this.redis, this.treeId, this.nodeId, {
+            await saveSessionToRedis(this.redis, this.nodeId, {
                 sessionId,
                 roomId,
                 audioSsrc,
@@ -211,7 +211,7 @@ export class InjectionNode extends BaseNode {
             const { roomId, endpoint } = session;
 
             // inattiva su Redis
-            await deactivateSessionInRedis(this.redis, this.treeId, this.nodeId, sessionId);
+            await deactivateSessionInRedis(this.redis, this.nodeId, sessionId);
 
             // distruggi endpoint
             try {
@@ -256,8 +256,8 @@ export class InjectionNode extends BaseNode {
         console.log(`[${this.nodeId}] Discovering existing sessions from Redis...`);
 
         try {
-            const key = `tree:${this.treeId}:node:${this.nodeId}:sessions`;
-            const sessionIds = await this.redis.smembers(key);
+            const sessionIds = await this.redis.smembers(`node:${this.nodeId}:sessions`);
+
             if (sessionIds.length === 0) {
                 console.log(`[${this.nodeId}] No existing sessions found`);
                 return;
@@ -267,7 +267,7 @@ export class InjectionNode extends BaseNode {
 
             for (const sessionId of sessionIds) {
                 // legge da Redis
-                const sessionData = await this.redis.hgetall(`tree:${this.treeId}:session:${sessionId}`);
+                const sessionData = await this.redis.hgetall(`session:${sessionId}`);
 
                 if (!sessionData || Object.keys(sessionData).length === 0) {
                     console.warn(`[${this.nodeId}] Session ${sessionId} not found in Redis`);
@@ -403,7 +403,6 @@ export class InjectionNode extends BaseNode {
                 res.status(201).json({
                     success: true,
                     sessionId: result.sessionId,
-                    treeId: this.treeId,
                     roomId: result.roomId,
                     audioSsrc: result.audioSsrc,
                     videoSsrc: result.videoSsrc,
@@ -466,8 +465,12 @@ export class InjectionNode extends BaseNode {
 
     async getRecipientsFromTopology() {
         const recipients = [];
+        const childrenKey = `node:${this.nodeId}:children`;
+        const childrenIds = await this.redis.smembers(childrenKey);
 
-        for (const childId of this.children) {
+        console.log(`[${this.nodeId}] Fetching recipients from Redis for children: ${childrenIds}`);
+
+        for (const childId of childrenIds) {
             const childInfo = await this.getNodeInfo(childId);
             if (childInfo) {
                 recipients.push({

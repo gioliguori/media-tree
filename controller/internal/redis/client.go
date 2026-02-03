@@ -105,15 +105,6 @@ func (c *Client) Del(ctx context.Context, key string) error {
 	return c.rdb.Del(ctx, key).Err()
 }
 
-// TREE OPERATIONS
-
-// Vrifica se un tree esiste
-func (c *Client) TreeExists(ctx context.Context, treeId string) (bool, error) {
-	key := fmt.Sprintf("tree:%s:metadata", treeId)
-	exists, err := c.rdb.Exists(ctx, key).Result()
-	return exists > 0, err
-}
-
 func (c *Client) Pipeline() redis.Pipeliner {
 	return c.rdb.Pipeline()
 }

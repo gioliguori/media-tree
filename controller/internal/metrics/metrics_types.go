@@ -4,29 +4,26 @@ import "time"
 
 // ContainerMetrics rappresenta le metriche Docker di un singolo container
 type ContainerMetrics struct {
-	ContainerID   string  `json:"containerId"`
-	ContainerName string  `json:"containerName"`
-	CPUPercent    float64 `json:"cpuPercent"`
-	MemoryUsedMB  float64 `json:"memoryUsedMb"`
-	//MemoryLimitMB float64 `json:"memoryLimitMb"`
-	MemoryPercent float64 `json:"memoryPercent"`
+	ContainerId    string        `json:"containerId"`
+	ContainerName  string        `json:"containerName"`
+	CPUPercent     float64       `json:"cpuPercent"`
+	MemoryUsedMB   float64       `json:"memoryUsedMb"`
+	MemoryPercent  float64       `json:"memoryPercent"`
+	NetworkTxBytes uint64        `json:"networkTxBytes"`
+	JanusMetrics   *JanusMetrics `json:"janus,omitempty"`
 
+	//MemoryLimitMB float64 `json:"memoryLimitMb"`
 	// Network metrics
 	// NetworkRxBytes   uint64 `json:"networkRxBytes"`
-	NetworkTxBytes uint64 `json:"networkTxBytes"`
 	// NetworkRxPackets uint64 `json:"networkRxPackets"`
 	// NetworkTxPackets uint64 `json:"networkTxPackets"`
 	// NetworkRxErrors  uint64 `json:"networkRxErrors"`
 	// NetworkTxErrors  uint64 `json:"networkTxErrors"`
-
 	// Disk I/O
 	// BlockReadBytes  uint64 `json:"blockReadBytes"`
 	// BlockWriteBytes uint64 `json:"blockWriteBytes"`
-
-	// PIDs
-	// PIDsCurrent int `json:"pidsCurrent"`
-
-	JanusMetrics *JanusMetrics `json:"janus,omitempty"`
+	// PIds
+	// PIdsCurrent int `json:"pidsCurrent"`
 }
 
 // ApplicationMetrics
@@ -52,15 +49,18 @@ type JanusMetrics struct {
 
 	// Streaming (egress)
 	MountpointsActive int                `json:"mountpointsActive,omitempty"` // Numero mountpoint attivi
+	TotalViewers      int                `json:"totalViewers,omitempty"`      // viewer totali su Egress
 	Mountpoints       []MountpointMetric `json:"mountpoints,omitempty"`       // Dettaglio mountpoint
 }
 
 type MountpointMetric struct {
-	MountpointId int    `json:"mountpointId"`
-	Description  string `json:"description,omitempty"`
-	Viewers      int    `json:"viewers"`
-	Enabled      bool   `json:"enabled"`
-	AgeMs        int64  `json:"ageMs"`
+	MountpointId   int    `json:"mountpointId"`
+	SessionId      string `json:"sessionId"`
+	Description    string `json:"description,omitempty"`
+	Viewers        int    `json:"viewers"`
+	Enabled        bool   `json:"enabled"`
+	LastActivityAt int64  `json:"lastActivityAt"`
+	AgeMs          int64  `json:"ageMs"`
 }
 
 type RoomMetric struct {
@@ -72,18 +72,16 @@ type RoomMetric struct {
 }
 
 type NodeMetricsResponse struct {
-	NodeID    string        `json:"nodeId"`
+	NodeId    string        `json:"nodeId"`
 	NodeType  string        `json:"nodeType"`
-	TreeID    string        `json:"treeId"`
 	Timestamp int64         `json:"timestamp"`
 	Janus     *JanusMetrics `json:"janus,omitempty"`
 }
 
 // NodeMetrics rappresenta le metriche aggregate per un nodo logico
 type NodeMetrics struct {
-	NodeID             string                       `json:"nodeId"`
+	NodeId             string                       `json:"nodeId"`
 	NodeType           string                       `json:"nodeType"`
-	TreeID             string                       `json:"treeId"`
 	Timestamp          int64                        `json:"timestamp"`
 	Containers         map[string]*ContainerMetrics `json:"containers"`
 	ApplicationMetrics *ApplicationMetrics          `json:"application,omitempty"`

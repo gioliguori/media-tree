@@ -11,9 +11,9 @@ import (
 // forse poco efficiente ma lavoriamo con numero piccolo di nodi
 
 // generateNodeID trova il primo ID libero per un tipo di nodo (Gap Detection)
-func (tm *TreeManager) generateNodeID(ctx context.Context, treeId string, nodeNamePrefix string) (string, error) {
-	// Recupera i nodi di questo albero
-	nodes, err := tm.redis.GetAllProvisionedNodes(ctx, treeId)
+func (tm *TreeManager) generateNodeID(ctx context.Context, nodeNamePrefix string) (string, error) {
+	// Recupera i nodi
+	nodes, err := tm.redis.GetAllProvisionedNodes(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to list nodes for naming: %w", err)
 	}

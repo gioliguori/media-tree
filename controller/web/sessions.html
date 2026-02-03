@@ -4,134 +4,118 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Media Tree - Sessions</title>
+    <title>Media - Global Sessions</title>
 </head>
 
 <body>
-    <h1>Media Tree - Active Sessions</h1>
+    <h1> Media Sessions</h1>
 
-    <div class="tree-selector">
-        <label for="treeId">Tree ID:</label>
-        <input type="text" id="treeId" value="default-tree" placeholder="Enter tree ID">
-        <button onclick="loadSessions()">Refresh</button>
+    <div class="mesh-status">
+        Global Pool Status: <span id="node-count">...</span> Nodes Active
     </div>
 
-    <div id="error" class="error" style="display:none;"></div>
-    <div id="loading" class="loading" style="display:none;">Loading sessions...</div>
+    <div id="error" class="error"></div>
+    <div id="loading" class="loading">Syncing...</div>
     <div id="sessions"></div>
 
     <script>
-        let currentTreeId = 'test-1';
-
-        // Load sessions on page load
         window.onload = function () {
             loadSessions();
+            loadNodeStats();
         };
 
-        // Load sessions for current tree
+        // Carica tutte le sessioni attive nella
         async function loadSessions() {
-            const treeId = document.getElementById('treeId').value || 'test-1';
-            currentTreeId = treeId;
-
-            showLoading(true);
-            hideError();
-
             try {
-                const response = await fetch(`/api/sessions?treeId=${treeId}`);
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
+                const response = await fetch('/api/sessions');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
                 const sessions = await response.json();
                 displaySessions(sessions);
+                hideError();
             } catch (error) {
                 showError(`Failed to load sessions: ${error.message}`);
-                document.getElementById('sessions').innerHTML = '';
             } finally {
-                showLoading(false);
+                document.getElementById('loading').style.display = 'none';
             }
         }
 
-        // Display sessions list
+        // Carica statistiche dei nodi
+        async function loadNodeStats() {
+            try {
+                const response = await fetch('/api/nodes');
+                if (response.ok) {
+                    const nodes = await response.json();
+                    document.getElementById('node-count').textContent = nodes.length;
+                }
+            } catch (e) { }
+        }
         function displaySessions(sessions) {
             const container = document.getElementById('sessions');
-
             if (!sessions || sessions.length === 0) {
-                container.innerHTML = '<p class="info">No active sessions. Create a session first.</p>';
+                container.innerHTML = '<p style="text-align:center; color:#999;">No active broadcasts found.</p>';
                 return;
             }
 
             container.innerHTML = sessions.map(session => `
                 <div class="session">
-                    <div class="session-id">${session.sessionId}</div>
-                    <div class="info">Tree: ${session.treeId}</div>
-                    <div class="info">Injection: ${session.injectionNodeId}</div>
-                    <div class="info">Status: ${session.active ? 'Active' : 'Inactive'}</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span class="session-id">${session.sessionId}</span>
+                        <span class="badge ${session.active ? 'badge-active' : 'badge-inactive'}">
+                            ${session.active ? 'Active' : 'Inactive'}
+                        </span>
+                    </div>
+                    <div class="info">Ingested via: <b>${session.injectionNodeId}</b></div>
+                    <div class="info">Created: ${new Date(session.createdAt).toLocaleString()}</div>
                     <button onclick="watchSession('${session.sessionId}')" ${!session.active ? 'disabled' : ''}>
-                        Watch
+                        Watch Stream
                     </button>
                 </div>
             `).join('');
         }
 
-        // Watch session (provision viewer on-demand)
         async function watchSession(sessionId) {
             const button = event.target;
+            const originalText = button.textContent;
             button.disabled = true;
-            button.textContent = 'Provisioning...';
-
-            hideError();
+            button.textContent = 'Allocating Path...';
 
             try {
-                const response = await fetch(
-                    `/api/sessions/${sessionId}/view?treeId=${currentTreeId}`
-                );
-
+                const response = await fetch(`/api/sessions/${sessionId}/view`);
                 if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error || `HTTP ${response.status}`);
+                    const errData = await response.json();
+                    throw new Error(errData.error || 'Mesh Allocation Failed');
                 }
 
                 const data = await response.json();
+                console.log('Path built:', data.path.join(' -> '));
 
-                console.log('Viewer provisioned:', data);
-                console.log('Path:', data.path);
-                console.log('Reused:', data.reused);
-
-                // Redirect to WHEP endpoint
+                // Redirect al WHEP endpoint sull'Egress selezionato
                 window.location.href = data.whepEndpoint;
 
             } catch (error) {
-                showError(`Failed to provision viewer: ${error.message}`);
+                showError(`Provisioning Error: ${error.message}`);
                 button.disabled = false;
-                button.textContent = 'Watch';
+                button.textContent = originalText;
             }
         }
-
-        // Helper: Show loading
-        function showLoading(show) {
-            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        function showError(msg) {
+            const div = document.getElementById('error');
+            div.textContent = msg;
+            div.style.display = 'block';
         }
 
-        // Helper: Show error
-        function showError(message) {
-            const errorDiv = document.getElementById('error');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
-        }
-
-        // Helper: Hide error
         function hideError() {
             document.getElementById('error').style.display = 'none';
         }
 
-        // Auto-refresh every 5 seconds
+        // Refresh automatico ogni 10 secondi
         setInterval(() => {
             if (!document.hidden) {
                 loadSessions();
+                loadNodeStats();
             }
-        }, 5000);
+        }, 10000);
     </script>
 </body>
 <style>
@@ -145,6 +129,16 @@
 
     h1 {
         color: #333;
+        text-align: center;
+    }
+
+    .mesh-status {
+        background: #e9ecef;
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        text-align: center;
+        color: #666;
     }
 
     .session {
@@ -153,6 +147,7 @@
         margin: 10px 0;
         border: 1px solid #ddd;
         border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     }
 
     .session-id {
@@ -167,6 +162,25 @@
         margin: 5px 0;
     }
 
+    .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 12px;
+        font-weight: bold;
+        text-transform: uppercase;
+    }
+
+    .badge-active {
+        background: #d4edda;
+        color: #155724;
+    }
+
+    .badge-inactive {
+        background: #f8d7da;
+        color: #721c24;
+    }
+
     button {
         background: #28a745;
         color: white;
@@ -176,6 +190,7 @@
         border-radius: 4px;
         font-size: 14px;
         margin-top: 10px;
+        width: 100%;
     }
 
     button:hover {
@@ -194,23 +209,13 @@
         border: 1px solid #f5c6cb;
         border-radius: 4px;
         margin: 10px 0;
+        display: none;
     }
 
     .loading {
         text-align: center;
         padding: 20px;
         color: #666;
-    }
-
-    .tree-selector {
-        margin-bottom: 20px;
-    }
-
-    select {
-        padding: 8px;
-        font-size: 14px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
     }
 </style>
 

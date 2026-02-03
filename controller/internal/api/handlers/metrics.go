@@ -15,29 +15,26 @@ func NewMetricsHandler(redisClient *redis.Client) *MetricsHandler {
 	return &MetricsHandler{redisClient: redisClient}
 }
 
-// GET /api/metrics/:treeId/:nodeId
+// GET /api/metrics/:nodeId
 func (h *MetricsHandler) GetNodeMetrics(c *gin.Context) {
-	treeID := c.Param("treeId")
-	nodeID := c.Param("nodeId")
+	nodeId := c.Param("nodeId")
 
-	metrics, err := h.redisClient.GetNodeMetrics(c.Request.Context(), treeID, nodeID)
+	metrics, err := h.redisClient.GetNodeMetrics(c.Request.Context(), nodeId)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "metrics not found"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"treeId":  treeID,
-		"nodeId":  nodeID,
+		"nodeId":  nodeId,
 		"metrics": metrics,
 	})
 }
 
-// GET /api/metrics/:treeId
-func (h *MetricsHandler) GetTreeMetrics(c *gin.Context) {
-	treeID := c.Param("treeId")
+// GET /api/metrics/global
+func (h *MetricsHandler) GetGlobalMetrics(c *gin.Context) {
 
-	nodes, err := h.redisClient.GetAllProvisionedNodes(c.Request.Context(), treeID)
+	nodes, err := h.redisClient.GetAllProvisionedNodes(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -45,7 +42,7 @@ func (h *MetricsHandler) GetTreeMetrics(c *gin.Context) {
 
 	result := make(map[string]any)
 	for _, node := range nodes {
-		metrics, err := h.redisClient.GetNodeMetrics(c.Request.Context(), treeID, node.NodeId)
+		metrics, err := h.redisClient.GetNodeMetrics(c.Request.Context(), node.NodeId)
 		if err != nil {
 			continue
 		}
@@ -53,7 +50,6 @@ func (h *MetricsHandler) GetTreeMetrics(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"treeId":  treeID,
 		"metrics": result,
 	})
 }

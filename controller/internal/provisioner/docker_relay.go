@@ -15,7 +15,7 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 		return nil, fmt.Errorf("failed to allocate API port: %w", err)
 	}
 
-	dockerName := fmt.Sprintf("%s-%s", spec.TreeId, spec.NodeId)
+	dockerName := spec.NodeId
 	// Crea Relay Node
 	nodeArgs := []string{
 		"-d",
@@ -27,8 +27,6 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 		"-e", fmt.Sprintf("NODE_ID=%s", spec.NodeId),
 		"-e", fmt.Sprintf("NODE_HOST=%s", dockerName),
 		"-e", "API_PORT=7070",
-		"-e", fmt.Sprintf("TREE_ID=%s", spec.TreeId),
-		"-e", fmt.Sprintf("LAYER=%d", spec.Layer),
 		"-e", "RTP_AUDIO_PORT=5002",
 		"-e", "RTP_VIDEO_PORT=5004",
 		"-e", "REDIS_HOST=redis",
@@ -49,8 +47,6 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 	nodeInfo := &domain.NodeInfo{
 		NodeId:           spec.NodeId,
 		NodeType:         spec.NodeType,
-		TreeId:           spec.TreeId,
-		Layer:            spec.Layer,
 		ContainerId:      nodeID,
 		InternalHost:     dockerName,
 		InternalAPIPort:  7070,

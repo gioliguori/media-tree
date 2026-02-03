@@ -60,8 +60,6 @@ export class BaseNode {
     //     token: 'verysecret'            // Token autenticazione viewer         
     //   },
 
-    this.treeId = config.treeId;
-    this.layer = config.layer || 0;
     this.host = config.host || 'localhost';
     this.port = config.port || 7070;
 
@@ -177,10 +175,10 @@ export class BaseNode {
   async setupPubSub() {
     // Subscribe a canali
     const channels = [
-      `topology:${this.treeId}:${this.nodeId}`,  // eventi specifici nodo
-      `topology:${this.treeId}`,
-      `sessions:${this.treeId}:${this.nodeId}`,
-      `sessions:${this.treeId}`
+      `node:${this.nodeId}:topology`, // Eventi diretti a questo nodo
+      `topology:global`,              // Reset globali
+      `node:${this.nodeId}:sessions`, // Sessioni che questo nodo deve gestire
+      `sessions:global`               // Eventi distruzione globale
     ];
 
     await this.subscriber.subscribe(...channels);
@@ -188,7 +186,7 @@ export class BaseNode {
     // Handler messaggi
     this.subscriber.on('message', async (channel, message) => {
       try {
-        if (channel.startsWith('sessions:')) {
+        if (channel.endsWith(':sessions') || channel === 'sessions:global') {
           await this.handleSessionEvent(channel, message);
         } else {
           await this.handleTopologyEvent(channel, message);
@@ -200,34 +198,28 @@ export class BaseNode {
   }
 
   async registerNode() {
-    await this.redis.hset(`tree:${this.treeId}:node:${this.nodeId}`, {          //  hset setta come hash redis e non come json 
+    await this.redis.hset(`node:${this.nodeId}`, {                               //  hset setta come hash redis e non come json 
       nodeId: this.nodeId,                                                      //  dovrebbe essere un'azione atomica quindi piu performante (boh)
       type: this.nodeType,
-      treeId: this.treeId,
       host: this.host,
       port: this.port,
       audioPort: this.rtp.audioPort,
       videoPort: this.rtp.videoPort,
-      layer: this.layer,
       status: 'active',
       created: Date.now()
     });
 
-    await this.redis.expire(`tree:${this.treeId}:node:${this.nodeId}`, 600);
+    await this.redis.expire(`node:${this.nodeId}`, 600);
     // Registra nodo nel tree
-    const setKey = `tree:${this.treeId}:${this.nodeType}`; // injection, relay, egress
+    const setKey = `pool:${this.nodeType}`; // pool:injection, pool:relay, pool:egress
     await this.redis.sadd(setKey, this.nodeId);
-    console.log(`[${this.nodeId}] Registered in tree ${this.treeId} (${setKey})`);
+    console.log(`[${this.nodeId}] Registered in pool (${setKey})`);
   }
 
   async unregisterNode() {
-    await this.redis.del(`tree:${this.treeId}:node:${this.nodeId}`);
-
-    // Rimuovi dal tree
-    const setKey = `tree:${this.treeId}:${this.nodeType}s`;
+    await this.redis.del(`node:${this.nodeId}`);
+    const setKey = `pool:${this.nodeType}`;
     await this.redis.srem(setKey, this.nodeId);
-
-    console.log(`[${this.nodeId}] Unregistered from tree ${this.treeId}`);
   }
 
   // TOPOLOGY
@@ -282,10 +274,14 @@ export class BaseNode {
 
   async updateTopology() {
     try {
+      const parentsKey = `node:${this.nodeId}:parents`;
+      const childrenKey = `node:${this.nodeId}:children`;
       // relay/egress
+      const [newParents, newChildren] = await Promise.all([
+        this.redis.smembers(parentsKey),
+        this.redis.smembers(childrenKey)
+      ]);
       if (this.nodeType !== 'injection') {
-        const parentsKey = `tree:${this.treeId}:parents:${this.nodeId}`;
-        const newParents = await this.redis.smembers(parentsKey);
 
         // Confronta con current
         const currentSet = new Set(this.parents);
@@ -312,8 +308,6 @@ export class BaseNode {
 
       // injection/relay
       if (this.nodeType !== 'egress') {
-        const childrenKey = `tree:${this.treeId}:children:${this.nodeId}`;
-        const newChildren = await this.redis.smembers(childrenKey);
 
         const currentSet = new Set(this.children);
         const newSet = new Set(newChildren);
@@ -342,10 +336,11 @@ export class BaseNode {
       console.error(`[${this.nodeId}] Failed to parse session event:`, message);
       return;
     }
+    const eventType = event.type ? event.type.trim() : "";
+    console.log(`[${this.nodeId}] Received session event: ${eventType} for session: ${event.sessionId}`);
 
-    console.log(`[${this.nodeId}] Session event [${channel}]: ${event.type}`);
 
-    switch (event.type) {
+    switch (eventType) {
       case 'session-created':
         await this.onSessionCreated(event);
         break;
@@ -363,7 +358,7 @@ export class BaseNode {
         break;
 
       default:
-        console.log(`[${this.nodeId}] Unknown session event: ${event.type}`);
+        console.warn(`[${this.nodeId}] Unhandled event type: "${eventType}" (raw: ${event.type})`);
     }
   }
 
@@ -443,7 +438,7 @@ export class BaseNode {
   }
 
   async getNodeInfo(nodeId) {
-    const data = await this.redis.hgetall(`tree:${this.treeId}:node:${nodeId}`);
+    const data = await this.redis.hgetall(`node:${nodeId}`);
     if (!data || Object.keys(data).length === 0) return null;
 
     return {
@@ -488,35 +483,42 @@ export class BaseNode {
   }
 
   async refreshNodeTTL() {
-    await this.redis.expire(`tree:${this.treeId}:node:${this.nodeId}`, 600);
+    await this.redis.expire(`node:${this.nodeId}`, 600);
   }
 
   async periodicSync() {
     try {
       // Leggi stato da Redis
-      let redisParent = null;
+      let redisParents = null;
       let redisChildren = [];
 
       if (this.nodeType !== 'injection') {
-        redisParent = await this.redis.get(`tree:${this.treeId}:parents:${this.nodeId}`);
+        redisParents = await this.redis.smembers(`node:${this.nodeId}:parents`);
       }
 
       if (this.nodeType !== 'egress') {
-        redisChildren = await this.redis.smembers(`tree:${this.treeId}:children:${this.nodeId}`);
+        redisChildren = await this.redis.smembers(`node:${this.nodeId}:children`);
       }
 
-      // Confronta con cache locale
       let desync = false;
 
-      // Check parent
-      // if (this.nodeType !== 'injection' && redisParent !== this.parent) {
-      //   console.warn(`[${this.nodeId}] DESYNC parent: cache=${this.parent} redis=${redisParent}`);
-      //   this.parent = redisParent;
-      //   await this.onParentChanged(null, redisParent);
-      //   desync = true;
-      // }
+      //  Gestione parent
+      // Primo elemento del set
+      const newParent = redisParents.length > 0 ? redisParents[0] : null;
 
-      // Check children
+      if (newParent !== this.parent) {
+        console.log(`[${this.nodeId}] Parent changed: ${this.parent} -> ${newParent}`);
+        const oldParent = this.parent;
+        this.parent = newParent;
+
+        if (newParent) {
+          await this.onParentAdded(newParent);
+        } else if (oldParent) {
+          await this.onParentRemoved(oldParent);
+        }
+      }
+
+      // Gestione children
       if (this.nodeType !== 'egress') {
         const redisSet = new Set(redisChildren);
         const localSet = new Set(this.children);

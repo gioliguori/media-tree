@@ -47,12 +47,13 @@ func (p *DockerProvisioner) CreateNode(ctx context.Context, spec domain.NodeSpec
 func (p *DockerProvisioner) DestroyNode(ctx context.Context, nodeInfo *domain.NodeInfo) error {
 	// Se mancano info, recupera da Redis
 	if nodeInfo.ContainerId == "" {
-		fullInfo, err := p.redisClient.GetNodeProvisioning(ctx, nodeInfo.TreeId, nodeInfo.NodeId)
+		fullInfo, err := p.redisClient.GetNodeProvisioning(ctx, nodeInfo.NodeId)
 		if err != nil {
 			// se Redis fallisce, ricostruiamo il nome fisico a mano
-			nodeInfo.InternalHost = fmt.Sprintf("%s-%s", nodeInfo.TreeId, nodeInfo.NodeId)
+			nodeInfo.InternalHost = nodeInfo.NodeId
+		} else {
+			nodeInfo = fullInfo
 		}
-		nodeInfo = fullInfo
 	}
 
 	targetContainer := nodeInfo.InternalHost
@@ -77,27 +78,22 @@ func (p *DockerProvisioner) DestroyNode(ctx context.Context, nodeInfo *domain.No
 	if nodeInfo.NeedsJanus() {
 		targetJanus := nodeInfo.JanusContainerId
 		if targetJanus == "" {
-			targetJanus = targetContainer + "-janus-vr"
+			suffix := "-janus-vr"
 			if nodeInfo.IsEgress() {
-				targetJanus = targetContainer + "-janus-streaming"
+				suffix = "-janus-streaming"
 			}
+			targetJanus = nodeInfo.NodeId + suffix
 		}
-		if targetJanus != "" {
-			log.Printf("[INFO] Stopping Janus %s...", targetJanus)
-			p.dockerStop(ctx, targetJanus)
-			if err := p.dockerRemove(ctx, targetJanus); err != nil {
-				log.Printf("[WARN] Failed to remove Janus: %v", err)
-			}
-		}
+		log.Printf("[Provisioner] Stopping Janus %s", targetJanus)
+		p.dockerStop(ctx, targetJanus)
+		p.dockerRemove(ctx, targetJanus)
 	}
 
 	// Cleanup redis
 	if nodeInfo.NodeType != "" {
-		err := p.redisClient.ForceDeleteNode(ctx, nodeInfo.TreeId, nodeInfo.NodeId, string(nodeInfo.NodeType))
-		if err != nil {
-			log.Printf("[WARN] ForceDeleteNode error: %v", err)
-		}
+		p.redisClient.ForceDeleteNode(ctx, nodeInfo.NodeId, string(nodeInfo.NodeType))
 	}
+
 	// Rilascia porte
 	if nodeInfo.ExternalAPIPort > 0 {
 		p.portAllocator.Release(nodeInfo.ExternalAPIPort)
@@ -118,7 +114,7 @@ func (p *DockerProvisioner) DestroyNode(ctx context.Context, nodeInfo *domain.No
 		}
 	}
 	// Cleanup Redis provisioning info
-	if err := p.redisClient.DeleteNodeProvisioning(ctx, nodeInfo.TreeId, nodeInfo.NodeId); err != nil {
+	if err := p.redisClient.DeleteNodeProvisioning(ctx, nodeInfo.NodeId); err != nil {
 		log.Printf("[WARN] Failed to delete provisioning info: %v", err)
 	}
 

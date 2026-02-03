@@ -23,18 +23,16 @@ func (c *Client) Get(ctx context.Context, key string) (string, error) {
 	return c.rdb.Get(ctx, key).Result()
 }
 
-// GetNodeProvisioningByContainerID trova nodeInfo dal containerID
+// GetNodeProvisioningByContainerId trova nodeInfo dal containerId
 // Utile per il metrics collector
-func (c *Client) GetNodeProvisioningByContainerID(ctx context.Context, containerID string) (*NodeProvisioningData, error) {
-	// Pattern: tree:*:controller:node:*
-	// Dobbiamo cercare in tutti i tree (non efficiente, per ora ok)
-	pattern := "tree:*:controller:node:*"
+func (c *Client) GetNodeProvisioningByContainerId(ctx context.Context, containerId string) (*NodeProvisioningData, error) {
+	pattern := "node:*:provisioning"
 	keys, err := c.Keys(ctx, pattern)
 	if err != nil {
 		return nil, err
 	}
 
-	// Cerca tra tutte le chiavi quella con questo containerID
+	// Cerca tra tutte le chiavi quella con questo containerId
 	for _, key := range keys {
 		var data NodeProvisioningData
 		if err := c.rdb.HGetAll(ctx, key).Scan(&data); err != nil {
@@ -42,7 +40,7 @@ func (c *Client) GetNodeProvisioningByContainerID(ctx context.Context, container
 		}
 
 		// Controlla se questo nodo ha il container che cerchiamo
-		if data.ContainerId == containerID || data.JanusContainerId == containerID {
+		if data.ContainerId == containerId || data.JanusContainerId == containerId {
 			return &data, nil
 		}
 	}
@@ -51,15 +49,15 @@ func (c *Client) GetNodeProvisioningByContainerID(ctx context.Context, container
 }
 
 // GetNodeMetrics legge metriche per un nodo (tutti container)
-func (c *Client) GetNodeMetrics(ctx context.Context, treeID, nodeID string) (map[string]map[string]string, error) {
-	pattern := fmt.Sprintf("metrics:%s:node:%s:*", treeID, nodeID)
+func (c *Client) GetNodeMetrics(ctx context.Context, nodeId string) (map[string]map[string]string, error) {
+	pattern := fmt.Sprintf("metrics:node:%s:*", nodeId)
 	keys, err := c.rdb.Keys(ctx, pattern).Result()
 	if err != nil {
 		return nil, err
 	}
 
 	if len(keys) == 0 {
-		return nil, fmt.Errorf("no metrics found for node %s", nodeID)
+		return nil, fmt.Errorf("no metrics found for node %s", nodeId)
 	}
 
 	result := make(map[string]map[string]string)
@@ -78,19 +76,16 @@ func (c *Client) GetNodeMetrics(ctx context.Context, treeID, nodeID string) (map
 }
 
 // GetComponentMetrics legge metriche per un componente specifico
-// pattern: metrics:{treeId}:node:{nodeId}:{component}
-// Components: "nodejs", "janusVideoroom", "janusStreaming", "application"
 func (c *Client) GetComponentMetrics(
 	ctx context.Context,
-	treeID string,
-	nodeID string,
+	nodeId string,
 	component string,
 ) (map[string]string, error) {
-	key := fmt.Sprintf("metrics:%s:node:%s:%s", treeID, nodeID, component)
+	key := fmt.Sprintf("metrics:node:%s:%s", nodeId, component)
 
 	result, err := c.rdb.HGetAll(ctx, key).Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get metrics for %s/%s:  %w", nodeID, component, err)
+		return nil, fmt.Errorf("failed to get metrics for %s/%s:  %w", nodeId, component, err)
 	}
 
 	return result, nil
@@ -100,18 +95,17 @@ func (c *Client) GetComponentMetrics(
 // Ritorna 100.0 se metriche non disponibili (assume saturo)
 func (c *Client) GetNodeCPUPercent(
 	ctx context.Context,
-	treeID string,
-	nodeID string,
+	nodeId string,
 	component string,
 ) (float64, error) {
-	metrics, err := c.GetComponentMetrics(ctx, treeID, nodeID, component)
+	metrics, err := c.GetComponentMetrics(ctx, nodeId, component)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get metrics:  %w", err)
 	}
 
 	cpuStr, ok := metrics["cpuPercent"]
 	if !ok || cpuStr == "" {
-		return 0, fmt.Errorf("cpuPercent field missing for %s/%s", nodeID, component)
+		return 0, fmt.Errorf("cpuPercent field missing for %s/%s", nodeId, component)
 	}
 
 	cpu, err := strconv.ParseFloat(cpuStr, 64)
@@ -126,11 +120,10 @@ func (c *Client) GetNodeCPUPercent(
 // Ritorna 999.0 se metriche non disponibili
 func (c *Client) GetNodeBandwidthTxMbps(
 	ctx context.Context,
-	treeID string,
-	nodeID string,
+	nodeId string,
 	component string,
 ) (float64, error) {
-	metrics, err := c.GetComponentMetrics(ctx, treeID, nodeID, component)
+	metrics, err := c.GetComponentMetrics(ctx, nodeId, component)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get metrics: %w", err)
 	}
@@ -147,4 +140,17 @@ func (c *Client) GetNodeBandwidthTxMbps(
 	}
 
 	return bw, nil
+}
+
+// GetNodeTotalViewers legge il totale dei viewer su un egress
+func (c *Client) GetNodeTotalViewers(ctx context.Context, nodeId string) (int, error) {
+	key := fmt.Sprintf("metrics:node:%s:janusStreaming", nodeId)
+	val, err := c.rdb.HGet(ctx, key, "janusTotalViewers").Result()
+	if err != nil {
+		if err.Error() == "redis:nil" {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return strconv.Atoi(val)
 }

@@ -50,6 +50,8 @@ export class EgressNode extends BaseNode {
 
         // Lock per operazioni per sessione
         this.operationLocks = new Map();
+        this.mountpointsLastActivity = new Map();
+
 
 
         // ForwarderManager per gestire processo C
@@ -193,30 +195,19 @@ export class EgressNode extends BaseNode {
 
     // MOUNTPOINT MANAGEMENT
     async onSessionCreated(event) {
-        const { sessionId, treeId } = event;
-
-        // Verifica tree
-        if (treeId !== this.treeId) {
-            console.warn(`[${this.nodeId}] Session event for wrong tree: ${treeId}`);
-            return;
-        }
-
+        const { sessionId } = event;
         // console.log(`[${this.nodeId}] Received session-created event for ${sessionId}`);
+        console.log(`[${this.nodeId}] Handling session-created for ${sessionId}`);
 
         try {
             await this.createMountpoint(sessionId);
         } catch (error) {
-            console.error(`[${this.nodeId}] Failed to create mountpoint`, error.message);
+            console.error(`[${this.nodeId}] Failed to create mountpoint for ${sessionId}:`, error.message);
         }
     }
 
     async onSessionDestroyed(event) {
-        const { sessionId, treeId } = event;
-
-        // Verifica tree
-        if (treeId !== this.treeId) {
-            return;
-        }
+        const { sessionId } = event;
 
         // console.log(`[${this.nodeId}] Received session-destroyed event for ${sessionId}`);
 
@@ -243,7 +234,7 @@ export class EgressNode extends BaseNode {
             console.log(`[${this.nodeId}] Creating mountpoint for session: ${sessionId}`);
 
             // Leggi info da Redis (mountpointId = roomId)    
-            const sessionData = await this.redis.hgetall(`tree:${this.treeId}:session:${sessionId}`);
+            const sessionData = await this.redis.hgetall(`session:${sessionId}`);
             if (!sessionData || !sessionData.roomId) {
                 throw new Error(`Session ${sessionId} not found in Redis`);
             }
@@ -286,7 +277,7 @@ export class EgressNode extends BaseNode {
             });
 
             // Salva su Redis
-            await saveMountpointToRedis(this.redis, this.treeId, this.nodeId, {
+            await saveMountpointToRedis(this.redis, this.nodeId, {
                 sessionId,
                 mountpointId,
                 audioSsrc,
@@ -400,7 +391,7 @@ export class EgressNode extends BaseNode {
 
             // Deactivate in Redis
             // rimuove dopo 24 ore
-            await deactivateMountpointInRedis(this.redis, this.treeId, this.nodeId, sessionId);
+            await deactivateMountpointInRedis(this.redis, this.nodeId, sessionId);
 
             this.operationLocks.delete(sessionId);
 
@@ -423,11 +414,8 @@ export class EgressNode extends BaseNode {
     }
 
     async discoverExistingSessions() {
-        if (!this.treeId) return;
 
-        // console.log(`[${this.nodeId}] Discovering existing sessions for tree ${this.treeId}`);
-
-        const sessionIds = await this.redis.smembers(`tree:${this.treeId}:mountpoints:node:${this.nodeId}`);
+        const sessionIds = await this.redis.smembers(`node:${this.nodeId}:mountpoints`);
 
         if (sessionIds.length === 0) {
             console.log(`[${this.nodeId}] No existing sessions found`);
@@ -437,29 +425,17 @@ export class EgressNode extends BaseNode {
         console.log(`[${this.nodeId}] Found ${sessionIds.length} existing sessions`);
 
         for (const sessionId of sessionIds) {
-            const sessionData = await this.redis.hgetall(`tree:${this.treeId}:session:${sessionId}`);
+            const sessionData = await this.redis.hgetall(`session:${sessionId}`);
+            const mountpointData = await this.redis.hgetall(`mountpoint:${this.nodeId}:${sessionId}`);
 
-            if (sessionData.active !== 'true') {
-                console.log(`[${this.nodeId}] Skipping inactive session ${sessionId}`);
-                continue;
-            }
+            if (sessionData && sessionData.active === 'true' && mountpointData) {
 
-            // CHECK: mountpoint già esisteva per questo nodo?
-            const mountpointId = parseInt(sessionData.roomId);
-            const existingMountpoint = await this.redis.hgetall(`tree:${this.treeId}:mountpoint:${this.nodeId}:${sessionId}`);
-
-            try {
-                if (existingMountpoint && existingMountpoint.active === 'true') {
-                    // RECOVERY
-                    console.log(`[${this.nodeId}] Recovering mountpoint for session ${sessionId}`);
-                    await this.recoverMountpoint(sessionId, existingMountpoint);
-                } else {
-                    // mountpoint nuovo
-                    console.log(`[${this.nodeId}] Creating new mountpoint for session ${sessionId}`);
-                    await this.createMountpoint(sessionId);
-                }
-            } catch (err) {
-                console.error(`[${this.nodeId}] Failed to handle mountpoint for ${sessionId}:`, err.message);
+                console.log(`[${this.nodeId}] Recovering mountpoint for session ${sessionId}`);
+                await this.recoverMountpoint(sessionId, existingMountpoint);
+            } else {
+                // mountpoint nuovo
+                console.log(`[${this.nodeId}] Creating new mountpoint for session ${sessionId}`);
+                await this.createMountpoint(sessionId);
             }
         }
 
@@ -474,7 +450,7 @@ export class EgressNode extends BaseNode {
         this.operationLocks.set(sessionId, true);
 
         try {
-            // console.log(`[${this.nodeId}] Recovering mountpoint for session: ${sessionId}`);
+            // console.log(`[${ this.nodeId }] Recovering mountpoint for session: ${ sessionId } `);
 
             const mountpointId = parseInt(mountpointData.mountpointId);
             const audioSsrc = parseInt(mountpointData.audioSsrc);
@@ -484,7 +460,7 @@ export class EgressNode extends BaseNode {
             let audioPort = parseInt(mountpointData.janusAudioPort);
             let videoPort = parseInt(mountpointData.janusVideoPort);
 
-            // console.log(`[${this.nodeId}] Reusing existing ports: ${audioPort}, ${videoPort}`);
+            // console.log(`[${ this.nodeId }] Reusing existing ports: ${ audioPort }, ${ videoPort } `);
 
             // mountpoint Janus già esiste
             // porte allocate
@@ -524,7 +500,6 @@ export class EgressNode extends BaseNode {
             // sovrascrivi in memoria
             const mountpoint = {
                 sessionId,
-                treeId: this.treeId,
                 mountpointId,
                 audioSsrc,
                 videoSsrc,
@@ -539,7 +514,7 @@ export class EgressNode extends BaseNode {
 
             // Aggiorna Redis
             if (mountpointCreated) {
-                await saveMountpointToRedis(this.redis, this.treeId, this.nodeId, mountpoint);
+                await saveMountpointToRedis(this.redis, this.nodeId, mountpoint);
             }
 
             // ricrea mapping nel forwarder C
@@ -572,7 +547,7 @@ export class EgressNode extends BaseNode {
         //        const result = await this.createMountpoint(sessionId, parseInt(audioSsrc), parseInt(videoSsrc));
         //        res.status(201).json(result);
         //    } catch (error) {
-        //        console.error(`[${this.nodeId}] Create mountpoint error:`, error.message);
+        //        console.error(`[${ this.nodeId }] Create mountpoint error: `, error.message);
         //        res.status(500).json({ error: error.message });
         //    }
         //});
@@ -584,7 +559,7 @@ export class EgressNode extends BaseNode {
         //        const result = await this.destroyMountpoint(sessionId);
         //        res.json({ message: 'Mountpoint destroyed', ...result });
         //    } catch (error) {
-        //        console.error(`[${this.nodeId}] Destroy mountpoint error:`, error.message);
+        //        console.error(`[${ this.nodeId }] Destroy mountpoint error: `, error.message);
         //        res.status(500).json({ error: error.message });
         //    }
         //});
@@ -625,7 +600,7 @@ export class EgressNode extends BaseNode {
         //     try {
         //         res.json(this.portPool.getStats());
         //     } catch (error) {
-        //         console.error(`[${this.nodeId}] Get portpool error:`, error.message);
+        //         console.error(`[${ this.nodeId }] Get portpool error:`, error.message);
         //         res.status(500).json({ error: error.message });
         //     }
         // });
@@ -725,13 +700,32 @@ export class EgressNode extends BaseNode {
                     });
                     const info = response.plugindata?.data?.info || {};
                     const viewers = info.viewers ?? 0;
+                    const now = Date.now();
+
+                    let sessionId = null;
+                    for (const [sid, mpData] of this.mountpoints.entries()) {
+                        if (mpData.mountpointId === mp.id) {
+                            sessionId = sid;
+                            break;
+                        }
+                    }
+                    if (viewers > 0) {
+                        this.mountpointsLastActivity.set(mp.id, now); // Aggiorna solo se attivo
+                    }
+                    if (!this.mountpointsLastActivity.has(mp.id)) {
+                        this.mountpointsLastActivity.set(mp.id, now);
+                    }
+
+                    const lastActivityAt = this.mountpointsLastActivity.get(mp.id);
 
                     mountpointDetails.push({
                         mountpointId: mp.id,
+                        sessionId: sessionId,
                         description: info.description || mp.description,
                         type: info.type,
                         viewers: viewers,
                         enabled: info.enabled !== false,
+                        lastActivityAt: lastActivityAt,
                         ageMs: info.media?.[0]?.age_ms ?? 0 // Utile per capire se il flusso sta ricevendo dati
                     });
 

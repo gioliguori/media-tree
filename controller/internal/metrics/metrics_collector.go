@@ -29,8 +29,8 @@ type MetricsCollector struct {
 
 	//  Salva valori precedenti per calcolo CPU
 	mu             sync.Mutex
-	previousCPU    map[string]uint64 // containerID -> TotalUsage
-	previousSystem map[string]uint64 // containerID -> SystemUsage
+	previousCPU    map[string]uint64 // containerId -> TotalUsage
+	previousSystem map[string]uint64 // containerId -> SystemUsage
 
 }
 
@@ -150,7 +150,7 @@ func (mc *MetricsCollector) collectMetrics(ctx context.Context) error {
 
 	// Map mutex
 	var activeContainersMu sync.Mutex
-	activeContainerIDs := make(map[string]bool)
+	activeContainerIds := make(map[string]bool)
 
 	// Channel per risultati
 	resultsCh := make(chan metricsResult, len(activeNodes))
@@ -172,19 +172,14 @@ func (mc *MetricsCollector) collectMetrics(ctx context.Context) error {
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
-			// Parse "tree-1:injection-1" -> ["tree-1", "injection-1"]
-			parts := strings.Split(nodeRef, ":")
-			if len(parts) != 2 {
-				resultsCh <- metricsResult{
-					nodeRef: nodeRef,
-					err:     fmt.Errorf("invalid node ref format"),
-				}
+			// Recupera lo stato attuale dal database
+			status, err := mc.redisClient.GetNodeStatus(ctx, nodeRef)
+			if err != nil || status != "active" {
+				// Se il nodo è in "draining", "destroying" o non risponde, lo saltiamo
 				return
 			}
-			treeID, nodeID := parts[0], parts[1]
-
 			// Get node info
-			node, err := mc.redisClient.GetNodeProvisioning(ctx, treeID, nodeID)
+			node, err := mc.redisClient.GetNodeProvisioning(ctx, nodeRef)
 			if err != nil {
 				resultsCh <- metricsResult{
 					nodeRef: nodeRef,
@@ -195,15 +190,15 @@ func (mc *MetricsCollector) collectMetrics(ctx context.Context) error {
 
 			activeContainersMu.Lock()
 			if node.ContainerId != "" {
-				activeContainerIDs[node.ContainerId] = true
+				activeContainerIds[node.ContainerId] = true
 			}
 			if node.JanusContainerId != "" {
-				activeContainerIDs[node.JanusContainerId] = true
+				activeContainerIds[node.JanusContainerId] = true
 			}
 			activeContainersMu.Unlock()
 
 			// Collect metrics con timeout per nodo
-			containerCount, err := mc.collectNodeMetrics(ctx, treeID, node)
+			containerCount, err := mc.collectNodeMetrics(ctx, node)
 			resultsCh <- metricsResult{
 				nodeRef:        nodeRef,
 				containerCount: containerCount,
@@ -238,21 +233,20 @@ func (mc *MetricsCollector) collectMetrics(ctx context.Context) error {
 			len(activeNodes), totalContainers, errorCount, duration)
 	}
 
-	mc.cleanupStaleCPUCache(activeContainerIDs)
+	mc.cleanupStaleCPUCache(activeContainerIds)
 
 	return nil
 }
 
 // collectNodeMetrics raccoglie metriche per un singolo nodo
-func (mc *MetricsCollector) collectNodeMetrics(ctx context.Context, treeID string, node *domain.NodeInfo) (int, error) {
+func (mc *MetricsCollector) collectNodeMetrics(ctx context.Context, node *domain.NodeInfo) (int, error) {
 	// Timeout specifico per nodo (10 secondi)
 	nodeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	nodeMetrics := &NodeMetrics{
-		NodeID:     node.NodeId,
+		NodeId:     node.NodeId,
 		NodeType:   string(node.NodeType),
-		TreeID:     treeID,
 		Timestamp:  time.Now().Unix(),
 		Containers: make(map[string]*ContainerMetrics),
 	}
@@ -296,7 +290,7 @@ func (mc *MetricsCollector) collectNodeMetrics(ctx context.Context, treeID strin
 
 	// Application metrics da Redis
 	if node.NodeType == "relay" {
-		appMetrics := mc.getApplicationMetricsFromRedis(nodeCtx, treeID, node)
+		appMetrics := mc.getApplicationMetricsFromRedis(nodeCtx, node)
 		nodeMetrics.ApplicationMetrics = appMetrics
 	}
 
@@ -329,16 +323,16 @@ func (mc *MetricsCollector) collectNodeMetrics(ctx context.Context, treeID strin
 }
 
 // getContainerMetrics ottiene metriche Docker per un singolo container
-func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerID string) (*ContainerMetrics, error) {
+func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerId string) (*ContainerMetrics, error) {
 	statsCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	// una sola chiamata (stream=false)
-	stats, err := mc.dockerClient.ContainerStats(statsCtx, containerID, false)
+	stats, err := mc.dockerClient.ContainerStats(statsCtx, containerId, false)
 	if err != nil {
 		if strings.Contains(err.Error(), "No such container") ||
 			strings.Contains(err.Error(), "is not running") {
-			return nil, fmt.Errorf("container %s not available: %w", containerID, err)
+			return nil, fmt.Errorf("container %s not available: %w", containerId, err)
 		}
 		return nil, fmt.Errorf("failed to get container stats: %w", err)
 	}
@@ -349,13 +343,13 @@ func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerID
 		return nil, fmt.Errorf("failed to decode stats: %w", err)
 	}
 
-	containerInfo, err := mc.dockerClient.ContainerInspect(ctx, containerID)
+	containerInfo, err := mc.dockerClient.ContainerInspect(ctx, containerId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect container: %w", err)
 	}
 
 	metrics := &ContainerMetrics{
-		ContainerID:   containerID,
+		ContainerId:   containerId,
 		ContainerName: strings.TrimPrefix(containerInfo.Name, "/"),
 	}
 
@@ -367,15 +361,15 @@ func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerID
 	// }
 
 	mc.mu.Lock()
-	previousCPU, hasPrev := mc.previousCPU[containerID]
-	previousSystem, _ := mc.previousSystem[containerID]
+	previousCPU, hasPrev := mc.previousCPU[containerId]
+	previousSystem, _ := mc.previousSystem[containerId]
 
 	currentCPU := v.CPUStats.CPUUsage.TotalUsage
 	currentSystem := v.CPUStats.SystemUsage
 
 	// Salva valori correnti per prossimo ciclo
-	mc.previousCPU[containerID] = currentCPU
-	mc.previousSystem[containerID] = currentSystem
+	mc.previousCPU[containerId] = currentCPU
+	mc.previousSystem[containerId] = currentSystem
 	mc.mu.Unlock()
 
 	// Calcola CPU% usando valori del ciclo precedente
@@ -460,8 +454,8 @@ func (mc *MetricsCollector) getContainerMetrics(ctx context.Context, containerID
 	// 	}
 	// }
 
-	// PIDs
-	// metrics.PIDsCurrent = int(v.PidsStats.Current)
+	// PIds
+	// metrics.PIdsCurrent = int(v.PidsStats.Current)
 
 	return metrics, nil
 }
@@ -489,30 +483,34 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 
 	// Container metrics con metriche Janus
 	for containerType, containerMetrics := range metrics.Containers {
-		key := fmt.Sprintf("metrics:%s:node:%s:%s", metrics.TreeID, metrics.NodeID, containerType)
+		key := fmt.Sprintf("metrics:node:%s:%s", metrics.NodeId, containerType)
 
 		metricsMap := map[string]any{
-			"containerId":   containerMetrics.ContainerID,
-			"containerName": containerMetrics.ContainerName,
-			"cpuPercent":    fmt.Sprintf("%.2f", containerMetrics.CPUPercent),
-			"memoryUsedMb":  fmt.Sprintf("%.2f", containerMetrics.MemoryUsedMB),
-			// "memoryLimitMb":    fmt.Sprintf("%.2f", containerMetrics.MemoryLimitMB),
-			"memoryPercent": fmt.Sprintf("%.2f", containerMetrics.MemoryPercent),
-			// "networkRxBytes":   fmt.Sprintf("%d", containerMetrics.NetworkRxBytes),
+			"containerId":    containerMetrics.ContainerId,
+			"containerName":  containerMetrics.ContainerName,
+			"cpuPercent":     fmt.Sprintf("%.2f", containerMetrics.CPUPercent),
+			"memoryUsedMb":   fmt.Sprintf("%.2f", containerMetrics.MemoryUsedMB),
 			"networkTxBytes": fmt.Sprintf("%d", containerMetrics.NetworkTxBytes),
+			"memoryPercent":  fmt.Sprintf("%.2f", containerMetrics.MemoryPercent),
+			"timestamp":      timestampReadable,
+			// "memoryLimitMb":    fmt.Sprintf("%.2f", containerMetrics.MemoryLimitMB),
+			// "networkRxBytes":   fmt.Sprintf("%d", containerMetrics.NetworkRxBytes),
 			// "networkRxPackets": fmt.Sprintf("%d", containerMetrics.NetworkRxPackets),
 			// "networkTxPackets": fmt.Sprintf("%d", containerMetrics.NetworkTxPackets),
 			// "networkRxErrors":  fmt.Sprintf("%d", containerMetrics.NetworkRxErrors),
 			// "networkTxErrors":  fmt.Sprintf("%d", containerMetrics.NetworkTxErrors),
 			// "blockReadBytes":   fmt.Sprintf("%d", containerMetrics.BlockReadBytes),
 			// "blockWriteBytes":  fmt.Sprintf("%d", containerMetrics.BlockWriteBytes),
-			// "pidsCurrent":      fmt.Sprintf("%d", containerMetrics.PIDsCurrent),
-			"timestamp": timestampReadable,
+			// "pidsCurrent":      fmt.Sprintf("%d", containerMetrics.PIdsCurrent),
 		}
-
 		if containerMetrics.JanusMetrics != nil {
-			metricsMap["janusRoomsActive"] = fmt.Sprintf("%d", containerMetrics.JanusMetrics.RoomsActive)
-			metricsMap["janusMountpointsActive"] = fmt.Sprintf("%d", containerMetrics.JanusMetrics.MountpointsActive)
+			switch metrics.NodeType {
+			case "injection":
+				metricsMap["janusRoomsActive"] = fmt.Sprintf("%d", containerMetrics.JanusMetrics.RoomsActive)
+			case "egress":
+				metricsMap["janusMountpointsActive"] = fmt.Sprintf("%d", containerMetrics.JanusMetrics.MountpointsActive)
+				metricsMap["janusTotalViewers"] = fmt.Sprintf("%d", containerMetrics.JanusMetrics.TotalViewers)
+			}
 		}
 
 		pipe.HMSet(ctx, key, metricsMap)
@@ -521,11 +519,11 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 		// Mountpoint details (egress)
 		if containerMetrics.JanusMetrics != nil && len(containerMetrics.JanusMetrics.Mountpoints) > 0 {
 			for _, mp := range containerMetrics.JanusMetrics.Mountpoints {
-				mpKey := fmt.Sprintf("metrics:%s:node:%s:mountpoint:%d",
-					metrics.TreeID, metrics.NodeID, mp.MountpointId)
+				mpKey := fmt.Sprintf("metrics:node:%s:mountpoint:%d", metrics.NodeId, mp.MountpointId)
 
 				mpMap := map[string]any{
 					"mountpointId": fmt.Sprintf("%d", mp.MountpointId),
+					"sessionId":    mp.SessionId,
 					"description":  mp.Description,
 					"viewers":      fmt.Sprintf("%d", mp.Viewers),
 					"enabled":      fmt.Sprintf("%t", mp.Enabled),
@@ -541,8 +539,7 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 		// Room details (injection)
 		if containerMetrics.JanusMetrics != nil && len(containerMetrics.JanusMetrics.Rooms) > 0 {
 			for _, room := range containerMetrics.JanusMetrics.Rooms {
-				roomKey := fmt.Sprintf("metrics:%s:node:%s:room:%d",
-					metrics.TreeID, metrics.NodeID, room.RoomId)
+				roomKey := fmt.Sprintf("metrics:node:%s:room:%d", metrics.NodeId, room.RoomId)
 
 				roomMap := map[string]any{
 					"roomId":         fmt.Sprintf("%d", room.RoomId),
@@ -560,7 +557,7 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 
 	// GStreamer metrics (relay)
 	if metrics.GStreamerMetrics != nil {
-		key := fmt.Sprintf("metrics:%s:node:%s:gstreamer", metrics.TreeID, metrics.NodeID)
+		key := fmt.Sprintf("metrics:node:%s:gstreamer", metrics.NodeId)
 
 		gstreamerMap := map[string]any{
 			"maxAudioQueueMs": fmt.Sprintf("%.2f", metrics.GStreamerMetrics.MaxAudioQueueMs),
@@ -575,7 +572,7 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 
 	// Application metrics
 	if metrics.ApplicationMetrics != nil && metrics.NodeType == "relay" {
-		key := fmt.Sprintf("metrics:%s:node:%s:application", metrics.TreeID, metrics.NodeID)
+		key := fmt.Sprintf("metrics:node:%s:application", metrics.NodeId)
 
 		appMap := map[string]interface{}{
 			"timestamp":         timestampReadable,
@@ -594,6 +591,12 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 		}
 	}
 
+	if metrics.NodeType == "egress" {
+		if err := mc.updateInactiveEgressPaths(ctx, metrics); err != nil {
+			log.Printf("[MetricsCollector] Failed to update inactive egress paths: %v", err)
+		}
+	}
+
 	// Esegui tutto
 	_, err := pipe.Exec(ctx)
 	if err != nil {
@@ -604,11 +607,11 @@ func (mc *MetricsCollector) saveNodeMetrics(ctx context.Context, metrics *NodeMe
 }
 
 // getApplicationMetricsFromRedis - Legge dati application da Redis
-func (mc *MetricsCollector) getApplicationMetricsFromRedis(ctx context.Context, treeID string, node *domain.NodeInfo) *ApplicationMetrics {
+func (mc *MetricsCollector) getApplicationMetricsFromRedis(ctx context.Context, node *domain.NodeInfo) *ApplicationMetrics {
 	appMetrics := &ApplicationMetrics{}
 
 	// Leggi sessioni da Redis
-	sessions, err := mc.redisClient.GetNodeSessions(ctx, treeID, node.NodeId)
+	sessions, err := mc.redisClient.GetNodeSessions(ctx, node.NodeId)
 	if err != nil {
 		sessions = []string{}
 	}
@@ -622,8 +625,8 @@ func (mc *MetricsCollector) getApplicationMetricsFromRedis(ctx context.Context, 
 
 		// Calcola totalRoutes
 		totalRoutes := 0
-		for _, sessionID := range sessions {
-			routes, err := mc.redisClient.GetRoutes(ctx, treeID, sessionID, node.NodeId)
+		for _, sessionId := range sessions {
+			routes, err := mc.redisClient.GetRoutes(ctx, sessionId, node.NodeId)
 			if err == nil {
 				totalRoutes += len(routes)
 			}
@@ -693,7 +696,7 @@ func (mc *MetricsCollector) getGStreamerMetricsFromNode(ctx context.Context, nod
 
 // calculateBandwidth - Calcola Mbps da delta TX
 func (mc *MetricsCollector) calculateBandwidth(ctx context.Context, node *domain.NodeInfo, currentTxBytes uint64) float64 {
-	prevKey := fmt.Sprintf("metrics:%s:node:%s:prevTx", node.TreeId, node.NodeId)
+	prevKey := fmt.Sprintf("metrics:node:%s:prevTx", node.NodeId)
 
 	prevTxStr, err := mc.redisClient.Get(ctx, prevKey)
 	if err != nil {
@@ -723,7 +726,7 @@ func (mc *MetricsCollector) calculateBandwidth(ctx context.Context, node *domain
 }
 
 func (mc *MetricsCollector) updateInactiveSessions(ctx context.Context, metrics *NodeMetrics) error {
-	sortedSetKey := fmt.Sprintf("inactive_sessions:%s", metrics.TreeID)
+	sortedSetKey := "sessions:inactive"
 
 	// Get Janus metrics
 	var janusMetrics *JanusMetrics
@@ -743,28 +746,62 @@ func (mc *MetricsCollector) updateInactiveSessions(ctx context.Context, metrics 
 			continue
 		}
 
-		entryKey := fmt.Sprintf("%s:%s", metrics.TreeID, room.SessionId)
-
 		if !room.HasPublisher {
 			// inactive: Add to sorted set
 			score := float64(room.LastActivityAt)
 
-			err := mc.redisClient.ZAdd(ctx, sortedSetKey, score, entryKey)
+			err := mc.redisClient.ZAdd(ctx, sortedSetKey, score, room.SessionId)
 
 			if err != nil {
-				log.Printf("[MetricsCollector] Failed to add %s to sorted set: %v", entryKey, err)
+				log.Printf("[MetricsCollector] Failed to add %s to sorted set: %v", room.SessionId, err)
 			}
 
 		} else {
 			// active: Remove from sorted set
-			err := mc.redisClient.ZRem(ctx, sortedSetKey, entryKey)
+			err := mc.redisClient.ZRem(ctx, sortedSetKey, room.SessionId)
 
 			if err != nil {
-				log.Printf("[MetricsCollector] Failed to remove %s from sorted set: %v", entryKey, err)
+				log.Printf("[MetricsCollector] Failed to remove %s from sorted set: %v", room.SessionId, err)
 			}
 		}
 	}
 
+	return nil
+}
+
+func (mc *MetricsCollector) updateInactiveEgressPaths(ctx context.Context, metrics *NodeMetrics) error {
+	sortedSetKey := "paths:inactive"
+
+	var janusMetrics *JanusMetrics
+	for containerType, containerMetrics := range metrics.Containers {
+		if containerType == string(ContainerTypeJanusStreaming) {
+			janusMetrics = containerMetrics.JanusMetrics
+			break
+		}
+	}
+
+	if janusMetrics == nil || len(janusMetrics.Mountpoints) == 0 {
+		return nil
+	}
+
+	for _, mp := range janusMetrics.Mountpoints {
+		if mp.SessionId == "" {
+			continue
+		}
+
+		// Chiave nel set: "nodeId:sessionId"
+		entryKey := fmt.Sprintf("%s:%s", metrics.NodeId, mp.SessionId)
+
+		if mp.Viewers == 0 {
+			// Aggiungi ai candidati (pulizia)
+			score := float64(mp.LastActivityAt)
+
+			mc.redisClient.ZAdd(ctx, sortedSetKey, score, entryKey)
+		} else {
+			// Ci sono viewer: rimuovi il path dal set degli inattivi
+			mc.redisClient.ZRem(ctx, sortedSetKey, entryKey)
+		}
+	}
 	return nil
 }
 
@@ -783,18 +820,18 @@ func (mc *MetricsCollector) getContainerCPULimit(info types.ContainerJSON) float
 	return 0.0
 }
 
-func (mc *MetricsCollector) cleanupStaleCPUCache(activeContainerIDs map[string]bool) {
+func (mc *MetricsCollector) cleanupStaleCPUCache(activeContainerIds map[string]bool) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 
 	staleCount := 0
 
 	// Controlla ogni entry nella map
-	for containerID := range mc.previousCPU {
-		// Se containerID non è nella lista degli attivi, rimuovi
-		if !activeContainerIDs[containerID] {
-			delete(mc.previousCPU, containerID)
-			delete(mc.previousSystem, containerID)
+	for containerId := range mc.previousCPU {
+		// Se containerId non è nella lista degli attivi, rimuovi
+		if !activeContainerIds[containerId] {
+			delete(mc.previousCPU, containerId)
+			delete(mc.previousSystem, containerId)
 			staleCount++
 		}
 	}

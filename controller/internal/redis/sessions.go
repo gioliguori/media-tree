@@ -9,21 +9,19 @@ import (
 // SaveSession salva session metadata
 func (c *Client) SaveSession(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 	data map[string]any,
 ) error {
-	key := fmt.Sprintf("tree:%s:session:%s", treeId, sessionId)
+	key := fmt.Sprintf("session:%s", sessionId)
 	return c.rdb.HSet(ctx, key, data).Err()
 }
 
 // GetSession legge session metadata
 func (c *Client) GetSession(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 ) (map[string]string, error) {
-	key := fmt.Sprintf("tree:%s:session:%s", treeId, sessionId)
+	key := fmt.Sprintf("session:%s", sessionId)
 	result, err := c.rdb.HGetAll(ctx, key).Result()
 	if err != nil {
 		return nil, err
@@ -37,8 +35,8 @@ func (c *Client) GetSession(
 }
 
 // SessionExists verifica se session esiste
-func (c *Client) SessionExists(ctx context.Context, treeId string, sessionId string) (bool, error) {
-	key := fmt.Sprintf("tree:%s:session:%s", treeId, sessionId)
+func (c *Client) SessionExists(ctx context.Context, sessionId string) (bool, error) {
+	key := fmt.Sprintf("session:%s", sessionId)
 	exists, err := c.rdb.Exists(ctx, key).Result()
 	return exists > 0, err
 }
@@ -46,40 +44,33 @@ func (c *Client) SessionExists(ctx context.Context, treeId string, sessionId str
 // DeleteSession rimuove session
 func (c *Client) DeleteSession(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 ) error {
-	key := fmt.Sprintf("tree:%s:session:%s", treeId, sessionId)
+	key := fmt.Sprintf("session:%s", sessionId)
 	return c.rdb.Del(ctx, key).Err()
 }
 
-// AddSessionToTree aggiunge session a tree index
-func (c *Client) AddSessionToTree(
+// AddSessionToGlobalIndex aggiunge la sessione all'indice di sistema
+func (c *Client) AddSessionToGlobalIndex(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 ) error {
-	key := fmt.Sprintf("tree:%s:sessions", treeId)
-	return c.rdb.SAdd(ctx, key, sessionId).Err()
+	return c.rdb.SAdd(ctx, "sessions:global", sessionId).Err()
 }
 
-// RemoveSessionFromTree rimuove session da tree index
-func (c *Client) RemoveSessionFromTree(
+// RemoveSessionFromGlobalIndex rimuove la sessione dall'indice di sistema
+func (c *Client) RemoveSessionFromGlobalIndex(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 ) error {
-	key := fmt.Sprintf("tree:%s:sessions", treeId)
-	return c.rdb.SRem(ctx, key, sessionId).Err()
+	return c.rdb.SRem(ctx, "sessions:global", sessionId).Err()
 }
 
-// GetTreeSessions legge tutte le sessioni di un tree
-func (c *Client) GetTreeSessions(
+// GetGlobalSessions legge tutte le sessioni attive nel sistema
+func (c *Client) GetGlobalSessions(
 	ctx context.Context,
-	treeId string,
 ) ([]string, error) {
-	key := fmt.Sprintf("tree:%s:sessions", treeId)
-	return c.rdb.SMembers(ctx, key).Result()
+	return c.rdb.SMembers(ctx, "sessions:global").Result()
 }
 
 // Egress
@@ -87,32 +78,29 @@ func (c *Client) GetTreeSessions(
 // AddEgressToSession aggiunge egress a lista session
 func (c *Client) AddEgressToSession(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 	egressId string,
 ) error {
-	key := fmt.Sprintf("tree:%s:session:%s:egresses", treeId, sessionId)
+	key := fmt.Sprintf("session:%s:egresses", sessionId)
 	return c.rdb.SAdd(ctx, key, egressId).Err()
 }
 
 // GetSessionEgresses legge lista egress per session
 func (c *Client) GetSessionEgresses(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 ) ([]string, error) {
-	key := fmt.Sprintf("tree:%s:session:%s:egresses", treeId, sessionId)
+	key := fmt.Sprintf("session:%s:egresses", sessionId)
 	return c.rdb.SMembers(ctx, key).Result()
 }
 
 // RemoveEgressFromSession rimuove egress da session
 func (c *Client) RemoveEgressFromSession(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 	egressId string,
 ) error {
-	key := fmt.Sprintf("tree:%s:session:%s:egresses", treeId, sessionId)
+	key := fmt.Sprintf("session:%s:egresses", sessionId)
 	return c.rdb.SRem(ctx, key, egressId).Err()
 }
 
@@ -120,22 +108,20 @@ func (c *Client) RemoveEgressFromSession(
 // Usato da ProvisionViewer per riusare egress esistente invece di crearne uno nuovo
 func (c *Client) FindEgressServingSession(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 ) ([]string, error) {
 	// Wrapper semantico per GetSessionEgresses
-	return c.GetSessionEgresses(ctx, treeId, sessionId)
+	return c.GetSessionEgresses(ctx, sessionId)
 }
 
 // SaveSessionPath salva path costruito per coppia (session, egress)
 func (c *Client) SaveSessionPath(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 	egressId string,
 	path []string,
 ) error {
-	key := fmt.Sprintf("tree:%s:session:%s:path:%s", treeId, sessionId, egressId)
+	key := fmt.Sprintf("path:%s:%s", sessionId, egressId)
 	pathStr := strings.Join(path, ",")
 	return c.rdb.Set(ctx, key, pathStr, 0).Err()
 }
@@ -143,11 +129,10 @@ func (c *Client) SaveSessionPath(
 // GetSessionPath legge path per coppia (session, egress)
 func (c *Client) GetSessionPath(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 	egressId string,
 ) ([]string, error) {
-	key := fmt.Sprintf("tree:%s:session:%s:path:%s", treeId, sessionId, egressId)
+	key := fmt.Sprintf("path:%s:%s", sessionId, egressId)
 	pathStr, err := c.rdb.Get(ctx, key).Result()
 	if err != nil {
 		return nil, err
@@ -161,8 +146,8 @@ func (c *Client) GetSessionPath(
 }
 
 // GetNextRoomId genera room ID incrementale
-func (c *Client) GetNextRoomId(ctx context.Context, treeId string) (int, error) {
-	key := fmt.Sprintf("tree:%s:roomCounter", treeId)
+func (c *Client) GetNextRoomId(ctx context.Context) (int, error) {
+	key := "global:roomCounter"
 
 	// Controlla se il counter esiste
 	exists, err := c.rdb.Exists(ctx, key).Result()
@@ -186,8 +171,8 @@ func (c *Client) GetNextRoomId(ctx context.Context, treeId string) (int, error) 
 
 // GetNextSSRC genera SSRC incrementale
 // Range: 10000-999999999
-func (c *Client) GetNextSSRC(ctx context.Context, treeId string) (int, error) {
-	key := fmt.Sprintf("tree:%s:ssrcCounter", treeId)
+func (c *Client) GetNextSSRC(ctx context.Context) (int, error) {
+	key := "global:ssrcCounter"
 
 	// Controlla se il counter esiste
 	exists, err := c.rdb.Exists(ctx, key).Result()

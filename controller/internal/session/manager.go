@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -42,20 +41,11 @@ func NewSessionManager(redisClient *redis.Client) *SessionManager {
 func (sm *SessionManager) CreateSession(
 	ctx context.Context,
 	sessionId string,
-	treeId string,
 ) (*SessionInfo, error) {
-	log.Printf("[SessionManager] Creating session %s on tree %s", sessionId, treeId)
-	// Check tree esiste
-	exists, err := sm.redis.TreeExists(ctx, treeId)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check tree:  %w", err)
-	}
-	if !exists {
-		return nil, fmt.Errorf("tree not found: %s", treeId)
-	}
+	log.Printf("[SessionManager] Creating  session: %s", sessionId)
 
 	// Check session non esiste già
-	exists, err = sm.redis.SessionExists(ctx, treeId, sessionId)
+	exists, err := sm.redis.SessionExists(ctx, sessionId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check session: %w", err)
 	}
@@ -64,45 +54,37 @@ func (sm *SessionManager) CreateSession(
 	}
 
 	// Seleziona Injection
-	injectionId, err := sm.selector.SelectInjection(ctx, treeId)
+	injectionId, err := sm.selector.SelectInjection(ctx)
 	if err != nil {
-		if errors.Is(err, ErrScalingNeeded) {
-			log.Printf("[SessionManager] Scaling needed for tree %s", treeId)
-			// TODO: Trigger autoscaling
-			// Per ora ritorna errore 503 Service Unavailable
-			return nil, fmt.Errorf("no injection nodes available, scaling in progress")
-		}
-
 		return nil, fmt.Errorf("failed to select injection: %w", err)
 	}
 
 	log.Printf("[SessionManager] Selected injection:  %s", injectionId)
 
 	// Get Relay root
-	children, err := sm.redis.GetNodeChildren(ctx, treeId, injectionId)
+	children, err := sm.redis.GetNodeChildren(ctx, injectionId)
 	if err != nil || len(children) == 0 {
 		return nil, fmt.Errorf("relay-root not found for injection %s", injectionId)
 	}
-	relayRootId := children[0] // Primo child è relay-root (coppia statica)
-	log.Printf("[SessionManager] Relay-root:  %s", relayRootId)
+	relayRootId := children[0]
 
 	// Genera ssrc e roomId
-	audioSsrc, videoSsrc, err := GenerateSSRCPair(ctx, sm.redis, treeId)
+	audioSsrc, videoSsrc, err := GenerateSSRCPair(ctx, sm.redis)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate SSRC: %w", err)
 	}
 
-	roomId, err := GenerateRoomId(ctx, sm.redis, treeId)
+	roomId, err := GenerateRoomId(ctx, sm.redis)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate room ID: %w", err)
 	}
+
 	log.Printf("[SessionManager] Generated SSRC: audio=%d, video=%d, room=%d",
 		audioSsrc, videoSsrc, roomId)
 
 	// Salva metadata sessione
 	metadata := map[string]any{
 		"sessionId":       sessionId,
-		"treeId":          treeId,
 		"injectionNodeId": injectionId,
 		"relayRootId":     relayRootId,
 		"audioSsrc":       audioSsrc,
@@ -111,33 +93,29 @@ func (sm *SessionManager) CreateSession(
 		"active":          true,
 		"createdAt":       time.Now().UnixMilli(),
 	}
-	if err := sm.redis.SaveSession(ctx, treeId, sessionId, metadata); err != nil {
+	if err := sm.redis.SaveSession(ctx, sessionId, metadata); err != nil {
 		return nil, fmt.Errorf("failed to save session:  %w", err)
 	}
 
-	// Aggiungi a index tree
-	if err := sm.redis.AddSessionToTree(ctx, treeId, sessionId); err != nil {
-		log.Printf("[WARN] Failed to add session to tree index: %v", err)
-	}
-	// Registra session su injection node (per recovery)
-	if err := sm.redis.AddSessionToNode(ctx, treeId, injectionId, sessionId); err != nil {
-		log.Printf("[WARN] Failed to register session on injection:  %v", err)
-	}
+	// Aggiungi all'indice globale e registra sul nodo injection
+	sm.redis.AddSessionToGlobalIndex(ctx, sessionId)
+	sm.redis.AddSessionToNode(ctx, injectionId, sessionId)
+
 	log.Printf("[SessionManager] Session metadata saved to Redis")
 
 	// Notifica Injection Node
-	injectionResp, err := sm.createInjectionSession(ctx, treeId, injectionId, sessionId, roomId, audioSsrc, videoSsrc)
+	injectionResp, err := sm.createInjectionSession(ctx, injectionId, sessionId, roomId, audioSsrc, videoSsrc)
 	if err != nil {
 		// Rollback:   cleanup Redis
-		sm.redis.DeleteSession(ctx, treeId, sessionId)
-		sm.redis.RemoveSessionFromTree(ctx, treeId, sessionId)
+		sm.redis.DeleteSession(ctx, sessionId)
+		sm.redis.RemoveSessionFromGlobalIndex(ctx, sessionId)
 		return nil, fmt.Errorf("failed to create injection session: %w", err)
 	}
 	log.Printf("[SessionManager] Injection session created: %s", injectionResp.Endpoint)
 
 	// Costruisci risposta
 	// Get injection node info per WHIP endpoint
-	injectionNode, err := sm.redis.GetNodeProvisioning(ctx, treeId, injectionId)
+	injectionNode, err := sm.redis.GetNodeProvisioning(ctx, injectionId)
 	if err != nil {
 		log.Printf("[WARN] Failed to get injection node info: %v", err)
 	}
@@ -150,7 +128,6 @@ func (sm *SessionManager) CreateSession(
 
 	sessionInfo := &SessionInfo{
 		SessionId:       sessionId,
-		TreeId:          treeId,
 		InjectionNodeId: injectionId,
 		AudioSsrc:       audioSsrc,
 		VideoSsrc:       videoSsrc,
@@ -175,12 +152,11 @@ func (sm *SessionManager) CreateSession(
 // -> Return WHEP endpoint
 func (sm *SessionManager) ProvisionViewer(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 ) (*ViewSessionResponse, error) {
 	log.Printf("[SessionManager] Provisioning viewer for session %s", sessionId)
 	// Get session metadata
-	session, err := sm.redis.GetSession(ctx, treeId, sessionId)
+	session, err := sm.redis.GetSession(ctx, sessionId)
 	if err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
@@ -188,9 +164,10 @@ func (sm *SessionManager) ProvisionViewer(
 	relayRootId := session["relayRootId"]
 	audioSsrc := parseInt(session["audioSsrc"])
 	videoSsrc := parseInt(session["videoSsrc"])
+
 	log.Printf("[SessionManager] Session:  injection=%s, relay-root=%s", injectionId, relayRootId)
 	// Check egress esistenti
-	existingEgress, err := sm.redis.FindEgressServingSession(ctx, treeId, sessionId)
+	existingEgress, err := sm.redis.FindEgressServingSession(ctx, sessionId)
 	if err == nil && len(existingEgress) > 0 {
 		log.Printf("[SessionManager] Found %d existing egress:  %v", len(existingEgress), existingEgress)
 
@@ -199,8 +176,8 @@ func (sm *SessionManager) ProvisionViewer(
 			if sm.selector.CanAcceptViewer(ctx, egressId) {
 				log.Printf("[SessionManager] Reusing egress %s (multicast)", egressId)
 
-				egressNode, _ := sm.redis.GetNodeProvisioning(ctx, treeId, egressId)
-				path, _ := sm.redis.GetSessionPath(ctx, treeId, sessionId, egressId)
+				egressNode, _ := sm.redis.GetNodeProvisioning(ctx, egressId)
+				path, _ := sm.redis.GetSessionPath(ctx, sessionId, egressId)
 
 				return &ViewSessionResponse{
 					SessionId:    sessionId,
@@ -220,7 +197,7 @@ func (sm *SessionManager) ProvisionViewer(
 	}
 
 	// Seleziona nuovo egress
-	egressId, err := sm.selector.SelectBestEgressForSession(ctx, treeId, sessionId)
+	egressId, err := sm.selector.SelectBestEgressForSession(ctx, sessionId)
 	if err != nil {
 		// TODO scaling?
 		return nil, fmt.Errorf("no egress available - scaling needed: %w", err)
@@ -229,7 +206,7 @@ func (sm *SessionManager) ProvisionViewer(
 	log.Printf("[SessionManager] Selected new egress: %s", egressId)
 
 	// Costruisci path
-	path, err := BuildPath(ctx, sm.redis, treeId, sessionId, injectionId, relayRootId, egressId)
+	path, err := BuildPath(ctx, sm.redis, sessionId, injectionId, relayRootId, egressId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build path: %w", err)
 	}
@@ -237,21 +214,21 @@ func (sm *SessionManager) ProvisionViewer(
 	log.Printf("[SessionManager] Path:  %v", path)
 
 	// Provvisiona path
-	if err := sm.provisionPath(ctx, treeId, sessionId, audioSsrc, videoSsrc, path); err != nil {
+	if err := sm.provisionPath(ctx, sessionId, audioSsrc, videoSsrc, path); err != nil {
 		return nil, fmt.Errorf("failed to provision path: %w", err)
 	}
 	// Salva mapping
-	if err := sm.redis.AddEgressToSession(ctx, treeId, sessionId, egressId); err != nil {
+	if err := sm.redis.AddEgressToSession(ctx, sessionId, egressId); err != nil {
 		log.Printf("[WARN] Failed to add egress to session: %v", err)
 	}
-	if err := sm.redis.AddSessionToNode(ctx, treeId, egressId, sessionId); err != nil {
+	if err := sm.redis.AddSessionToNode(ctx, egressId, sessionId); err != nil {
 		log.Printf("[WARN] Failed to register session on egress: %v", err)
 	}
-	if err := sm.redis.SaveSessionPath(ctx, treeId, sessionId, egressId, path); err != nil {
+	if err := sm.redis.SaveSessionPath(ctx, sessionId, egressId, path); err != nil {
 		log.Printf("[WARN] Failed to save path: %v", err)
 	}
 	// Get egress info
-	egressNode, err := sm.redis.GetNodeProvisioning(ctx, treeId, egressId)
+	egressNode, err := sm.redis.GetNodeProvisioning(ctx, egressId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get egress node: %w", err)
 	}
@@ -273,7 +250,6 @@ func (sm *SessionManager) ProvisionViewer(
 // provisionPath notifica relay + egress nel path
 func (sm *SessionManager) provisionPath(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 	audioSsrc int,
 	videoSsrc int,
@@ -289,7 +265,7 @@ func (sm *SessionManager) provisionPath(
 			return fmt.Errorf("failed to get next hop for %s: %w", relayId, err)
 		}
 		// Verifica se sessione attiva
-		nodeSessions, _ := sm.redis.GetNodeSessions(ctx, treeId, relayId)
+		nodeSessions, _ := sm.redis.GetNodeSessions(ctx, relayId)
 		alreadyActive := false
 		for _, s := range nodeSessions {
 			if s == sessionId {
@@ -300,14 +276,14 @@ func (sm *SessionManager) provisionPath(
 		if alreadyActive {
 			// CASO A: ROUTE-ADDED (Solo ID)
 			log.Printf("[ProvisionPath] Relay %s active -> Adding route ID: %s", relayId, nextHop)
-			if err := sm.redis.PublishRouteAdded(ctx, treeId, relayId, sessionId, nextHop); err != nil {
+			if err := sm.redis.PublishRouteAdded(ctx, relayId, sessionId, nextHop); err != nil {
 				return err
 			}
 		} else {
 			// CASO B: SESSION-CREATED (Full Info)
 
 			// Recupera info da Redis
-			nextNodeInfo, err := sm.redis.GetNodeProvisioning(ctx, treeId, nextHop)
+			nextNodeInfo, err := sm.redis.GetNodeProvisioning(ctx, nextHop)
 			if err != nil {
 				return fmt.Errorf("failed to get node info for %s: %w", nextHop, err)
 			}
@@ -327,30 +303,138 @@ func (sm *SessionManager) provisionPath(
 
 			// Invia evento con array di rotte
 			routes := []redis.Route{routeFull}
-			if err := sm.redis.PublishNodeSessionCreated(ctx, treeId, relayId, sessionId, audioSsrc, videoSsrc, routes); err != nil {
+			if err := sm.redis.PublishNodeSessionCreated(ctx, relayId, sessionId, audioSsrc, videoSsrc, routes); err != nil {
 				return err
 			}
 			// Persistenza
-			sm.redis.AddSessionToNode(ctx, treeId, relayId, sessionId)
+			sm.redis.AddSessionToNode(ctx, relayId, sessionId)
 		}
 		// Persistenza
-		sm.redis.AddRoute(ctx, treeId, sessionId, relayId, nextHop)
+		sm.redis.AddRoute(ctx, sessionId, relayId, nextHop)
 
 	}
 
 	// Egress
 	egressId := path[len(path)-1]
-	if err := sm.redis.PublishNodeSessionCreated(ctx, treeId, egressId, sessionId, audioSsrc, videoSsrc, nil); err != nil {
+	if err := sm.redis.PublishNodeSessionCreated(ctx, egressId, sessionId, audioSsrc, videoSsrc, nil); err != nil {
 		return err
 	}
-	sm.redis.AddSessionToNode(ctx, treeId, egressId, sessionId)
+	sm.redis.AddSessionToNode(ctx, egressId, sessionId)
 	return nil
 }
+
+// DestroySessionComplete distrugge tutta la sessione (tutti i path)
+func (sm *SessionManager) DestroySessionComplete(
+	ctx context.Context,
+	sessionId string,
+) error {
+	log.Printf("[SessionManager] Destroying entire session: %s", sessionId)
+
+	// Get tutti gli egress
+	egresses, err := sm.redis.GetSessionEgresses(ctx, sessionId)
+	if err != nil {
+		log.Printf("[WARN] Failed to get egresses: %v", err)
+		egresses = []string{} // Continua comunque
+	}
+
+	// Distruggi ogni path
+	for _, egressId := range egresses {
+		if err := sm.DestroySessionPath(ctx, sessionId, egressId); err != nil {
+			log.Printf("[WARN] Failed to destroy path %s: %v", egressId, err)
+			// Continua con gli altri
+		}
+	}
+
+	// Distruggi injection
+	sessionData, err := sm.redis.GetSession(ctx, sessionId)
+	if err == nil {
+		injectionId := sessionData["injectionNodeId"]
+		sm.redis.RemoveSessionFromNode(ctx, injectionId, sessionId)
+		sm.redis.PublishNodeSessionDestroyed(ctx, injectionId, sessionId)
+	}
+
+	// Cleanup metadata principale
+	sm.redis.DeleteSession(ctx, sessionId)
+	sm.redis.RemoveSessionFromGlobalIndex(ctx, sessionId)
+
+	log.Printf("[SessionManager] Session %s destroyed completely", sessionId)
+	return nil
+}
+
+// DestroySessionPath distrugge solo un path specifico (Backtracking)
+func (sm *SessionManager) DestroySessionPath(
+	ctx context.Context,
+	sessionId string,
+	egressId string,
+) error {
+	log.Printf("[SessionManager] Destroying path: session=%s, egress=%s", sessionId, egressId)
+
+	// Get path da distruggere
+	path, err := sm.redis.GetSessionPath(ctx, sessionId, egressId)
+	if err != nil {
+		return fmt.Errorf("path not found: %w", err)
+	}
+
+	// Distruggi l'Egress
+	log.Printf("[DestroyPath] Destroying egress node %s", egressId)
+	sm.redis.RemoveSessionFromNode(ctx, egressId, sessionId)
+	sm.redis.PublishNodeSessionDestroyed(ctx, egressId, sessionId)
+	sm.redis.RemoveEgressFromSession(ctx, sessionId, egressId)
+
+	// Rimuovi la chiave del path salvato
+	sm.redis.Del(ctx, fmt.Sprintf("path:%s:%s", sessionId, egressId))
+
+	// BACKTRACKING: Risali il path dai Relay verso la Root
+	currentTargetId := egressId
+
+	for i := len(path) - 2; i >= 1; i-- {
+		relayId := path[i]
+
+		log.Printf("[DestroyPath] Checking relay %s (removing route to %s)", relayId, currentTargetId)
+
+		// Rimuovi la rotta verso il target corrente
+		err := sm.redis.RemoveRoute(ctx, sessionId, relayId, currentTargetId)
+		if err != nil {
+			log.Printf("[WARN] Failed to remove route on %s: %v", relayId, err)
+		}
+
+		// Controlla quante rotte sono rimaste attive su questo relay
+		remainingRoutes, err := sm.redis.GetRoutes(ctx, sessionId, relayId)
+		routeCount := len(remainingRoutes)
+		if err != nil {
+			log.Printf("[WARN] Failed to get routes for %s: %v", relayId, err)
+			routeCount = 0
+		}
+
+		if routeCount > 0 {
+			// CASO 1: Il Relay serve ancora qualcun altro
+			log.Printf("[DestroyPath] Relay %s still has %d routes. Keeping session.", relayId, routeCount)
+			// Notifica solo la rimozione della rotta specifica
+			sm.redis.PublishRouteRemoved(ctx, relayId, sessionId, currentTargetId)
+
+			break
+		} else {
+			// CASO 2: Il Relay non ha più rotte
+			log.Printf("[DestroyPath] Relay %s is empty. Destroying session.", relayId)
+
+			// Distruggi sessione sul relay
+			sm.redis.RemoveSessionFromNode(ctx, relayId, sessionId)
+			sm.redis.PublishNodeSessionDestroyed(ctx, relayId, sessionId)
+
+			// Il relay corrente diventa il target da rimuovere al prossimo giro del loop
+			currentTargetId = relayId
+		}
+	}
+
+	log.Printf("[SessionManager] Path destroyed: %s -> %s", sessionId, egressId)
+	return nil
+}
+
+// Helpers
 
 // createInjectionSession chiama HTTP API injection node
 func (sm *SessionManager) createInjectionSession(
 	ctx context.Context,
-	treeId string,
 	injectionNodeId string,
 	sessionId string,
 	roomId int,
@@ -358,7 +442,7 @@ func (sm *SessionManager) createInjectionSession(
 	videoSsrc int,
 ) (*InjectionSessionResponse, error) {
 	// Get node info per API endpoint
-	nodeInfo, err := sm.redis.GetNodeProvisioning(ctx, treeId, injectionNodeId)
+	nodeInfo, err := sm.redis.GetNodeProvisioning(ctx, injectionNodeId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node info: %w", err)
 	}
@@ -408,11 +492,10 @@ func (sm *SessionManager) createInjectionSession(
 // ListSessions lista tutte le sessioni di un tree
 func (sm *SessionManager) ListSessions(
 	ctx context.Context,
-	treeId string,
 ) ([]*SessionSummary, error) {
-	log.Printf("[SessionManager] Listing sessions for tree %s", treeId)
+	log.Printf("[SessionManager] Listing sessions")
 
-	sessionIds, err := sm.redis.GetTreeSessions(ctx, treeId)
+	sessionIds, err := sm.redis.GetGlobalSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tree sessions:  %w", err)
 	}
@@ -421,7 +504,7 @@ func (sm *SessionManager) ListSessions(
 	summaries := make([]*SessionSummary, 0, len(sessionIds))
 
 	for _, sessionId := range sessionIds {
-		session, err := sm.redis.GetSession(ctx, treeId, sessionId)
+		session, err := sm.redis.GetSession(ctx, sessionId)
 		if err != nil {
 			log.Printf("[WARN] Failed to get session %s: %v", sessionId, err)
 			continue
@@ -446,42 +529,26 @@ func (sm *SessionManager) ListSessions(
 		}
 		summaries = append(summaries, &SessionSummary{
 			SessionId:       sessionId,
-			TreeId:          treeId,
 			InjectionNodeId: session["injectionNodeId"],
 			Active:          isActive,
 			CreatedAt:       createdAt,
 		})
 	}
 
-	log.Printf("[SessionManager] Found %d sessions for tree %s", len(summaries), treeId)
+	log.Printf("[SessionManager] Found %d sessions ", len(summaries))
 	return summaries, nil
-}
-
-// Helpers
-
-func parseInt(s string) int {
-	var i int
-	fmt.Sscanf(s, "%d", &i)
-	return i
-}
-
-func parseInt64(s string) int64 {
-	var i int64
-	fmt.Sscanf(s, "%d", &i)
-	return i
 }
 
 // GetSessionDetails legge dettagli sessione completi
 // Usato da GET /api/trees/:treeId/sessions/:sessionId
 func (sm *SessionManager) GetSessionDetails(
 	ctx context.Context,
-	treeId string,
 	sessionId string,
 ) (*SessionInfo, error) {
 	log.Printf("[SessionManager] Getting session details %s", sessionId)
 
 	// Get session metadata
-	session, err := sm.redis.GetSession(ctx, treeId, sessionId)
+	session, err := sm.redis.GetSession(ctx, sessionId)
 	if err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
@@ -490,8 +557,8 @@ func (sm *SessionManager) GetSessionDetails(
 	audioSsrc := parseInt(session["audioSsrc"])
 	videoSsrc := parseInt(session["videoSsrc"])
 	roomId := parseInt(session["roomId"])
-	// Get injection node info
-	injectionNode, _ := sm.redis.GetNodeProvisioning(ctx, treeId, injectionId)
+	// Get injection node info per ricostruire l'endpoint
+	injectionNode, err := sm.redis.GetNodeProvisioning(ctx, injectionId)
 	whipEndpoint := fmt.Sprintf("http://%s:%d/whip/endpoint/%s",
 		injectionNode.InternalHost,
 		injectionNode.InternalAPIPort,
@@ -507,7 +574,6 @@ func (sm *SessionManager) GetSessionDetails(
 
 	return &SessionInfo{
 		SessionId:       sessionId,
-		TreeId:          treeId,
 		InjectionNodeId: injectionId,
 		AudioSsrc:       audioSsrc,
 		VideoSsrc:       videoSsrc,
@@ -517,113 +583,14 @@ func (sm *SessionManager) GetSessionDetails(
 		CreatedAt:       createdAt,
 	}, nil
 }
-
-// DestroySessionComplete distrugge tutta la sessione (tutti i path)
-func (sm *SessionManager) DestroySessionComplete(
-	ctx context.Context,
-	treeId string,
-	sessionId string,
-) error {
-	log.Printf("[SessionManager] Destroying entire session: %s", sessionId)
-
-	// Get tutti gli egress
-	egresses, err := sm.redis.GetSessionEgresses(ctx, treeId, sessionId)
-	if err != nil {
-		log.Printf("[WARN] Failed to get egresses: %v", err)
-		egresses = []string{} // Continua comunque
-	}
-
-	// Distruggi ogni path
-	for _, egressId := range egresses {
-		if err := sm.DestroySessionPath(ctx, treeId, sessionId, egressId); err != nil {
-			log.Printf("[WARN] Failed to destroy path %s: %v", egressId, err)
-			// Continua con gli altri
-		}
-	}
-
-	// Distruggi injection
-	sessionData, err := sm.redis.GetSession(ctx, treeId, sessionId)
-	if err == nil {
-		injectionId := sessionData["injectionNodeId"]
-		sm.redis.RemoveSessionFromNode(ctx, treeId, injectionId, sessionId)
-		sm.redis.PublishNodeSessionDestroyed(ctx, treeId, injectionId, sessionId)
-	}
-
-	// Cleanup metadata principale
-	sm.redis.DeleteSession(ctx, treeId, sessionId)
-	sm.redis.RemoveSessionFromTree(ctx, treeId, sessionId)
-
-	log.Printf("[SessionManager] Session %s destroyed completely", sessionId)
-	return nil
+func parseInt(s string) int {
+	var i int
+	fmt.Sscanf(s, "%d", &i)
+	return i
 }
 
-// DestroySessionPath distrugge solo un path specifico (Backtracking)
-func (sm *SessionManager) DestroySessionPath(
-	ctx context.Context,
-	treeId string,
-	sessionId string,
-	egressId string,
-) error {
-	log.Printf("[SessionManager] Destroying path: session=%s, egress=%s", sessionId, egressId)
-
-	// Get path da distruggere
-	path, err := sm.redis.GetSessionPath(ctx, treeId, sessionId, egressId)
-	if err != nil {
-		return fmt.Errorf("path not found: %w", err)
-	}
-
-	// Distruggi l'Egress
-	log.Printf("[DestroyPath] Destroying egress node %s", egressId)
-	sm.redis.RemoveSessionFromNode(ctx, treeId, egressId, sessionId)
-	sm.redis.PublishNodeSessionDestroyed(ctx, treeId, egressId, sessionId)
-	sm.redis.RemoveEgressFromSession(ctx, treeId, sessionId, egressId)
-
-	// Rimuovi la chiave del path salvato
-	pathKey := fmt.Sprintf("tree:%s:session:%s:path:%s", treeId, sessionId, egressId)
-	sm.redis.Del(ctx, pathKey)
-
-	// BACKTRACKING: Risali il path dai Relay verso la Root
-	currentTargetId := egressId
-
-	for i := len(path) - 2; i >= 1; i-- {
-		relayId := path[i]
-
-		log.Printf("[DestroyPath] Checking relay %s (removing route to %s)", relayId, currentTargetId)
-
-		// Rimuovi la rotta verso il target corrente
-		err := sm.redis.RemoveRoute(ctx, treeId, sessionId, relayId, currentTargetId)
-		if err != nil {
-			log.Printf("[WARN] Failed to remove route on %s: %v", relayId, err)
-		}
-
-		// Controlla quante rotte sono rimaste attive su questo relay
-		remainingRoutes, err := sm.redis.GetRoutes(ctx, treeId, sessionId, relayId)
-		routeCount := len(remainingRoutes)
-		if err != nil {
-			log.Printf("[WARN] Failed to get routes for %s: %v", relayId, err)
-			routeCount = 0
-		}
-
-		if routeCount > 0 {
-			// CASO 1: Il Relay serve ancora qualcun altro
-			log.Printf("[DestroyPath] Relay %s still has %d routes. Keeping session.", relayId, routeCount)
-			// Notifica solo la rimozione della rotta specifica
-			sm.redis.PublishRouteRemoved(ctx, treeId, relayId, sessionId, currentTargetId)
-
-			break
-		} else {
-			// CASO 2: Il Relay non ha più rotte
-			log.Printf("[DestroyPath] Relay %s is empty. Destroying session.", relayId)
-
-			// Distruggi sessione sul relay
-			sm.redis.RemoveSessionFromNode(ctx, treeId, relayId, sessionId)
-			sm.redis.PublishNodeSessionDestroyed(ctx, treeId, relayId, sessionId)
-
-			// Il relay corrente diventa il target da rimuovere al prossimo giro del loop
-			currentTargetId = relayId
-		}
-	}
-
-	log.Printf("[SessionManager] Path destroyed: %s -> %s", sessionId, egressId)
-	return nil
+func parseInt64(s string) int64 {
+	var i int64
+	fmt.Sscanf(s, "%d", &i)
+	return i
 }

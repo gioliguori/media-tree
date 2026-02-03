@@ -5,14 +5,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"controller/internal/api"
 	"controller/internal/autoscaler"
 	"controller/internal/config"
-	"controller/internal/domain"
 	"controller/internal/metrics"
 	"controller/internal/provisioner"
 	"controller/internal/redis"
@@ -48,26 +46,25 @@ func main() {
 		log.Fatalf("Failed to create Docker Provisioner: %v", err)
 	}
 
-	// Tree Manager
-	treeManager := tree.NewTreeManager(redisClient, dockerProvisioner)
+	// Node Manager
+	nodeManager := tree.NewTreeManager(redisClient, dockerProvisioner)
 
 	// Session Manager
 	sessionManager := session.NewSessionManager(redisClient)
 
 	log.Println("Core Managers Initialized")
 
-	// Albero di Default
+	// Bootstrap
 	ctx := context.Background()
-	defaultTreeID := "default-tree"
-	if exists, _ := redisClient.TreeExists(ctx, defaultTreeID); !exists {
-		log.Printf("Bootstrapping default tree: %s...", defaultTreeID)
-		if _, err := treeManager.CreateTree(ctx, defaultTreeID, "minimal"); err != nil {
-			log.Printf("Warning: Failed to create default tree: %v", err)
-		} else {
-			log.Println("Default tree created successfully")
+	activeNodes, _ := redisClient.GetActiveNodes(ctx)
+
+	if len(activeNodes) == 0 {
+		log.Println("[Main] Mesh is empty. Bootstrapping minimum nodes...")
+		if err := nodeManager.Bootstrap(ctx); err != nil {
+			log.Printf("[WARN] Bootstrap failed: %v", err)
 		}
 	} else {
-		log.Println("Default tree already exists")
+		log.Printf("[Main] System already has %d active nodes", len(activeNodes))
 	}
 
 	// Avvio background jobs
@@ -88,14 +85,14 @@ func main() {
 	log.Println("Session cleanup job started")
 
 	// Autoscaler Job
-	autoscalerJob := autoscaler.NewAutoscalerJob(redisClient, treeManager)
+	autoscalerJob := autoscaler.NewAutoscalerJob(redisClient, nodeManager)
 	if err := autoscalerJob.Start(ctx); err != nil {
 		log.Fatalf("Failed to start autoscaler: %v", err)
 	}
 	log.Println("Autoscaler job started")
 
 	// Api Server
-	server := api.NewServer(cfg, redisClient, treeManager, sessionManager)
+	server := api.NewServer(cfg, redisClient, nodeManager, sessionManager)
 
 	go func() {
 		if err := server.Start(); err != nil {
@@ -115,58 +112,13 @@ func main() {
 	defer shutdownCancel()
 
 	autoscalerJob.Stop()
+
+	// Distruggi tutti i nodi fisici della mesh prima di uscire
+	nodeManager.DestroyAllNodes(shutdownCtx)
+
+	// Ferma il server API
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Server shutdown failed: %v", err)
-	}
-	log.Println("Resource cleanup")
-
-	// Recupera tutti gli alberi
-	trees, err := redisClient.GetAllTrees(shutdownCtx)
-	if err != nil {
-		log.Printf("[ERROR] Failed to get trees for cleanup: %v", err)
-	} else {
-		for _, treeID := range trees {
-			log.Printf("Cleanup: Scanning tree %s", treeID)
-
-			// Recupera i nodi dell'albero
-			nodeIDs, err := redisClient.GetAllTreeNodes(shutdownCtx, treeID)
-			if err != nil {
-				log.Printf("[WARN] Failed to get nodes for tree %s: %v", treeID, err)
-				continue
-			}
-
-			if len(nodeIDs) == 0 {
-				continue
-			}
-
-			// WaitGroup per questo albero
-			var wg sync.WaitGroup
-			log.Printf("Cleanup: Found %d nodes in tree %s. Destroying", len(nodeIDs), treeID)
-
-			for _, nodeID := range nodeIDs {
-				wg.Add(1)
-
-				go func(tID, nID string) {
-					defer wg.Done()
-
-					// Recupera info (o crea dummy)
-					nodeInfo, err := redisClient.GetNodeProvisioning(shutdownCtx, tID, nID)
-					if err != nil {
-						// Fallback per nodi zombie
-						nodeInfo = &domain.NodeInfo{TreeId: tID, NodeId: nID}
-					}
-
-					log.Printf("Cleanup: Destroying node %s", nID)
-					if err := dockerProvisioner.DestroyNode(shutdownCtx, nodeInfo); err != nil {
-						log.Printf("[ERROR] Failed to destroy node %s: %v", nID, err)
-					}
-				}(treeID, nodeID)
-			}
-
-			// Aspetta che tutti i nodi di questo albero siano distrutti
-			wg.Wait()
-			log.Printf("Cleanup: Tree %s cleaned.", treeID)
-		}
+		log.Printf("Server shutdown error: %v", err)
 	}
 	log.Println("Controller stopped")
 }
