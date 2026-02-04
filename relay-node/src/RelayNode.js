@@ -196,10 +196,43 @@ export class RelayNode extends BaseNode {
             }
         };
     }
+
+    async onReportMetrics(metrics) {
+        await super.onReportMetrics(metrics);
+
+        if (!metrics.gstreamer) return;
+
+        const key = `metrics:node:${this.nodeId}:gstreamer`;
+        const appKey = `metrics:node:${this.nodeId}:application`;
+
+        const pipe = this.redis.pipeline();
+
+        // Metriche GStreamer (Latenza code)
+        pipe.hset(key, {
+            maxAudioQueueMs: metrics.gstreamer.maxAudioQueueMs.toFixed(2),
+            maxVideoQueueMs: metrics.gstreamer.maxVideoQueueMs.toFixed(2),
+            sessionCount: metrics.gstreamer.sessionCount,
+            timestamp: new Date().toISOString()
+        });
+        pipe.expire(key, 30);
+
+        // Metriche Applicative
+        if (metrics.application) {
+            pipe.hset(appKey, {
+                sessionsForwarded: metrics.application.sessionsForwarded,
+                totalRoutes: metrics.application.totalRoutes,
+            });
+            pipe.expire(appKey, 30);
+        }
+
+        await pipe.exec();
+    }
+
     async getMetrics() {
         const baseMetrics = await super.getMetrics();
 
         let gstreamerStats = null;
+        let totalRoutes = 0;
 
         try {
             if (this.forwarder.isReady()) {
@@ -208,10 +241,18 @@ export class RelayNode extends BaseNode {
         } catch (err) {
             console.error(`[${this.nodeId}] Failed to get GStreamer stats:`, err.message);
         }
+        if (gstreamerStats && gstreamerStats.sessions) {
+            totalRoutes = gstreamerStats.sessions.reduce((acc, s) => acc + (s.targetCount || 0), 0);
+        }
 
         return {
             ...baseMetrics,
-            gstreamer: gstreamerStats
+            gstreamer: gstreamerStats,
+            application: {
+                ...baseMetrics.application,
+                sessionsForwarded: gstreamerStats ? gstreamerStats.sessionCount : 0,
+                totalRoutes: totalRoutes
+            }
             // Output esempio: 
             // {
             //   maxAudioQueueMs: 45.3,

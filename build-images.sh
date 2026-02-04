@@ -37,6 +37,10 @@ docker build -t media-tree/egress-node:latest \
   -f egress-node/Dockerfile \
   .
 
+
+echo "Building metrics-agent..."
+docker build -t media-tree/metrics-agent:latest ./metrics-agent/
+
 echo "All images built successfully!"
 echo ""
 echo "Available images:"

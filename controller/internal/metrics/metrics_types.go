@@ -1,117 +1,117 @@
 package metrics
 
-import "time"
+// import "time"
 
-// ContainerMetrics rappresenta le metriche Docker di un singolo container
-type ContainerMetrics struct {
-	ContainerId    string        `json:"containerId"`
-	ContainerName  string        `json:"containerName"`
-	CPUPercent     float64       `json:"cpuPercent"`
-	MemoryUsedMB   float64       `json:"memoryUsedMb"`
-	MemoryPercent  float64       `json:"memoryPercent"`
-	NetworkTxBytes uint64        `json:"networkTxBytes"`
-	JanusMetrics   *JanusMetrics `json:"janus,omitempty"`
+// // ContainerMetrics rappresenta le metriche Docker di un singolo container
+// type ContainerMetrics struct {
+// 	ContainerId    string        `json:"containerId"`
+// 	ContainerName  string        `json:"containerName"`
+// 	CPUPercent     float64       `json:"cpuPercent"`
+// 	MemoryUsedMB   float64       `json:"memoryUsedMb"`
+// 	MemoryPercent  float64       `json:"memoryPercent"`
+// 	NetworkTxBytes uint64        `json:"networkTxBytes"`
+// 	JanusMetrics   *JanusMetrics `json:"janus,omitempty"`
 
-	//MemoryLimitMB float64 `json:"memoryLimitMb"`
-	// Network metrics
-	// NetworkRxBytes   uint64 `json:"networkRxBytes"`
-	// NetworkRxPackets uint64 `json:"networkRxPackets"`
-	// NetworkTxPackets uint64 `json:"networkTxPackets"`
-	// NetworkRxErrors  uint64 `json:"networkRxErrors"`
-	// NetworkTxErrors  uint64 `json:"networkTxErrors"`
-	// Disk I/O
-	// BlockReadBytes  uint64 `json:"blockReadBytes"`
-	// BlockWriteBytes uint64 `json:"blockWriteBytes"`
-	// PIds
-	// PIdsCurrent int `json:"pidsCurrent"`
-}
+// 	//MemoryLimitMB float64 `json:"memoryLimitMb"`
+// 	// Network metrics
+// 	// NetworkRxBytes   uint64 `json:"networkRxBytes"`
+// 	// NetworkRxPackets uint64 `json:"networkRxPackets"`
+// 	// NetworkTxPackets uint64 `json:"networkTxPackets"`
+// 	// NetworkRxErrors  uint64 `json:"networkRxErrors"`
+// 	// NetworkTxErrors  uint64 `json:"networkTxErrors"`
+// 	// Disk I/O
+// 	// BlockReadBytes  uint64 `json:"blockReadBytes"`
+// 	// BlockWriteBytes uint64 `json:"blockWriteBytes"`
+// 	// PIds
+// 	// PIdsCurrent int `json:"pidsCurrent"`
+// }
 
-// ApplicationMetrics
-type ApplicationMetrics struct {
-	ActiveSessions    int     `json:"activeSessions"`              // Injection/Egress
-	SessionsForwarded int     `json:"sessionsForwarded,omitempty"` // Relay
-	TotalRoutes       int     `json:"totalRoutes,omitempty"`       // Relay
-	BandwidthTxMbps   float64 `json:"bandwidthTxMbps,omitempty"`   // Relay (calcolato)
-}
+// // ApplicationMetrics
+// type ApplicationMetrics struct {
+// 	ActiveSessions    int     `json:"activeSessions"`              // Injection/Egress
+// 	SessionsForwarded int     `json:"sessionsForwarded,omitempty"` // Relay
+// 	TotalRoutes       int     `json:"totalRoutes,omitempty"`       // Relay
+// 	BandwidthTxMbps   float64 `json:"bandwidthTxMbps,omitempty"`   // Relay (calcolato)
+// }
 
-// GStreamerMetrics - Metriche code GStreamer (solo relay)
-type GStreamerMetrics struct {
-	MaxAudioQueueMs float64 `json:"maxAudioQueueMs"`
-	MaxVideoQueueMs float64 `json:"maxVideoQueueMs"`
-	SessionCount    int     `json:"sessionCount"`
-}
+// // GStreamerMetrics - Metriche code GStreamer (solo relay)
+// type GStreamerMetrics struct {
+// 	MaxAudioQueueMs float64 `json:"maxAudioQueueMs"`
+// 	MaxVideoQueueMs float64 `json:"maxVideoQueueMs"`
+// 	SessionCount    int     `json:"sessionCount"`
+// }
 
-// JanusMetrics - Metriche da Janus API
-type JanusMetrics struct {
-	// VideoRoom (injection)
-	RoomsActive int          `json:"roomsActive,omitempty"` // Numero room attive
-	Rooms       []RoomMetric `json:"rooms,omitempty"`       // Dettaglio room
+// // JanusMetrics - Metriche da Janus API
+// type JanusMetrics struct {
+// 	// VideoRoom (injection)
+// 	RoomsActive int          `json:"roomsActive,omitempty"` // Numero room attive
+// 	Rooms       []RoomMetric `json:"rooms,omitempty"`       // Dettaglio room
 
-	// Streaming (egress)
-	MountpointsActive int                `json:"mountpointsActive,omitempty"` // Numero mountpoint attivi
-	TotalViewers      int                `json:"totalViewers,omitempty"`      // viewer totali su Egress
-	Mountpoints       []MountpointMetric `json:"mountpoints,omitempty"`       // Dettaglio mountpoint
-}
+// 	// Streaming (egress)
+// 	MountpointsActive int                `json:"mountpointsActive,omitempty"` // Numero mountpoint attivi
+// 	TotalViewers      int                `json:"totalViewers,omitempty"`      // viewer totali su Egress
+// 	Mountpoints       []MountpointMetric `json:"mountpoints,omitempty"`       // Dettaglio mountpoint
+// }
 
-type MountpointMetric struct {
-	MountpointId   int    `json:"mountpointId"`
-	SessionId      string `json:"sessionId"`
-	Description    string `json:"description,omitempty"`
-	Viewers        int    `json:"viewers"`
-	Enabled        bool   `json:"enabled"`
-	LastActivityAt int64  `json:"lastActivityAt"`
-	AgeMs          int64  `json:"ageMs"`
-}
+// type MountpointMetric struct {
+// 	MountpointId   int    `json:"mountpointId"`
+// 	SessionId      string `json:"sessionId"`
+// 	Description    string `json:"description,omitempty"`
+// 	Viewers        int    `json:"viewers"`
+// 	Enabled        bool   `json:"enabled"`
+// 	LastActivityAt int64  `json:"lastActivityAt"`
+// 	AgeMs          int64  `json:"ageMs"`
+// }
 
-type RoomMetric struct {
-	RoomId         int    `json:"roomId"`
-	SessionId      string `json:"sessionId,omitempty"`
-	Description    string `json:"description,omitempty"`
-	HasPublisher   bool   `json:"hasPublisher"`
-	LastActivityAt int64  `json:"lastActivityAt"`
-}
+// type RoomMetric struct {
+// 	RoomId         int    `json:"roomId"`
+// 	SessionId      string `json:"sessionId,omitempty"`
+// 	Description    string `json:"description,omitempty"`
+// 	HasPublisher   bool   `json:"hasPublisher"`
+// 	LastActivityAt int64  `json:"lastActivityAt"`
+// }
 
-type NodeMetricsResponse struct {
-	NodeId    string        `json:"nodeId"`
-	NodeType  string        `json:"nodeType"`
-	Timestamp int64         `json:"timestamp"`
-	Janus     *JanusMetrics `json:"janus,omitempty"`
-}
+// type NodeMetricsResponse struct {
+// 	NodeId    string        `json:"nodeId"`
+// 	NodeType  string        `json:"nodeType"`
+// 	Timestamp int64         `json:"timestamp"`
+// 	Janus     *JanusMetrics `json:"janus,omitempty"`
+// }
 
-// NodeMetrics rappresenta le metriche aggregate per un nodo logico
-type NodeMetrics struct {
-	NodeId             string                       `json:"nodeId"`
-	NodeType           string                       `json:"nodeType"`
-	Timestamp          int64                        `json:"timestamp"`
-	Containers         map[string]*ContainerMetrics `json:"containers"`
-	ApplicationMetrics *ApplicationMetrics          `json:"application,omitempty"`
-	GStreamerMetrics   *GStreamerMetrics            `json:"gstreamer,omitempty"`
-}
+// // NodeMetrics rappresenta le metriche aggregate per un nodo logico
+// type NodeMetrics struct {
+// 	NodeId             string                       `json:"nodeId"`
+// 	NodeType           string                       `json:"nodeType"`
+// 	Timestamp          int64                        `json:"timestamp"`
+// 	Containers         map[string]*ContainerMetrics `json:"containers"`
+// 	ApplicationMetrics *ApplicationMetrics          `json:"application,omitempty"`
+// 	GStreamerMetrics   *GStreamerMetrics            `json:"gstreamer,omitempty"`
+// }
 
-// ContainerType identifica il tipo di container
-type ContainerType string
+// // ContainerType identifica il tipo di container
+// type ContainerType string
 
-const (
-	ContainerTypeNodeJS         ContainerType = "nodejs"
-	ContainerTypeJanusVideoroom ContainerType = "janusVideoroom"
-	ContainerTypeJanusStreaming ContainerType = "janusStreaming"
-)
+// const (
+// 	ContainerTypeNodeJS         ContainerType = "nodejs"
+// 	ContainerTypeJanusVideoroom ContainerType = "janusVideoroom"
+// 	ContainerTypeJanusStreaming ContainerType = "janusStreaming"
+// )
 
-// MetricsCollectorConfig configurazione del collector
-type MetricsCollectorConfig struct {
-	PollInterval time.Duration // Intervallo polling
-	MetricsTTL   time.Duration // TTL metriche in Redis
-	MaxWorkers   int           // Max goroutine concorrenti
-	Enabled      bool          // Enable/disable collector
-}
+// // MetricsCollectorConfig configurazione del collector
+// type MetricsCollectorConfig struct {
+// 	PollInterval time.Duration // Intervallo polling
+// 	MetricsTTL   time.Duration // TTL metriche in Redis
+// 	MaxWorkers   int           // Max goroutine concorrenti
+// 	Enabled      bool          // Enable/disable collector
+// }
 
-// DefaultConfig ritorna configurazione di default
-func DefaultConfig() *MetricsCollectorConfig {
-	pollInterval := 10 * time.Second
-	return &MetricsCollectorConfig{
-		PollInterval: pollInterval,
-		MetricsTTL:   pollInterval * 3,
-		MaxWorkers:   10,
-		Enabled:      true,
-	}
-}
+// // DefaultConfig ritorna configurazione di default
+// func DefaultConfig() *MetricsCollectorConfig {
+// 	pollInterval := 10 * time.Second
+// 	return &MetricsCollectorConfig{
+// 		PollInterval: pollInterval,
+// 		MetricsTTL:   pollInterval * 3,
+// 		MaxWorkers:   10,
+// 		Enabled:      true,
+// 	}
+// }

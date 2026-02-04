@@ -23,31 +23,6 @@ func (c *Client) Get(ctx context.Context, key string) (string, error) {
 	return c.rdb.Get(ctx, key).Result()
 }
 
-// GetNodeProvisioningByContainerId trova nodeInfo dal containerId
-// Utile per il metrics collector
-func (c *Client) GetNodeProvisioningByContainerId(ctx context.Context, containerId string) (*NodeProvisioningData, error) {
-	pattern := "node:*:provisioning"
-	keys, err := c.Keys(ctx, pattern)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cerca tra tutte le chiavi quella con questo containerId
-	for _, key := range keys {
-		var data NodeProvisioningData
-		if err := c.rdb.HGetAll(ctx, key).Scan(&data); err != nil {
-			continue
-		}
-
-		// Controlla se questo nodo ha il container che cerchiamo
-		if data.ContainerId == containerId || data.JanusContainerId == containerId {
-			return &data, nil
-		}
-	}
-
-	return nil, nil // Non trovato
-}
-
 // GetNodeMetrics legge metriche per un nodo (tutti container)
 func (c *Client) GetNodeMetrics(ctx context.Context, nodeId string) (map[string]map[string]string, error) {
 	pattern := fmt.Sprintf("metrics:node:%s:*", nodeId)

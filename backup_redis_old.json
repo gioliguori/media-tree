@@ -1,0 +1,256 @@
+{
+  "pool:egress": [
+    "egress-1"
+  ],
+  "pool:injection": [
+    "injection-1"
+  ],
+  "mountpoints:global": [
+    "egress-1:manual-1770055269"
+  ],
+  "metrics:node:relay-1:gstreamer": {
+    "maxAudioQueueMs": "0.00",
+    "maxVideoQueueMs": "0.00",
+    "sessionCount": "0",
+    "timestamp": "2026-02-02T18:03:20Z"
+  },
+  "metrics:node:relay-root-1:gstreamer": {
+    "maxAudioQueueMs": "0.00",
+    "maxVideoQueueMs": "0.00",
+    "sessionCount": "1",
+    "timestamp": "2026-02-02T18:03:20Z"
+  },
+  "metrics:node:egress-1:mountpoint:1000": {
+    "enabled": "true",
+    "ageMs": "46943",
+    "timestamp": "2026-02-02T18:03:20Z",
+    "mountpointId": "1000",
+    "sessionId": "manual-1770055269",
+    "description": "Session mountpoint 1000",
+    "viewers": "1"
+  },
+  "metrics:node:relay-1:nodejs": {
+    "containerId": "14833dc2ec5847526c64b8588904d4bfd3e52df9c4c1187a2688b26343927324",
+    "containerName": "relay-1",
+    "cpuPercent": "0.04",
+    "memoryUsedMb": "31.39",
+    "networkTxBytes": "13210",
+    "memoryPercent": "6.13",
+    "timestamp": "2026-02-02T18:03:20Z"
+  },
+  "sessions:inactive": [
+    [
+      "manual-1770055269",
+      1770055383463.0
+    ]
+  ],
+  "node:injection-1:provisioning": {
+    "nodeId": "injection-1",
+    "nodeType": "injection",
+    "containerId": "9d8555fb1671d23457d923783959ffd2d387a947139a2ca6563165a4fdd7c567",
+    "janusContainerId": "960347ea6f623664390f5d1141caf1bd9c9d969a28116a087baf773b0ecfcbbb",
+    "externalAPIPort": "7070",
+    "janusHTTPPort": "8088",
+    "janusWSPort": "8188",
+    "webrtcPortStart": "20000",
+    "webrtcPortEnd": "20099",
+    "streamPortStart": "0",
+    "streamPortEnd": "0",
+    "createdBy": "controller",
+    "createdAt": "1770055258"
+  },
+  "session:manual-1770055269:egresses": [
+    "egress-1"
+  ],
+  "metrics:node:injection-1:janusVideoroom": {
+    "timestamp": "2026-02-02T18:03:20Z",
+    "janusRoomsActive": "0",
+    "containerId": "960347ea6f623664390f5d1141caf1bd9c9d969a28116a087baf773b0ecfcbbb",
+    "containerName": "injection-1-janus-vr",
+    "cpuPercent": "0.34",
+    "memoryUsedMb": "40.72",
+    "networkTxBytes": "3539035",
+    "memoryPercent": "7.95"
+  },
+  "global:ssrcCounter": "10001",
+  "nodes:provisioned": [
+    "relay-root-1",
+    "egress-1",
+    "injection-1"
+  ],
+  "routing:manual-1770055269:relay-root-1": [
+    "egress-1"
+  ],
+  "global:active_nodes": [
+    "relay-root-1",
+    "egress-1",
+    "injection-1"
+  ],
+  "global:roomCounter": "1000",
+  "metrics:node:relay-1:application": {
+    "timestamp": "2026-02-02T18:03:30Z",
+    "sessionsForwarded": "0",
+    "totalRoutes": "0",
+    "bandwidthTxMbps": "0.00"
+  },
+  "node:injection-1:sessions": [
+    "manual-1770055269"
+  ],
+  "node:relay-root-1:parents": [
+    "injection-1"
+  ],
+  "metrics:node:relay-root-1:nodejs": {
+    "cpuPercent": "0.04",
+    "memoryUsedMb": "39.78",
+    "networkTxBytes": "3405409",
+    "memoryPercent": "7.77",
+    "timestamp": "2026-02-02T18:03:20Z",
+    "containerId": "6ecf9d4157fcf14f2916e5f0cbe1ba7396c2315286bf0897135644caa6f86794",
+    "containerName": "relay-root-1"
+  },
+  "node:relay-root-1:sessions": [
+    "manual-1770055269"
+  ],
+  "node:injection-1": {
+    "nodeId": "injection-1",
+    "type": "injection",
+    "host": "injection-1",
+    "port": "7070",
+    "audioPort": "5000",
+    "videoPort": "5002",
+    "status": "active",
+    "created": "1770055259531"
+  },
+  "metrics:node:relay-root-1:prevTx": "3405409",
+  "node:egress-1:provisioning": {
+    "nodeId": "egress-1",
+    "nodeType": "egress",
+    "containerId": "c66a76f897b542960774924c60288e7491ddcff5c05f15117aa45a073fed8ce6",
+    "janusContainerId": "9b98632c575380ca28bc71d2ec0e00aeac3a397ceded58a9f3d3269dd9090bee",
+    "externalAPIPort": "7073",
+    "janusHTTPPort": "8089",
+    "janusWSPort": "8189",
+    "webrtcPortStart": "20100",
+    "webrtcPortEnd": "20199",
+    "streamPortStart": "10000",
+    "streamPortEnd": "10199",
+    "createdBy": "controller",
+    "createdAt": "1770055260"
+  },
+  "metrics:node:injection-1:room:1000": {
+    "timestamp": "2026-02-02T18:03:20Z",
+    "roomId": "1000",
+    "description": "Session manual-1770055269",
+    "hasPublisher": "false",
+    "lastActivityAt": "1770055383463"
+  },
+  "metrics:node:relay-root-1:application": {
+    "bandwidthTxMbps": "0.00",
+    "timestamp": "2026-02-02T18:03:30Z",
+    "sessionsForwarded": "1",
+    "totalRoutes": "1"
+  },
+  "sessions:global": [
+    "manual-1770055269"
+  ],
+  "path:manual-1770055269:egress-1": "injection-1,relay-root-1,egress-1",
+  "metrics:node:injection-1:nodejs": {
+    "containerName": "injection-1",
+    "cpuPercent": "0.07",
+    "memoryUsedMb": "128.55",
+    "networkTxBytes": "61740",
+    "memoryPercent": "25.11",
+    "timestamp": "2026-02-02T18:03:30Z",
+    "containerId": "9d8555fb1671d23457d923783959ffd2d387a947139a2ca6563165a4fdd7c567"
+  },
+  "metrics:node:relay-1:prevTx": "13210",
+  "mountpoint:egress-1:manual-1770055269": {
+    "sessionId": "manual-1770055269",
+    "mountpointId": "1000",
+    "audioSsrc": "10000",
+    "videoSsrc": "10001",
+    "janusAudioPort": "10000",
+    "janusVideoPort": "10001",
+    "egressNodeId": "egress-1",
+    "active": "true",
+    "createdAt": "1770055272460",
+    "updatedAt": "1770055272460"
+  },
+  "metrics:node:egress-1:nodejs": {
+    "containerId": "c66a76f897b542960774924c60288e7491ddcff5c05f15117aa45a073fed8ce6",
+    "containerName": "egress-1",
+    "cpuPercent": "0.06",
+    "memoryUsedMb": "39.99",
+    "networkTxBytes": "3439909",
+    "memoryPercent": "7.81",
+    "timestamp": "2026-02-02T18:03:20Z"
+  },
+  "node:relay-root-1:provisioning": {
+    "nodeId": "relay-root-1",
+    "nodeType": "relay",
+    "containerId": "6ecf9d4157fcf14f2916e5f0cbe1ba7396c2315286bf0897135644caa6f86794",
+    "janusContainerId": "",
+    "externalAPIPort": "7071",
+    "janusHTTPPort": "0",
+    "janusWSPort": "0",
+    "webrtcPortStart": "0",
+    "webrtcPortEnd": "0",
+    "streamPortStart": "0",
+    "streamPortEnd": "0",
+    "createdBy": "controller",
+    "createdAt": "1770055258"
+  },
+  "node:egress-1:mountpoints": [
+    "manual-1770055269"
+  ],
+  "node:injection-1:children": [
+    "relay-root-1"
+  ],
+  "session:manual-1770055269": {
+    "relayRootId": "relay-root-1",
+    "audioSsrc": "10000",
+    "videoSsrc": "10001",
+    "roomId": "1000",
+    "active": "1",
+    "createdAt": "1770055269254",
+    "sessionId": "manual-1770055269",
+    "injectionNodeId": "injection-1"
+  },
+  "metrics:node:egress-1:janusStreaming": {
+    "containerId": "9b98632c575380ca28bc71d2ec0e00aeac3a397ceded58a9f3d3269dd9090bee",
+    "containerName": "egress-1-janus-streaming",
+    "memoryPercent": "4.35",
+    "janusMountpointsActive": "1",
+    "cpuPercent": "0.10",
+    "memoryUsedMb": "22.25",
+    "networkTxBytes": "3972683",
+    "timestamp": "2026-02-02T18:03:20Z",
+    "janusTotalViewers": "1"
+  },
+  "node:relay-root-1": {
+    "nodeId": "relay-root-1",
+    "type": "relay",
+    "host": "relay-root-1",
+    "port": "7070",
+    "audioPort": "5002",
+    "videoPort": "5004",
+    "status": "active",
+    "created": "1770055258769"
+  },
+  "pool:relay": [
+    "relay-root-1"
+  ],
+  "node:egress-1": {
+    "nodeId": "egress-1",
+    "type": "egress",
+    "host": "egress-1",
+    "port": "7070",
+    "audioPort": "5002",
+    "videoPort": "5004",
+    "status": "active",
+    "created": "1770055260638"
+  },
+  "node:egress-1:sessions": [
+    "manual-1770055269"
+  ]
+}

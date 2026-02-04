@@ -11,7 +11,6 @@ import (
 	"controller/internal/api"
 	"controller/internal/autoscaler"
 	"controller/internal/config"
-	"controller/internal/metrics"
 	"controller/internal/provisioner"
 	"controller/internal/redis"
 	"controller/internal/session"
@@ -63,22 +62,14 @@ func main() {
 		if err := nodeManager.Bootstrap(ctx); err != nil {
 			log.Printf("[WARN] Bootstrap failed: %v", err)
 		}
+		if err := dockerProvisioner.CreateAgent(ctx); err != nil {
+			log.Printf("Failed to start metrics agent: %v", err)
+		}
 	} else {
 		log.Printf("[Main] System already has %d active nodes", len(activeNodes))
 	}
 
 	// Avvio background jobs
-
-	// Metrics Collector
-	metricsConfig := metrics.DefaultConfig()
-	metricsCollector, err := metrics.NewMetricsCollector(redisClient, metricsConfig)
-	if err != nil {
-		log.Printf("Metrics collector disabled: %v", err)
-	} else {
-		metricsCollector.Start(context.Background())
-		defer metricsCollector.Stop()
-		log.Println("MetricsCollector Started")
-	}
 
 	// Session Cleanup
 	sessionManager.StartCleanupJob(ctx)

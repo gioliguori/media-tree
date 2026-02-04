@@ -157,3 +157,19 @@ func (p *DockerProvisioner) GetPortAllocator() *PortAllocator {
 func (p *DockerProvisioner) Close() error {
 	return nil
 }
+
+func (p *DockerProvisioner) CreateAgent(ctx context.Context) error {
+	log.Println("[Provisioner] Starting Metrics Agent")
+
+	args := []string{
+		"-d",
+		"--name", "metrics-agent",
+		"--network", p.networkName,
+		"--restart", "always",
+		"-v", "/var/run/docker.sock:/var/run/docker.sock",
+		"media-tree/metrics-agent:latest",
+	}
+
+	_, err := p.dockerRun(ctx, args)
+	return err
+}

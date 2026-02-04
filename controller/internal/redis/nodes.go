@@ -84,16 +84,29 @@ func (c *Client) ForceDeleteNode(
 	// Rimuovi da pool
 	c.RemoveNodeFromPool(ctx, nodeType, nodeId)
 
-	// Rimuovi provisioning info (salvato da Provisioner)
-	c.rdb.Del(ctx, fmt.Sprintf("node:%s:provisioning", nodeId))
-	c.rdb.Del(ctx, fmt.Sprintf("node:%s", nodeId))
+	keysToDelete := []string{
+		fmt.Sprintf("node:%s:provisioning", nodeId),
+		fmt.Sprintf("node:%s", nodeId),
+		fmt.Sprintf("node:%s:children", nodeId),
+		fmt.Sprintf("node:%s:parents", nodeId),
+		fmt.Sprintf("node:%s:sessions", nodeId),
+		// Chiavi metriche note
+		fmt.Sprintf("metrics:node:%s:application", nodeId),
+		fmt.Sprintf("metrics:node:%s:nodejs", nodeId),
+		fmt.Sprintf("metrics:node:%s:janus", nodeId),
+		fmt.Sprintf("metrics:node:%s:janusVideoroom", nodeId),
+		fmt.Sprintf("metrics:node:%s:janusStreaming", nodeId),
+		fmt.Sprintf("metrics:node:%s:gstreamer", nodeId),
+	}
 
-	// Rimuovi runtime info (salvato da BaseNode.js)
-	c.rdb.Del(ctx, fmt.Sprintf("node:%s:children", nodeId))
-	c.rdb.Del(ctx, fmt.Sprintf("node:%s:parents", nodeId))
+	// chiavi dinamiche (stanze o mountpoint)
+	dynamicPattern := fmt.Sprintf("metrics:node:%s:*", nodeId)
+	dynamicKeys, _ := c.rdb.Keys(ctx, dynamicPattern).Result()
+	keysToDelete = append(keysToDelete, dynamicKeys...)
 
-	// Rimuovi indice sessioni locali al nodo
-	c.rdb.Del(ctx, fmt.Sprintf("node:%s:sessions", nodeId))
+	if len(keysToDelete) > 0 {
+		return c.rdb.Del(ctx, keysToDelete...).Err()
+	}
 
 	log.Printf("[Redis] Node %s force deleted successfully", nodeId)
 	return nil

@@ -34,6 +34,8 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 	janusArgs := []string{
 		"-d",
 		"--name", janusDockerName,
+		"--label", "media-mesh.nodeId=" + spec.NodeId,
+		"--label", "media-mesh.containerType=janus",
 		"--cpus", "1.0",
 		"--memory", "512m",
 		"--hostname", janusDockerName,
@@ -57,6 +59,8 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 	nodeArgs := []string{
 		"-d",
 		"--name", dockerName,
+		"--label", "media-mesh.nodeId=" + spec.NodeId,
+		"--label", "media-mesh.containerType=nodejs",
 		"--cpus", "1.0",
 		"--memory", "512m",
 		"--hostname", dockerName,

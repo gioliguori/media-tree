@@ -38,7 +38,7 @@ func (calc *InjectionLoadCalculator) CalculateInjectionLoad(
 		return 100.0, fmt.Errorf("failed to get injection CPU: %w", err)
 	}
 
-	cpuJanus, err := calc.redis.GetNodeCPUPercent(ctx, injectionId, "janusVideoroom")
+	cpuJanus, err := calc.redis.GetNodeCPUPercent(ctx, injectionId, "janus")
 	if err != nil {
 		return 100.0, fmt.Errorf("failed to get janus CPU: %w", err)
 	}

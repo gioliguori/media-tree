@@ -504,6 +504,41 @@ export class InjectionNode extends BaseNode {
             }
         };
     }
+
+    async onReportMetrics(metrics) {
+        if (!metrics.janus || !metrics.janus.connected) return;
+
+        const pipe = this.redis.pipeline();
+        const key = `metrics:node:${this.nodeId}:janusVideoroom`;
+
+        pipe.hset(key, {
+            janusRoomsActive: metrics.janus.roomsActive,
+            timestamp: new Date().toISOString()
+        });
+        pipe.expire(key, 30);
+
+        // Dettaglio stanze
+        for (const room of (metrics.janus.rooms || [])) {
+            const roomKey = `metrics:node:${this.nodeId}:room:${room.roomId}`;
+            pipe.hset(roomKey, {
+                roomId: room.roomId,
+                sessionId: room.sessionId || "",
+                hasPublisher: room.hasPublisher,
+                lastActivityAt: room.lastActivityAt,
+                timestamp: new Date().toISOString()
+            });
+            pipe.expire(roomKey, 30);
+            // gestione inattività
+            const sortedSetKey = "sessions:inactive";
+            if (!room.hasPublisher) {
+                pipe.zadd(sortedSetKey, room.lastActivityAt, room.sessionId);
+            } else {
+                pipe.zrem(sortedSetKey, room.sessionId);
+            }
+        }
+        await pipe.exec();
+    }
+
     async getMetrics() {
         const baseMetrics = await super.getMetrics();
 
