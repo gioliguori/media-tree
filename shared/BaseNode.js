@@ -8,6 +8,7 @@ export class BaseNode {
     this.nodeType = nodeType;
     this.config = config;
 
+    this.metricsTimer = null;
 
     // CONFIG STRUCTURE:
     // {
@@ -101,6 +102,7 @@ export class BaseNode {
     await this.updateTopology();
     await this.setupPubSub();       // Subscribe eventi (dopo sync)
     this.startPeriodicSync();       // sync ogni 5/10 min
+    this.startMetricsReporting();
     await this.onStart();           // Hook per avvio specifico per ogni nodo
 
 
@@ -115,6 +117,8 @@ export class BaseNode {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+
+    if (this.metricsTimer) clearInterval(this.metricsTimer);
 
     if (this.subscriber) {
       try {
@@ -217,9 +221,13 @@ export class BaseNode {
   }
 
   async unregisterNode() {
-    await this.redis.del(`node:${this.nodeId}`);
-    const setKey = `pool:${this.nodeType}`;
-    await this.redis.srem(setKey, this.nodeId);
+    const pipe = this.redis.pipeline();
+    pipe.del(`node:${this.nodeId}`);
+    pipe.del(`metrics:node:${this.nodeId}:application`);
+    pipe.srem(`pool:${this.nodeType}`, this.nodeId);
+
+    await pipe.exec();
+    console.log(`[${this.nodeId}] Unregistered successfully`);
   }
 
   // TOPOLOGY
@@ -600,12 +608,34 @@ export class BaseNode {
   }
 
   async getMetrics() {
+    const activeSessionsCount = this.sessions ? this.sessions.size : (this.mountpoints ? this.mountpoints.size : 0);
     return {
       nodeId: this.nodeId,
       nodeType: this.nodeType,
       timestamp: Date.now(),
+      application: {
+        activeSessions: activeSessionsCount
+      },
       janus: null  // Override in injection/relay
     };
+  }
+
+  startMetricsReporting(interval = 10000) { // Ogni 10 secondi
+    this.metricsTimer = setInterval(async () => {
+      try {
+        const metrics = await this.getMetrics();
+        if (metrics) {
+          await this.redis.hset(`metrics:node:${this.nodeId}:application`, {
+            nodeId: this.nodeId,
+            type: this.nodeType,
+            timestamp: new Date().toISOString(),
+          });
+          await this.onReportMetrics(metrics);
+        }
+      } catch (err) {
+        console.error(`[${this.nodeId}] Metrics reporting error:`, err.message);
+      }
+    }, interval);
   }
 
   async onInitialize() {
@@ -646,5 +676,25 @@ export class BaseNode {
 
   async onRouteRemoved(event) {
     // Override in relay
+  }
+
+  async onReportMetrics(metrics) {
+    // Override in Injection/Relay/Egress
+    // Ogni nodo scrive la sua parte applicativa base
+    const appKey = `metrics:node:${this.nodeId}:application`;
+    const data = {
+      nodeId: this.nodeId,
+      type: this.nodeType,
+      timestamp: new Date().toISOString()
+    };
+
+    if (this.nodeType !== 'relay') {
+      data.activeSessions = metrics.application.activeSessions;
+    }
+
+    const pipe = this.redis.pipeline();
+    pipe.hset(appKey, data);
+    pipe.expire(appKey, 30);
+    await pipe.exec();
   }
 }

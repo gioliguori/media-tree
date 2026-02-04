@@ -142,6 +142,18 @@ func (tm *TreeManager) DestroyAllNodes(ctx context.Context) error {
 			tm.provisioner.DestroyNode(ctx, n)
 		}(node)
 	}
+
+	// metrics agent
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// NodeInfo fake
+		agentInfo := &domain.NodeInfo{NodeId: "metrics-agent"}
+		if err := tm.provisioner.DestroyNode(ctx, agentInfo); err != nil {
+			log.Printf("[WARN] Metrics agent was not running or could not be stopped")
+		}
+	}()
+
 	wg.Wait()
 	return nil
 }

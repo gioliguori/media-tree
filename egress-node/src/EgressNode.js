@@ -431,7 +431,7 @@ export class EgressNode extends BaseNode {
             if (sessionData && sessionData.active === 'true' && mountpointData) {
 
                 console.log(`[${this.nodeId}] Recovering mountpoint for session ${sessionId}`);
-                await this.recoverMountpoint(sessionId, existingMountpoint);
+                await this.recoverMountpoint(sessionId, mountpointData);
             } else {
                 // mountpoint nuovo
                 console.log(`[${this.nodeId}] Creating new mountpoint for session ${sessionId}`);
@@ -674,6 +674,43 @@ export class EgressNode extends BaseNode {
             }
             // portPool: this.portPool.getStats()
         };
+    }
+
+
+    async onReportMetrics(metrics) {
+        if (!metrics.janus || !metrics.janus.connected) return;
+
+        const pipe = this.redis.pipeline();
+        const key = `metrics:node:${this.nodeId}:janusStreaming`;
+
+        pipe.hset(key, {
+            janusMountpointsActive: metrics.janus.mountpointsActive,
+            janusTotalViewers: metrics.janus.totalViewers,
+            timestamp: new Date().toISOString()
+        });
+        pipe.expire(key, 30);
+
+        for (const mp of (metrics.janus.mountpoints || [])) {
+            const mpKey = `metrics:node:${this.nodeId}:mountpoint:${mp.mountpointId}`;
+            pipe.hset(mpKey, {
+                mountpointId: mp.mountpointId,
+                sessionId: mp.sessionId || "",
+                viewers: mp.viewers,
+                lastActivityAt: mp.lastActivityAt,
+                timestamp: new Date().toISOString()
+            });
+            pipe.expire(mpKey, 30);
+
+            // Gestione inattività path
+            const sortedSetKey = "paths:inactive";
+            if (mp.viewers === 0) {
+                const entry = `${this.nodeId}:${mp.sessionId}`;
+                pipe.zadd(sortedSetKey, mp.lastActivityAt, entry);
+            } else {
+                pipe.zrem(sortedSetKey, `${this.nodeId}:${mp.sessionId}`);
+            }
+        }
+        await pipe.exec();
     }
 
     async getMetrics() {

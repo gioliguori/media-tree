@@ -41,6 +41,8 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 	janusArgs := []string{
 		"-d",
 		"--name", janusDockerName,
+		"--label", "media-mesh.nodeId=" + spec.NodeId,
+		"--label", "media-mesh.containerType=janus",
 		"--cpus", "1.0",
 		"--memory", "512m",
 		"--hostname", janusDockerName,
@@ -66,6 +68,8 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 	nodeArgs := []string{
 		"-d",
 		"--name", dockerName,
+		"--label", "media-mesh.nodeId=" + spec.NodeId,
+		"--label", "media-mesh.containerType=nodejs",
 		"--cpus", "1.0",
 		"--memory", "512m",
 		"--hostname", dockerName,

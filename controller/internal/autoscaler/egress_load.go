@@ -33,7 +33,7 @@ func NewEgressLoadCalculator(redisClient *redis.Client) *EgressLoadCalculator {
 // CalculateEgressLoad calcola il carico basandosi su CPU, Viewers e Sessioni
 func (calc *EgressLoadCalculator) CalculateEgressLoad(ctx context.Context, nodeId string) (float64, error) {
 	// Carico CPU Janus Streaming
-	cpuJanus, err := calc.redis.GetNodeCPUPercent(ctx, nodeId, "janusStreaming")
+	cpuJanus, err := calc.redis.GetNodeCPUPercent(ctx, nodeId, "janus")
 	if err != nil {
 		cpuJanus = 0
 	}

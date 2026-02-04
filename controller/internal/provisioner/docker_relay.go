@@ -20,6 +20,8 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 	nodeArgs := []string{
 		"-d",
 		"--name", dockerName,
+		"--label", "media-mesh.nodeId=" + spec.NodeId,
+		"--label", "media-mesh.containerType=nodejs",
 		"--cpus", "1.0",
 		"--memory", "512m",
 		"--hostname", dockerName,
