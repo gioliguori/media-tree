@@ -10,6 +10,7 @@ import (
 type NodeData struct {
 	NodeId    string `redis:"nodeId"`
 	NodeType  string `redis:"type"`
+	Role      string `redis:"role"`
 	Host      string `redis:"host"`
 	Port      int    `redis:"port"`
 	AudioPort int    `redis:"audioPort"`

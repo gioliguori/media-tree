@@ -8,7 +8,7 @@ import (
 	"controller/internal/domain"
 )
 
-func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.NodeSpec) (*domain.NodeInfo, error) {
+func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.NodeSpec, role string) (*domain.NodeInfo, error) {
 	// Alloca porte
 	apiPort, err := p.portAllocator.AllocateAPIPort()
 	if err != nil {
@@ -75,6 +75,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		"--hostname", dockerName,
 		"--network", p.networkName,
 		"-e", fmt.Sprintf("NODE_ID=%s", spec.NodeId),
+		"-e", fmt.Sprintf("ROLE=%s", role),
 		"-e", fmt.Sprintf("NODE_HOST=%s", dockerName),
 		"-e", "API_PORT=7070",
 		"-e", "RTP_AUDIO_PORT=5002",
@@ -105,6 +106,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 	nodeInfo := &domain.NodeInfo{
 		NodeId:           spec.NodeId,
 		NodeType:         spec.NodeType,
+		Role:             role,
 		ContainerId:      nodeID,
 		InternalHost:     dockerName,
 		InternalAPIPort:  7070,

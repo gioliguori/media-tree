@@ -3,6 +3,7 @@ import { InjectionNode } from './InjectionNode.js';
 const config = {
     nodeId: process.env.NODE_ID || 'injection-1',
     nodeType: 'injection',
+    role: process.env.ROLE,
     host: process.env.NODE_HOST || 'injection-1',
     port: parseInt(process.env.API_PORT) || 7070,
 

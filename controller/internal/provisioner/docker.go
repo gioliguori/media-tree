@@ -30,14 +30,14 @@ func NewDockerProvisioner(networkName string, redisClient *redis.Client) (*Docke
 
 // CreateNode: Smistatore.
 // Riceve una richiesta generica (NodeSpec) e decide quale funzione specifica chiamare
-func (p *DockerProvisioner) CreateNode(ctx context.Context, spec domain.NodeSpec) (*domain.NodeInfo, error) {
+func (p *DockerProvisioner) CreateNode(ctx context.Context, spec domain.NodeSpec, role string) (*domain.NodeInfo, error) {
 	switch spec.NodeType {
 	case domain.NodeTypeInjection:
-		return p.createInjectionNode(ctx, spec)
+		return p.createInjectionNode(ctx, spec, role)
 	case domain.NodeTypeRelay:
-		return p.createRelayNode(ctx, spec)
+		return p.createRelayNode(ctx, spec,role)
 	case domain.NodeTypeEgress:
-		return p.createEgressNode(ctx, spec)
+		return p.createEgressNode(ctx, spec,role)
 	default:
 		return nil, fmt.Errorf("unknown node type: %s", spec.NodeType)
 	}

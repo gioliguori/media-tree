@@ -22,7 +22,7 @@ type NodeSpec struct {
 type NodeInfo struct {
 	NodeId   string   `json:"nodeId"`
 	NodeType NodeType `json:"nodeType"`
-
+	Role     string   `json:"role"`
 	// Container info
 	ContainerId string `json:"containerId"`
 

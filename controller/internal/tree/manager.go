@@ -25,26 +25,28 @@ func NewTreeManager(redis *redis.Client, prov provisioner.Provisioner) *TreeMana
 
 // Bootstrap inizializza la mesh minima
 func (tm *TreeManager) Bootstrap(ctx context.Context) error {
-	log.Println("[PoolManager] Starting bootstrap of minimum mesh...")
+	log.Println("[TreeManager] Starting bootstrap of minimum mesh...")
 
-	// Creiamo le unità base necessarie
-	typesToCreate := []domain.NodeType{
-		domain.NodeTypeInjection, // Questo creerà automaticamente anche il RelayRoot
-		domain.NodeTypeRelay,     // Relay
-		domain.NodeTypeEgress,    // Egress
+	// 1. Creiamo il modulo d'ingresso (Injection [ingress] + RelayRoot [root])
+	if _, err := tm.CreateNode(ctx, domain.NodeTypeInjection, "ingress"); err != nil {
+		return fmt.Errorf("failed to bootstrap ingress module: %w", err)
 	}
 
-	for _, nType := range typesToCreate {
-		if _, err := tm.CreateNode(ctx, nType); err != nil {
-			return fmt.Errorf("failed to bootstrap node type %s: %w", nType, err)
-		}
+	// 2. Creiamo un Relay Standalone iniziale per il pool
+	if _, err := tm.CreateNode(ctx, domain.NodeTypeRelay, "standalone"); err != nil {
+		return fmt.Errorf("failed to bootstrap standalone relay: %w", err)
 	}
 
-	log.Println("[PoolManager] Bootstrap completed successfully")
+	// 3. Creiamo un EgressNode iniziale (Ruolo: edge)
+	if _, err := tm.CreateNode(ctx, domain.NodeTypeEgress, "edge"); err != nil {
+		return fmt.Errorf("failed to bootstrap egress node: %w", err)
+	}
+
+	log.Println("[TreeManager] Bootstrap completed successfully")
 	return nil
 }
 
-func (tm *TreeManager) CreateNode(ctx context.Context, nodeType domain.NodeType) ([]*domain.NodeInfo, error) {
+func (tm *TreeManager) CreateNode(ctx context.Context, nodeType domain.NodeType, role string) ([]*domain.NodeInfo, error) {
 	log.Printf("[PoolManager] Request to create node of type: %s", nodeType)
 
 	if nodeType == domain.NodeTypeInjection {
@@ -63,7 +65,7 @@ func (tm *TreeManager) CreateNode(ctx context.Context, nodeType domain.NodeType)
 	node, err := tm.provisioner.CreateNode(ctx, domain.NodeSpec{
 		NodeId:   nodeId,
 		NodeType: nodeType,
-	})
+	}, role)
 	if err != nil {
 		return nil, fmt.Errorf("provisioner failed for %s: %w", nodeId, err)
 	}
@@ -88,7 +90,7 @@ func (tm *TreeManager) createInjectionPair(ctx context.Context, injId, rootId st
 		NodeId:   injId,
 		NodeType: domain.NodeTypeInjection,
 	}
-	injNode, err := tm.provisioner.CreateNode(ctx, injSpec)
+	injNode, err := tm.provisioner.CreateNode(ctx, injSpec, "ingress")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create injection %s: %w", injId, err)
 	}
@@ -99,7 +101,7 @@ func (tm *TreeManager) createInjectionPair(ctx context.Context, injId, rootId st
 		NodeId:   rootId,
 		NodeType: domain.NodeTypeRelay,
 	}
-	relayNode, err := tm.provisioner.CreateNode(ctx, relaySpec)
+	relayNode, err := tm.provisioner.CreateNode(ctx, relaySpec, "root")
 	if err != nil {
 		// Rollback
 		log.Printf("[WARN] Relay provisioning failed. Rolling back injection %s...", injId)

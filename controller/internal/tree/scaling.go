@@ -10,8 +10,22 @@ import (
 func (tm *TreeManager) ScaleUp(ctx context.Context, nodeType domain.NodeType) error {
 	log.Printf("[PoolManager] Scaling up: Provisioning new %s node", nodeType)
 
+	var role string
+
+	// Decidiamo il ruolo in base al tipo di pool che stiamo scalando
+	switch nodeType {
+	case domain.NodeTypeInjection:
+		role = "ingress" // Nota: CreateNode gestirà anche la creazione del RelayRoot associato
+	case domain.NodeTypeRelay:
+		role = "standalone" // Scaliamo solo i relay standalone. I "root" scalano con l'ingresso.
+	case domain.NodeTypeEgress:
+		role = "edge"
+	default:
+		return fmt.Errorf("unknown node type for scaling: %s", nodeType)
+	}
+
 	// CreateNode gestisce già internamente la differenza tra Injection (coppia) e gli altri
-	_, err := tm.CreateNode(ctx, nodeType)
+	_, err := tm.CreateNode(ctx, nodeType, role)
 	if err != nil {
 		return fmt.Errorf("scale up failed for %s: %w", nodeType, err)
 	}
