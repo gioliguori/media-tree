@@ -141,3 +141,5 @@ vite.config.ts.timestamp-*
 .vscode
 
 .DS_Store
+
+ backup_redis.json
