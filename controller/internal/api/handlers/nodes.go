@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"controller/internal/domain"
 	"controller/internal/tree"
 )
 
@@ -26,6 +27,25 @@ func (h *NodeHandler) ListNodes(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, nodes)
+}
+
+// POST /api/nodes
+func (h *NodeHandler) CreateNode(c *gin.Context) {
+	nodeType := c.Query("type") // injection, relay, egress
+	role := c.DefaultQuery("role", "standalone")
+
+	if nodeType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "type query param is required"})
+		return
+	}
+
+	nodes, err := h.nodeManager.CreateNode(c.Request.Context(), domain.NodeType(nodeType), role)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, nodes)
 }
 
 // DELETE /api/nodes/:nodeId

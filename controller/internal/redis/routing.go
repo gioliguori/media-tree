@@ -43,7 +43,14 @@ func (c *Client) RemoveRoute(
 	targetId string,
 ) error {
 	key := fmt.Sprintf("routing:%s:%s", sessionId, relayId)
-	return c.rdb.SRem(ctx, key, targetId).Err()
+	err := c.rdb.SRem(ctx, key, targetId).Err()
+
+	// Se il set è vuoto, cancelliamo la chiave
+	count, _ := c.rdb.SCard(ctx, key).Result()
+	if count == 0 {
+		c.rdb.Del(ctx, key)
+	}
+	return err
 }
 
 // RemoveAllRoutesForSession

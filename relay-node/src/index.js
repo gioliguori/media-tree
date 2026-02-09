@@ -3,6 +3,7 @@ import { RelayNode } from './RelayNode.js';
 const config = {
     nodeId: process.env.NODE_ID || 'relay-1',
     nodeType: 'relay',
+    role: process.env.ROLE,
     host: process.env.NODE_HOST || 'relay-1',
     port: parseInt(process.env.API_PORT) || 7070,
 

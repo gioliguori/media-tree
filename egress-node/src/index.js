@@ -3,6 +3,7 @@ import { EgressNode } from './EgressNode.js';
 const config = {
     nodeId: process.env.NODE_ID || 'egress-1',
     nodeType: 'egress',
+    role: process.env.ROLE,
     host: process.env.NODE_HOST || 'localhost',
     port: parseInt(process.env.API_PORT) || 7073,
 

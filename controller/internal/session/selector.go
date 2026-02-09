@@ -35,35 +35,21 @@ func NewNodeSelector(redisClient *redis.Client) *NodeSelector {
 	}
 }
 
-// SelectInjection seleziona injection (least loadedd)
-func (ns *NodeSelector) SelectInjection(ctx context.Context) (string, error) {
-	ns.mu.Lock()
-	defer ns.mu.Unlock()
+func (ns *NodeSelector) SelectInjection(ctx context.Context, sessionId string) (string, error) {
 
-	// Recupera tutti i nodi injection dal pool globale
-	injectionNodes, err := ns.redis.GetNodePool(ctx, "injection")
+	// Chiediamo un injection con capacità residua
+	nodeId, err := ns.redis.AcquireInjectionSlot(ctx, sessionId)
 	if err != nil {
-		return "", fmt.Errorf("failed to get injection nodes: %w", err)
+		return "", fmt.Errorf("failed to acquire injection slot: %w", err)
 	}
 
-	if len(injectionNodes) == 0 {
-		return "", fmt.Errorf("no injection nodes available")
+	if nodeId == "FULL" {
+		log.Printf("[NodeSelector] All injection nodes are at maximum capacity")
+		return "", ErrScalingNeeded
 	}
 
-	// solo injection con status=active (skip draining)
-	activeInjections := ns.filterActiveInjections(ctx, injectionNodes)
-
-	if len(activeInjections) == 0 {
-		log.Printf("[NodeSelector] No active injections available")
-		return "", ErrNoInjectionAvailable
-	}
-
-	// Selezione  least-loaded CPU
-	selectedInjection, err := ns.selectLeastLoadedInjection(ctx, activeInjections)
-	if err != nil {
-		return "", err // Propaga ErrScalingNeeded o altri errori
-	}
-	return selectedInjection, nil
+	log.Printf("[NodeSelector] Session %s assigned to injection %s", sessionId, nodeId)
+	return nodeId, nil
 }
 
 // filterActiveInjections filtra solo injection con status=active
@@ -88,54 +74,6 @@ func (ns *NodeSelector) filterActiveInjections(
 	}
 
 	return active
-}
-
-// selectLeastLoadedInjection seleziona injection con CPU minima
-func (ns *NodeSelector) selectLeastLoadedInjection(
-	ctx context.Context,
-	injections []string,
-) (string, error) {
-
-	minLoad := 999.0
-	selectedInjection := ""
-	metricsAvailableCount := 0
-	for _, injectionId := range injections {
-
-		loadScore, err := ns.loadCalcInjection.CalculateInjectionLoad(ctx, injectionId)
-		if err != nil {
-			log.Printf("[WARN] Failed to get load for %s: %v (assuming saturated)", injectionId, err)
-			continue
-		}
-
-		metricsAvailableCount++
-
-		// Filtra solo injection sotto threshold
-		if loadScore < autoscaler.InjectionSaturatedThreshold {
-			if loadScore < minLoad {
-				minLoad = loadScore
-				selectedInjection = injectionId
-			}
-		} else {
-			log.Printf("[NodeSelector] %s saturated (load=%.2f%% >= %.2f%%), skipping",
-				injectionId, loadScore, autoscaler.InjectionSaturatedThreshold)
-		}
-	}
-
-	// Fallback: nessuna metrica disponibile
-	if metricsAvailableCount == 0 {
-		log.Printf("[WARN] No metrics available, using first injection:  %s", injections[0])
-		return injections[0], nil
-	}
-	// Se tutti saturi -> scaling needed
-	if selectedInjection == "" {
-		log.Printf("[NodeSelector] All injections saturated (threshold: %.2f%%), scaling needed",
-			autoscaler.InjectionSaturatedThreshold)
-		return "", ErrScalingNeeded
-	}
-
-	log.Printf("[NodeSelector] Selected %s (load %.2f%%)", selectedInjection, minLoad)
-
-	return selectedInjection, nil
 }
 
 // SelectBestEgressForSession seleziona egress per viewer
@@ -214,4 +152,46 @@ func (ns *NodeSelector) ResetCounters() {
 	defer ns.mu.Unlock()
 	ns.injectionCounter = 0
 	ns.egressCounter = 0
+}
+
+// Relay
+
+// SelectRelayForViewer implementa Hole-Filling e Deepening per la mesh.
+// Ritorna: relayId, isNewRelayAdded, error
+func (ns *NodeSelector) SelectRelayForViewer(ctx context.Context, sessionId string) (string, bool, error) {
+
+	// Hole fitting
+	// Lo script scorre la catena
+	relayId, err := ns.redis.AcquireEdgeSlot(ctx, sessionId)
+	if err != nil {
+		return "", false, fmt.Errorf("lua acquisition failed: %w", err)
+	}
+
+	if relayId != "FULL" {
+		log.Printf("[NodeSelector] Hole-Filling: Slot acquired on existing relay %s", relayId)
+		return relayId, false, nil
+	}
+
+	//  Allungamento catena
+	log.Printf("[NodeSelector] Chain full for session %s. Attempting deepening...", sessionId)
+
+	currentChain, err := ns.redis.GetSessionChain(ctx, sessionId)
+	if err != nil {
+		return "", false, err
+	}
+
+	// Cerca nel pool un relay standalone con almeno 2 slot liberi (load <= 18)
+	// Esclude i nodi già presenti nella catena per evitare cicli
+	newRelayId, err := ns.redis.FindBestRelayForDeepening(ctx, currentChain)
+	if err != nil {
+		return "", false, fmt.Errorf("deepening failed: %w", err)
+	}
+
+	// Aggiunge il nuovo relay alla catena su Redis (+2 slot: 1 Deep Reserve + 1 Edge)
+	if err := ns.redis.AddRelayToChain(ctx, sessionId, newRelayId); err != nil {
+		return "", false, fmt.Errorf("failed to add relay to chain: %w", err)
+	}
+
+	log.Printf("[NodeSelector] Deepening: Added new relay %s to chain", newRelayId)
+	return newRelayId, true, nil
 }

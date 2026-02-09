@@ -10,7 +10,7 @@ import (
 // Implementazioni: DockerProvisioner
 type Provisioner interface {
 	// CreateNode crea un nuovo nodo
-	CreateNode(ctx context.Context, spec domain.NodeSpec) (*domain.NodeInfo, error)
+	CreateNode(ctx context.Context, spec domain.NodeSpec, role string) (*domain.NodeInfo, error)
 
 	// DestroyNode distrugge un nodo esistente
 	DestroyNode(ctx context.Context, nodeInfo *domain.NodeInfo) error

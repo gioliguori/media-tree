@@ -63,6 +63,7 @@ func (s *Server) setupRoutes() {
 
 	// API Nodes
 	s.router.GET("/api/nodes", nodeHandler.ListNodes)
+	s.router.POST("/api/nodes", nodeHandler.CreateNode)
 	s.router.DELETE("/api/nodes/:nodeId", nodeHandler.DestroyNode)
 
 	// API Sessions
