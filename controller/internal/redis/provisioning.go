@@ -16,6 +16,7 @@ type NodeProvisioningData struct {
 	NodeId   string `json:"nodeId" redis:"nodeId"`
 	NodeType string `json:"nodeType" redis:"nodeType"`
 	Role     string `json:"role" redis:"role"`
+	MaxSlots int    `json:"maxSlots" redis:"maxSlots"`
 	// Docker
 	ContainerId      string `json:"containerId" redis:"containerId"`
 	JanusContainerId string `json:"janusContainerId,omitempty" redis:"janusContainerId"`
@@ -44,6 +45,7 @@ func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.Node
 		NodeId:           nodeInfo.NodeId,
 		NodeType:         string(nodeInfo.NodeType),
 		Role:             nodeInfo.Role,
+		MaxSlots:         nodeInfo.MaxSlots,
 		ContainerId:      nodeInfo.ContainerId,
 		JanusContainerId: nodeInfo.JanusContainerId,
 		ExternalAPIPort:  nodeInfo.ExternalAPIPort,
@@ -105,6 +107,7 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, nodeId string) (*domai
 		NodeId:           data.NodeId,
 		NodeType:         domain.NodeType(data.NodeType),
 		Role:             data.Role,
+		MaxSlots:         data.MaxSlots,
 		ContainerId:      data.ContainerId,
 		JanusContainerId: data.JanusContainerId,
 		ExternalAPIPort:  data.ExternalAPIPort,
@@ -215,6 +218,7 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context) ([]*domain.NodeInfo
 			NodeId:           data.NodeId,
 			NodeType:         domain.NodeType(data.NodeType),
 			Role:             data.Role,
+			MaxSlots:         data.MaxSlots,
 			ContainerId:      data.ContainerId,
 			JanusContainerId: data.JanusContainerId,
 			ExternalAPIPort:  data.ExternalAPIPort,

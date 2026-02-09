@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // NodeData rappresenta quello che BaseNode salva in Redis
@@ -32,6 +34,14 @@ func (c *Client) AddNodeToPool(
 
 	if err := c.rdb.SAdd(ctx, key, nodeId).Err(); err != nil {
 		return fmt.Errorf("failed to add node to pool:  %w", err)
+	}
+
+	switch nodeType {
+	case "relay":
+		// ZAddNX aggiunge il membro solo se non esiste già
+		c.rdb.ZAddNX(ctx, "pool:relay:load", redis.Z{Score: 0, Member: nodeId})
+	case "injection":
+		c.rdb.ZAddNX(ctx, "pool:injection:load", redis.Z{Score: 0, Member: nodeId})
 	}
 
 	log.Printf("[Redis] Added %s to pool %s", nodeId, key)
@@ -84,6 +94,14 @@ func (c *Client) ForceDeleteNode(
 
 	// Rimuovi da pool
 	c.RemoveNodeFromPool(ctx, nodeType, nodeId)
+
+	// Rimuovi dal pool di carichi
+	switch nodeType {
+	case "relay":
+		c.rdb.ZRem(ctx, "pool:relay:load", nodeId)
+	case "injection":
+		c.rdb.ZRem(ctx, "pool:injection:load", nodeId)
+	}
 
 	keysToDelete := []string{
 		fmt.Sprintf("node:%s:provisioning", nodeId),

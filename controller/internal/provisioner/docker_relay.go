@@ -51,6 +51,7 @@ func (p *DockerProvisioner) createRelayNode(ctx context.Context, spec domain.Nod
 		NodeId:           spec.NodeId,
 		NodeType:         spec.NodeType,
 		Role:             role,
+		MaxSlots:         spec.MaxSlots,
 		ContainerId:      nodeID,
 		InternalHost:     dockerName,
 		InternalAPIPort:  7070,

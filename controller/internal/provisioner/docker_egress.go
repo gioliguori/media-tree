@@ -107,6 +107,7 @@ func (p *DockerProvisioner) createEgressNode(ctx context.Context, spec domain.No
 		NodeId:           spec.NodeId,
 		NodeType:         spec.NodeType,
 		Role:             role,
+		MaxSlots:         spec.MaxSlots,
 		ContainerId:      nodeID,
 		InternalHost:     dockerName,
 		InternalAPIPort:  7070,

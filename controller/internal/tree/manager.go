@@ -49,11 +49,19 @@ func (tm *TreeManager) Bootstrap(ctx context.Context) error {
 func (tm *TreeManager) CreateNode(ctx context.Context, nodeType domain.NodeType, role string) ([]*domain.NodeInfo, error) {
 	log.Printf("[PoolManager] Request to create node of type: %s", nodeType)
 
+	maxSlots := 0
+	switch nodeType {
+	case domain.NodeTypeRelay:
+		maxSlots = 20
+	case domain.NodeTypeInjection:
+		maxSlots = 10
+	}
+
 	if nodeType == domain.NodeTypeInjection {
 		// Logica speciale: l'injection richiede sempre un RelayRoot statico
 		injId, _ := tm.generateNodeID(ctx, "injection")
 		rootId, _ := tm.generateNodeID(ctx, "relay-root")
-		return tm.createInjectionPair(ctx, injId, rootId)
+		return tm.createInjectionPair(ctx, injId, rootId, maxSlots)
 	}
 
 	// Logica Standard per Relay ed Egress
@@ -65,10 +73,13 @@ func (tm *TreeManager) CreateNode(ctx context.Context, nodeType domain.NodeType,
 	node, err := tm.provisioner.CreateNode(ctx, domain.NodeSpec{
 		NodeId:   nodeId,
 		NodeType: nodeType,
+		MaxSlots: maxSlots,
 	}, role)
 	if err != nil {
 		return nil, fmt.Errorf("provisioner failed for %s: %w", nodeId, err)
 	}
+
+	node.MaxSlots = maxSlots
 
 	// Registrazione nel pool globale su Redis
 	if err := tm.redis.AddNodeToPool(ctx, string(nodeType), nodeId); err != nil {
@@ -80,7 +91,7 @@ func (tm *TreeManager) CreateNode(ctx context.Context, nodeType domain.NodeType,
 
 // Crea 1 Injection + 1 RelayRoot, li collega e li mette nei pool
 // Viene usato sia all'avvio (CreateTree) sia durante lo scaling (ScaleUpInjection)
-func (tm *TreeManager) createInjectionPair(ctx context.Context, injId, rootId string) ([]*domain.NodeInfo, error) {
+func (tm *TreeManager) createInjectionPair(ctx context.Context, injId, rootId string, maxSlots int) ([]*domain.NodeInfo, error) {
 	log.Printf("[TreeManager] Provisioning pair: %s <-> %s", injId, rootId)
 
 	created := []*domain.NodeInfo{}
@@ -89,6 +100,7 @@ func (tm *TreeManager) createInjectionPair(ctx context.Context, injId, rootId st
 	injSpec := domain.NodeSpec{
 		NodeId:   injId,
 		NodeType: domain.NodeTypeInjection,
+		MaxSlots: maxSlots,
 	}
 	injNode, err := tm.provisioner.CreateNode(ctx, injSpec, "ingress")
 	if err != nil {
@@ -100,6 +112,7 @@ func (tm *TreeManager) createInjectionPair(ctx context.Context, injId, rootId st
 	relaySpec := domain.NodeSpec{
 		NodeId:   rootId,
 		NodeType: domain.NodeTypeRelay,
+		MaxSlots: maxSlots,
 	}
 	relayNode, err := tm.provisioner.CreateNode(ctx, relaySpec, "root")
 	if err != nil {

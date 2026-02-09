@@ -15,6 +15,7 @@ const (
 type NodeSpec struct {
 	NodeId   string   `json:"nodeId"`
 	NodeType NodeType `json:"nodeType"`
+	MaxSlots int      `json:"maxSlots"`
 }
 
 // NodeInfo è quello che ritorna il provisioner dopo aver creato un nodo
@@ -23,6 +24,7 @@ type NodeInfo struct {
 	NodeId   string   `json:"nodeId"`
 	NodeType NodeType `json:"nodeType"`
 	Role     string   `json:"role"`
+	MaxSlots int      `json:"maxSlots" redis:"maxSlots"`
 	// Container info
 	ContainerId string `json:"containerId"`
 

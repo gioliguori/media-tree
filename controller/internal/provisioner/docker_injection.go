@@ -97,6 +97,7 @@ func (p *DockerProvisioner) createInjectionNode(ctx context.Context, spec domain
 		NodeId:           spec.NodeId,
 		NodeType:         spec.NodeType,
 		Role:             role,
+		MaxSlots:         spec.MaxSlots,
 		ContainerId:      nodeID,
 		InternalHost:     dockerName,
 		InternalAPIPort:  7070,
