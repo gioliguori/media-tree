@@ -27,6 +27,7 @@ type NodeInfo struct {
 	MaxSlots int      `json:"maxSlots" redis:"maxSlots"`
 	// Container info
 	ContainerId string `json:"containerId"`
+	CreatedAt   int64  `json:"createdAt"`
 
 	// Network - INTERNAL
 	// Usati per comunicazione tra nodi

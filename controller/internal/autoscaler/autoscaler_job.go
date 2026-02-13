@@ -12,19 +12,14 @@ import (
 )
 
 const (
-	AutoscalerPollInterval = 30 * time.Second
-
-	// TIMERS
-	ScalingCooldown = 60 * time.Second // Pausa dopo Docker Provisioning
-	RecoverCooldown = 10 * time.Second // Pausa dopo Draining->Active
-
-	// SOGLIE
-	InjectionLowThreshold = 5.0 // Se carico medio < 5%, proviamo a spegnere
-	ZombieLoadThreshold   = 1.0 // Se nodo < 1% CPU -> considerato "Zombie"
-	EgressLowThreshold    = 20.0
-
-	MinGlobalInjections = 1
-	MinGlobalEgresses   = 1
+	AutoscalerPollInterval = 20 * time.Second
+	ScalingCooldown        = 90 * time.Second // Tempo di attesa tra un'azione e l'altra
+	NodeMinLifeTime        = 2 * time.Minute
+	MinActiveInjections    = 1
+	MinActiveRelays        = 1
+	MinActiveEgresses      = 1
+	MinFreeSlotsInjection  = 2
+	MinFreeSlotsEgress     = 5
 )
 
 type ProvisionerClient interface {
@@ -33,22 +28,23 @@ type ProvisionerClient interface {
 }
 
 type AutoscalerJob struct {
-	redis             *redis.Client
-	loadCalcInjection *InjectionLoadCalculator
-	loadCalcEgress    *EgressLoadCalculator
-	provisioner       ProvisionerClient
-	stopChan          chan struct{}
-	running           bool
+	redis         *redis.Client
+	injectionCalc *InjectionLoadCalculator
+	relayCalc     *RelayLoadCalculator
+	egressCalc    *EgressLoadCalculator
+	provisioner   ProvisionerClient
+	stopChan      chan struct{}
+	running       bool
 }
 
 func NewAutoscalerJob(redisClient *redis.Client, provisioner ProvisionerClient) *AutoscalerJob {
 	return &AutoscalerJob{
-		redis:             redisClient,
-		loadCalcInjection: NewInjectionLoadCalculator(redisClient),
-		loadCalcEgress:    NewEgressLoadCalculator(redisClient),
-		provisioner:       provisioner,
-		stopChan:          make(chan struct{}),
-		running:           false,
+		redis:         redisClient,
+		injectionCalc: NewInjectionLoadCalculator(redisClient),
+		relayCalc:     NewRelayLoadCalculator(redisClient),
+		egressCalc:    NewEgressLoadCalculator(redisClient),
+		provisioner:   provisioner,
+		stopChan:      make(chan struct{}),
 	}
 }
 
@@ -57,21 +53,18 @@ func (job *AutoscalerJob) Start(ctx context.Context) error {
 		return fmt.Errorf("autoscaler already running")
 	}
 	job.running = true
-	log.Printf("[Autoscaler] Starting Orchestrator loop (interval: %v)", AutoscalerPollInterval)
+	log.Printf("[Autoscaler] Starting loop (Interval: %v)", AutoscalerPollInterval)
 	go job.orchestratorLoop(ctx)
 	return nil
 }
 
-func (job *AutoscalerJob) Stop() error {
-	if !job.running {
-		return nil
+func (job *AutoscalerJob) Stop() {
+	if job.running {
+		close(job.stopChan)
+		job.running = false
 	}
-	close(job.stopChan)
-	job.running = false
-	return nil
 }
 
-// orchestratorLoop: Il loop principale che scansiona gli alberi
 func (job *AutoscalerJob) orchestratorLoop(ctx context.Context) {
 	ticker := time.NewTicker(AutoscalerPollInterval)
 	defer ticker.Stop()
@@ -79,8 +72,8 @@ func (job *AutoscalerJob) orchestratorLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			job.manageGlobalScaling(timeoutCtx)
+			tickCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+			job.runTick(tickCtx)
 			cancel()
 		case <-job.stopChan:
 			return
@@ -90,288 +83,217 @@ func (job *AutoscalerJob) orchestratorLoop(ctx context.Context) {
 	}
 }
 
-// manageGlobalScaling gestisce lo scaling dell'intera mesh
-func (job *AutoscalerJob) manageGlobalScaling(ctx context.Context) {
-	// Gestione Ingresso (Injection Pool)
-	if err := job.manageInjectionScaling(ctx); err != nil {
-		log.Printf("[Autoscaler] Injection scaling error: %v", err)
+func (job *AutoscalerJob) runTick(ctx context.Context) {
+
+	job.manageInjectionPool(ctx)
+
+	job.manageRelayPool(ctx)
+
+	job.manageEgressPool(ctx)
+
+	job.cleanupDrainingNodes(ctx)
+}
+
+// Injection
+func (job *AutoscalerJob) manageInjectionPool(ctx context.Context) {
+	report, err := job.injectionCalc.GetPoolReport(ctx)
+	if err != nil {
+		return
 	}
 
-	// Gestione Uscita (Egress Pool)
-	if err := job.manageEgressScaling(ctx); err != nil {
-		log.Printf("[Autoscaler] Egress scaling error: %v", err)
+	// Regola: Scale up se posti totali < MinFreeSlotsInjection o hardware sopra soglia
+	if report.TotalNodes < MinActiveInjections || report.TotalAvailableSlots < MinFreeSlotsInjection || report.AvgHardwareLoad >= 100.0 {
+		// Tenta di riattivare un nodo esistente in draining
+		if job.tryReactivateNode(ctx, "injection") {
+			log.Printf("[Autoscaler-injection] Reactivated node from draining instead of scaling up")
+			return
+		}
+
+		// Se non ci sono nodi da riattivare, procedi con lo Scale up
+		if job.tryAcquireLock(ctx, "injection") {
+			log.Printf("[Autoscaler-injection] Scaling UP (Slots: %d, HW Load: %.2f)", report.TotalAvailableSlots, report.AvgHardwareLoad)
+			go job.provisioner.ScaleUp(context.Background(), domain.NodeTypeInjection)
+		}
+	}
+
+	// Scale Down: Se abbiamo troppa capacità e l'hardware è scarico (<20%)
+	// modificare variabile harcoded
+
+	if report.TotalNodes > MinActiveInjections && report.AvgHardwareLoad < 20.0 && report.TotalAvailableSlots > 12 {
+		job.markVictimForDraining(ctx, "injection")
 	}
 }
 
-func (job *AutoscalerJob) manageInjectionScaling(ctx context.Context) error {
-	// Lock Ingress
-	lockKey := "lock:scaling:global:injection"
-
-	if exists, _ := job.redis.Exists(ctx, lockKey); exists {
-		return nil
+// Relay
+func (job *AutoscalerJob) manageRelayPool(ctx context.Context) {
+	report, err := job.relayCalc.GetStandalonePoolReport(ctx)
+	if err != nil || report.TotalNodes == 0 {
+		return
 	}
 
-	// Recupera nodi
-	injections, err := job.redis.GetNodePool(ctx, "injection")
-	if err != nil || len(injections) == 0 {
-		return nil
+	// Regola: Vogliamo sempre almeno 1 nodo spare e due slot per nuove sessioni
+	if report.SpareNodes < 1 || report.NodesForDeepening < 1 || report.AvgHardwareLoad >= 100.0 {
+
+		if job.tryReactivateNode(ctx, "relay") {
+			log.Printf("[Autoscaler-relay] Reactivated relay from draining")
+			return
+		}
+
+		if job.tryAcquireLock(ctx, "relay") {
+			log.Printf("[Autoscaler-relay] Scaling UP (Spare: %d, Deepening: %d, HW: %.2f)",
+				report.SpareNodes, report.NodesForDeepening, report.AvgHardwareLoad)
+			go job.provisioner.ScaleUp(context.Background(), domain.NodeTypeRelay)
+		}
 	}
 
-	// Analisi Carico
-	var activeNodes []string
-	var drainingNodes []string
-	var saturatedCount int
-	var totalClusterLoad float64
+	// Scale Down: Se abbiamo più di 1 nodo completamente vuoto
+	if report.TotalNodes > MinActiveRelays && report.SpareNodes > 1 {
+		job.markVictimForDraining(ctx, "relay")
+	}
+}
 
-	nodeSessions := make(map[string]int64)
-	nodeLoads := make(map[string]float64)
+// Egress
+func (job *AutoscalerJob) manageEgressPool(ctx context.Context) {
+	report, err := job.egressCalc.GetPoolReport(ctx)
+	if err != nil {
+		return
+	}
 
-	for _, nodeId := range injections {
-		status, _ := job.redis.GetNodeStatus(ctx, nodeId)
-		if status == "destroying" {
+	// Regola: Scala up solo se tutti i nodi sono saturi, ci sono meno di 5 posto o hardware saturo
+	if report.TotalFreeSlots < MinFreeSlotsEgress || report.SaturatedNodesCount >= report.TotalNodes || report.AvgHardwareLoad >= 100.0 {
+		if job.tryReactivateNode(ctx, "egress") {
+			log.Printf("[Autoscaler-egress] Reactivated egress from draining")
+			return
+		}
+		if job.tryAcquireLock(ctx, "egress") {
+			log.Printf("[Autoscaler-egress] All %d nodes are saturated. Scaling UP.", report.TotalNodes)
+			go job.provisioner.ScaleUp(context.Background(), domain.NodeTypeEgress)
+		}
+	}
+
+	// Scale Down
+	// modificare variabile harcoded
+	if report.TotalNodes > MinActiveEgresses && report.TotalFreeSlots > 15 {
+		job.markVictimForDraining(ctx, "egress")
+	}
+}
+
+// tryReactivateNode cerca il nodo in draining con più carico per recuperarlo
+func (job *AutoscalerJob) tryReactivateNode(ctx context.Context, nodeType string) bool {
+	nodeIds, _ := job.redis.GetNodePool(ctx, nodeType)
+
+	var bestCandidate string
+	maxLoad := -1
+
+	for _, id := range nodeIds {
+		status, _ := job.redis.GetNodeStatus(ctx, id)
+		if status == "draining" {
+			load, _ := job.getNodeLoad(ctx, id, nodeType)
+			if load > maxLoad {
+				maxLoad = load
+				bestCandidate = id
+			}
+		}
+	}
+
+	if bestCandidate != "" {
+		log.Printf("[Autoscaler] Reactivating most loaded draining node: %s (Load: %d)", bestCandidate, maxLoad)
+		job.redis.SetNodeStatus(ctx, bestCandidate, "active")
+
+		if nodeType == "injection" {
+			children, _ := job.redis.GetNodeChildren(ctx, bestCandidate)
+			for _, cid := range children {
+				job.redis.SetNodeStatus(ctx, cid, "active")
+			}
+		}
+
+		lockKey := fmt.Sprintf("lock:scaling:%s", nodeType)
+		job.redis.Del(ctx, lockKey)
+		return true
+	}
+	return false
+}
+
+// markVictimForDraining cerca il nodo attivo con meno carico per metterlo in draining
+func (job *AutoscalerJob) markVictimForDraining(ctx context.Context, nodeType string) {
+	nodeIds, _ := job.redis.GetNodePool(ctx, nodeType)
+
+	var bestVictim string
+	minLoad := math.MaxInt32
+	now := time.Now().Unix()
+
+	for _, id := range nodeIds {
+		nodeInfo, err := job.redis.GetNodeProvisioning(ctx, id)
+		if err != nil || nodeInfo.Role == "root" {
 			continue
 		}
-		actualSessions, _ := job.redis.GetNodeSessionCount(ctx, nodeId)
-		nodeSessions[nodeId] = actualSessions
+		status, _ := job.redis.GetNodeStatus(ctx, id)
+		if status == "active" {
 
-		if status == "draining" {
-			drainingNodes = append(drainingNodes, nodeId)
-		} else {
-			activeNodes = append(activeNodes, nodeId)
-
-			load, err := job.loadCalcInjection.CalculateInjectionLoad(ctx, nodeId)
-			if err != nil {
-				log.Printf("[Autoscaler] Calc error for %s: %v", nodeId, err)
-				continue
+			// info.CreatedAt è popolato dal Controller durante il provisioning
+			if (now - nodeInfo.CreatedAt) < int64(NodeMinLifeTime.Seconds()) {
+				continue // Il nodo è troppo giovane, non lo spegniamo
 			}
-
-			nodeLoads[nodeId] = load
-			totalClusterLoad += load
-
-			if load >= InjectionSaturatedThreshold {
-				saturatedCount++
+			load, _ := job.getNodeLoad(ctx, id, nodeType)
+			if load < minLoad {
+				minLoad = load
+				bestVictim = id
 			}
 		}
 	}
-
-	// Calcolo Media Carico Cluster
-	avgLoad := 0.0
-	if len(activeNodes) > 0 {
-		avgLoad = totalClusterLoad / float64(len(activeNodes))
+	if bestVictim != "" {
+		log.Printf("[Autoscaler] DRAINING least loaded node: %s (Load: %d)", bestVictim, minLoad)
+		job.redis.SetNodeStatus(ctx, bestVictim, "draining")
 	}
-
-	// Scaling up se tutti i nodi attivi sono saturi
-	if len(activeNodes) > 0 && saturatedCount == len(activeNodes) {
-		log.Printf("[Autoscaler] Injection Pool saturated (%d/%d).", saturatedCount, len(activeNodes))
-
-		// Recupera un nodo Draining
-		if len(drainingNodes) > 0 {
-			candidate := job.findBestDrainingCandidate(drainingNodes, nodeSessions)
-			if candidate != "" {
-				log.Printf("[Autoscaler] Node %s from Draining to Active.", candidate)
-				// Riattivalo
-				job.redis.SetNodeStatus(ctx, candidate, "active")
-
-				job.redis.SetNX(ctx, lockKey, "recovered", RecoverCooldown)
-				return nil
-			}
-		}
-
-		// Provisioning
-		log.Printf("[Autoscaler-Ingress] No draining nodes. Scaling Up via Provisioner.")
-
-		acquired, err := job.redis.SetNX(ctx, lockKey, "scaling_up", ScalingCooldown)
-		if err != nil {
-			return err
-		}
-		if !acquired {
-			return nil
-		}
-
-		go func() {
-			bgCtx := context.Background()
-			if err := job.provisioner.ScaleUp(bgCtx, domain.NodeTypeInjection); err != nil {
-				log.Printf("[Autoscaler] ScaleUp Failed: %v", err)
-				job.redis.Del(bgCtx, lockKey) // Rilascia lock in caso di errore
-			}
-		}()
-	}
-
-	// TODO: Scaling down
-
-	// Pulizia Draining
-	for _, drainingId := range drainingNodes {
-		if nodeSessions[drainingId] == 0 {
-			log.Printf("[Autoscaler] Draining node %s is empty. Destroying.", drainingId)
-			job.provisioner.DestroyNode(ctx, drainingId, "injection")
-		}
-	}
-
-	// Scaling down
-	// Condizioni:
-	//  Carico medio basso (< 5%)
-	//  Numero nodi Attivi > Minimo Template
-
-	if avgLoad < InjectionLowThreshold && len(activeNodes) > MinGlobalInjections {
-		log.Printf("[Autoscaler] Low Load (%.2f%%). Active: %d > Min: %d. Seeking victim.", avgLoad, len(activeNodes), MinGlobalInjections)
-
-		victim := job.findBestScaleDownVictim(activeNodes, nodeSessions, nodeLoads)
-		if victim != "" {
-			// forse race condition....
-			if nodeSessions[victim] == 0 {
-				// Vuoto -> Kill subito.
-				log.Printf("[Autoscaler] Immediate Kill for empty node: %s", victim)
-				job.provisioner.DestroyNode(ctx, victim, "injection")
-			} else {
-				// Pieno -> Draining.
-				log.Printf("[Autoscaler] Setting node %s to DRAINING (Sessions: %d)", victim, nodeSessions[victim])
-				job.redis.SetNodeStatus(ctx, victim, "draining")
-			}
-		}
-	}
-	return nil
 }
 
-func (job *AutoscalerJob) manageEgressScaling(ctx context.Context) error {
-	// Lock per l'uscita
-	lockKey := "lock:scaling:global:egress"
+func (job *AutoscalerJob) cleanupDrainingNodes(ctx context.Context) {
+	tiers := []string{"injection", "relay", "egress"}
+	for _, tier := range tiers {
+		nodeIds, _ := job.redis.GetNodePool(ctx, tier)
+		for _, id := range nodeIds {
+			status, _ := job.redis.GetNodeStatus(ctx, id)
+			if status == "draining" {
+				if job.isLogicallyEmpty(ctx, id, tier) {
+					log.Printf("[Autoscaler] Final Cleanup: %s (%s) is empty.", id, tier)
+					job.provisioner.DestroyNode(ctx, id, tier)
+				}
 
-	if exists, _ := job.redis.Exists(ctx, lockKey); exists {
-		return nil
-	}
-
-	// Recupera i nodi dal pool
-	egressNodeIds, err := job.redis.GetNodePool(ctx, "egress")
-	if err != nil || len(egressNodeIds) == 0 {
-		return nil
-	}
-
-	var activeNodes []string
-	var drainingNodes []string
-	var saturatedCount int
-	var totalClusterLoad float64
-
-	nodeViewers := make(map[string]int64)
-	nodeLoads := make(map[string]float64)
-
-	for _, nodeId := range egressNodeIds {
-		status, _ := job.redis.GetNodeStatus(ctx, nodeId)
-		if status == "destroying" {
-			continue
-		}
-
-		// Recuperiamo i viewer totali dal MetricsCollector
-		actualViewers, _ := job.redis.GetNodeTotalViewers(ctx, nodeId)
-		nodeViewers[nodeId] = int64(actualViewers)
-
-		if status == "draining" {
-			drainingNodes = append(drainingNodes, nodeId)
-		} else {
-			activeNodes = append(activeNodes, nodeId)
-
-			// Calcolo carico composto (CPU + Slot)
-			load, err := job.loadCalcEgress.CalculateEgressLoad(ctx, nodeId)
-			if err != nil {
-				log.Printf("[Autoscaler-Egress] Calc error for %s: %v", nodeId, err)
-				continue
-			}
-
-			nodeLoads[nodeId] = load
-			totalClusterLoad += load
-
-			if load >= EgressSaturatedThreshold {
-				saturatedCount++
 			}
 		}
 	}
-
-	avgLoad := 0.0
-	if len(activeNodes) > 0 {
-		avgLoad = totalClusterLoad / float64(len(activeNodes))
-	}
-
-	// Scale up
-	if len(activeNodes) > 0 && saturatedCount == len(activeNodes) {
-		log.Printf("[Autoscaler] Egress Pool saturated (%d/%d). Scaling Up.", saturatedCount, len(activeNodes))
-
-		// Se abbiamo un nodo in Draining, proviamo a riattivarlo prima di crearne uno nuovo
-		if len(drainingNodes) > 0 {
-			candidate := job.findBestDrainingCandidate(drainingNodes, nodeViewers)
-			if candidate != "" {
-				log.Printf("[Autoscaler-Egress] Recovering node %s from Draining", candidate)
-				job.redis.SetNodeStatus(ctx, candidate, "active")
-				job.redis.SetNX(ctx, lockKey, "recovered", RecoverCooldown)
-				return nil
-			}
-		}
-
-		// Provisioning di un nuovo nodo
-		log.Printf("[Autoscaler-Egress] Scaling Up via Provisioner.")
-		acquired, err := job.redis.SetNX(ctx, lockKey, "scaling_up", ScalingCooldown)
-		if err != nil || !acquired {
-			return err
-		}
-
-		go func() {
-			bgCtx := context.Background()
-			if err := job.provisioner.ScaleUp(bgCtx, domain.NodeTypeEgress); err != nil {
-				log.Printf("[Autoscaler-Egress] ScaleUp Failed: %v", err)
-				job.redis.Del(bgCtx, lockKey)
-			}
-		}()
-		return nil
-	}
-
-	// Scale down
-	if avgLoad < EgressLowThreshold && len(activeNodes) > MinGlobalEgresses {
-		victim := job.findBestScaleDownVictim(activeNodes, nodeViewers, nodeLoads)
-		// stesso problema. di riga 220
-		if victim != "" {
-			if nodeViewers[victim] == 0 {
-				job.provisioner.DestroyNode(ctx, victim, "egress")
-			} else {
-				job.redis.SetNodeStatus(ctx, victim, "draining")
-			}
-		}
-	}
-
-	// Cleanup Draining
-	for _, drainingId := range drainingNodes {
-		if nodeViewers[drainingId] == 0 {
-			job.provisioner.DestroyNode(ctx, drainingId, "egress")
-		}
-	}
-
-	return nil
 }
 
-// findBestDrainingCandidate seleziona il nodo con più carico
-func (job *AutoscalerJob) findBestDrainingCandidate(candidates []string, scores map[string]int64) string {
-	best := ""
-	var maxScore int64 = -1
-	for _, id := range candidates {
-		if s := scores[id]; s > maxScore {
-			maxScore = s
-			best = id
-		}
+func (job *AutoscalerJob) getNodeLoad(ctx context.Context, nodeId, nodeType string) (int, error) {
+	switch nodeType {
+	case "injection":
+		score, err := job.redis.ZScore(ctx, "pool:injection:load", nodeId)
+		return int(score), err
+	case "relay":
+		score, err := job.redis.ZScore(ctx, "pool:relay:load", nodeId)
+		return int(score), err
+	case "egress":
+		count, err := job.redis.GetNodeTotalViewers(ctx, nodeId)
+		return int(count), err
 	}
-	return best
+	return 1, nil
 }
 
-// findBestScaleDownVictim seleziona il nodo con meno carico o "zombie" per spegnerlo
-func (job *AutoscalerJob) findBestScaleDownVictim(candidates []string, scores map[string]int64, loads map[string]float64) string {
-	best := ""
-	var minScore float64 = math.MaxFloat64
-	for _, id := range candidates {
-		score := float64(scores[id])
-		// Penalità se il nodo è quasi inutilizzato (Zombie)
-		if loads[id] < ZombieLoadThreshold {
-			score -= 1000000
-		}
-		if score < minScore {
-			minScore = score
-			best = id
-		}
+func (job *AutoscalerJob) tryAcquireLock(ctx context.Context, tier string) bool {
+	lockKey := fmt.Sprintf("lock:scaling:%s", tier)
+	acquired, _ := job.redis.SetNX(ctx, lockKey, "busy", ScalingCooldown)
+	return acquired
+}
+
+// isLogicallyEmpty controlla se un nodo non ha più percorsi mesh attivi
+func (job *AutoscalerJob) isLogicallyEmpty(ctx context.Context, id, nodeType string) bool {
+	if nodeType == "egress" {
+		// Un Egress è vuoto logicamente solo se non ha più mountpoints
+		key := fmt.Sprintf("node:%s:mountpoints", id)
+		count, _ := job.redis.GetRedisClient().SCard(ctx, key).Result()
+		return count == 0
 	}
-	return best
+	// Per Injection e Relay, il carico coincide con le sessioni
+	load, _ := job.getNodeLoad(ctx, id, nodeType)
+	return load == 0
 }
