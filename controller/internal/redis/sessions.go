@@ -208,15 +208,18 @@ local global_load_key = KEYS[3]
 
 -- Cicla sui relay
 for _, node_id in ipairs(chain) do
-    local occupied = tonumber(redis.call('ZSCORE', global_load_key, node_id) or 0)
-	-- Recuperiamo il limite dal nodo
-    local provisioning_key = "node:" .. node_id .. ":provisioning"
-    local max_slots = tonumber(redis.call('HGET', provisioning_key, "maxSlots") or 20)
+    local status = redis.call('HGET', "node:" .. node_id, "status")
+    if status == "active" then
+    	local occupied = tonumber(redis.call('ZSCORE', global_load_key, node_id) or 0)
+		-- Recuperiamo il limite dal nodo
+    	local provisioning_key = "node:" .. node_id .. ":provisioning"
+    	local max_slots = tonumber(redis.call('HGET', provisioning_key, "maxSlots") or 20)
 
-    if occupied < max_slots then
-        redis.call('ZINCRBY', global_load_key, 1, node_id)
-        redis.call('HINCRBY', edge_counts_key, node_id, 1)
-        return node_id
+    	if occupied < max_slots then
+    	    redis.call('ZINCRBY', global_load_key, 1, node_id)
+    	    redis.call('HINCRBY', edge_counts_key, node_id, 1)
+    	    return node_id
+		end
     end
 end
 return "FULL"
@@ -238,16 +241,19 @@ for i=1, #nodes, 2 do
     local current_sessions = tonumber(nodes[i+1])
     
     -- Leggi il limite MaxSlots
-    local provisioning_key = "node:" .. node_id .. ":provisioning"
-    local max_capacity = tonumber(redis.call('HGET', provisioning_key, "maxSlots") or 10)
-    
-    -- Se il nodo ha ancora capacità per una nuova sessione
-    if current_sessions < max_capacity then
-        -- Occupa lo slot incrementando lo score nel pool
-        redis.call('ZINCRBY', pool_key, 1, node_id)
-        -- Registra la sessione nell'indice del nodo
-        redis.call('SADD', "node:" .. node_id .. ":sessions", ARGV[1])
-        return node_id
+	local status = redis.call('HGET', "node:" .. node_id, "status")
+    if status == "active" then
+    	local provisioning_key = "node:" .. node_id .. ":provisioning"
+    	local max_capacity = tonumber(redis.call('HGET', provisioning_key, "maxSlots") or 10)
+
+    	-- Se il nodo ha ancora capacità per una nuova sessione
+    	if current_sessions < max_capacity then
+    	    -- Occupa lo slot incrementando lo score nel pool
+    	    redis.call('ZINCRBY', pool_key, 1, node_id)
+    	    -- Registra la sessione nell'indice del nodo
+    	    redis.call('SADD', "node:" .. node_id .. ":sessions", ARGV[1])
+    	    return node_id
+		end
     end
 end
 

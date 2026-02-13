@@ -2,68 +2,87 @@ package autoscaler
 
 import (
 	"context"
-	"fmt"
-	"math"
-	"strconv"
-
 	"controller/internal/redis"
+	"fmt"
+	"strconv"
 )
 
 const (
-	EgressJanusCPULimitPercent = 80.0
-	EgressCPULimitPercent      = 80.0
-
-	// ora qui ma magari potrebbero appartenere a spec del nodo in maniera da avere egress node diversi
-	MaxViewersPerEgress  = 10 // valori di test
-	MaxSessionsPerEgress = 5  // valori di test
-
-	EgressSaturatedThreshold = 80.0
+	EgressJanusCpuThreshold = 80.0
+	EgressMaxViewers        = 10 // Valore di test
 )
+
+type EgressPoolReport struct {
+	TotalNodes          int
+	SaturatedNodesCount int
+	TotalViewers        int
+	TotalFreeSlots      int
+	AvgHardwareLoad     float64
+}
 
 type EgressLoadCalculator struct {
 	redis *redis.Client
 }
 
 func NewEgressLoadCalculator(redisClient *redis.Client) *EgressLoadCalculator {
-	return &EgressLoadCalculator{
-		redis: redisClient,
-	}
+	return &EgressLoadCalculator{redis: redisClient}
 }
 
-// CalculateEgressLoad calcola il carico basandosi su CPU, Viewers e Sessioni
-func (calc *EgressLoadCalculator) CalculateEgressLoad(ctx context.Context, nodeId string) (float64, error) {
-	// Carico CPU Janus Streaming
-	cpuJanus, err := calc.redis.GetNodeCPUPercent(ctx, nodeId, "janus")
+func (calc *EgressLoadCalculator) GetPoolReport(ctx context.Context) (*EgressPoolReport, error) {
+	nodeIds, err := calc.redis.GetNodePool(ctx, "egress")
 	if err != nil {
-		cpuJanus = 0
+		return nil, err
 	}
 
-	// carico cpu egress nodejs
-	cpuNodejs, err := calc.redis.GetNodeCPUPercent(ctx, nodeId, "nodejs")
-	if err != nil {
-		cpuNodejs = 0
+	report := &EgressPoolReport{TotalNodes: len(nodeIds)}
+	var totalHardwareLoad float64
+
+	for _, id := range nodeIds {
+		status, _ := calc.redis.GetNodeStatus(ctx, id)
+		if status != "active" {
+			continue
+		}
+		// Hardware Load
+		cpuJanus, _ := calc.redis.GetNodeCPUPercent(ctx, id, "janusStreaming")
+		hwLoad := (cpuJanus / EgressJanusCpuThreshold) * 100.0
+		totalHardwareLoad += hwLoad
+
+		// Logic Load
+		key := fmt.Sprintf("metrics:node:%s:janusStreaming", id)
+		metrics, _ := calc.redis.HGetAll(ctx, key)
+		viewers, _ := strconv.Atoi(metrics["janusTotalViewers"])
+		report.TotalViewers += viewers
+
+		// Un nodo è saturo (soglia di allerta) se ha viewers >= 80% o CPU > 80%
+		if viewers >= (EgressMaxViewers*0.8) || hwLoad >= 100.0 {
+			report.SaturatedNodesCount++
+		}
+		if hwLoad < 100.0 {
+			free := EgressMaxViewers - viewers
+			if free > 0 {
+				report.TotalFreeSlots += free
+			}
+		}
 	}
 
-	loadEgress := (cpuNodejs / EgressCPULimitPercent) * 100.0
-	loadCPU := (cpuJanus / EgressJanusCPULimitPercent) * 100.0
+	if report.TotalNodes > 0 {
+		report.AvgHardwareLoad = totalHardwareLoad / float64(report.TotalNodes)
+	}
 
-	// Carico basato sui Viewer e Sessioni
+	return report, nil
+}
+
+func (calc *EgressLoadCalculator) IsNodeSaturated(ctx context.Context, nodeId string) bool {
+	// Check Hardware
+	cpuJanus, _ := calc.redis.GetNodeCPUPercent(ctx, nodeId, "janusStreaming")
+	if (cpuJanus / EgressJanusCpuThreshold * 100.0) >= 100.0 {
+		return true
+	}
+
+	// Check Slots (limite fisico)
 	key := fmt.Sprintf("metrics:node:%s:janusStreaming", nodeId)
+	val, _ := calc.redis.HGet(ctx, key, "janusTotalViewers")
+	viewers, _ := strconv.Atoi(val)
 
-	metrics, err := calc.redis.HGetAll(ctx, key)
-	if err != nil {
-		return 100.0, fmt.Errorf("failed to get egress metrics: %w", err)
-	}
-
-	usedViewers, _ := strconv.Atoi(metrics["janusTotalViewers"])
-	usedSessions, _ := strconv.Atoi(metrics["janusMountpointsActive"])
-
-	loadViewers := (float64(usedViewers) / float64(MaxViewersPerEgress)) * 100.0
-	loadSessions := (float64(usedSessions) / float64(MaxSessionsPerEgress)) * 100.0
-
-	// Il carico totale è il massimo dei fattori
-	// Se uno solo uno è saturo, il nodo è considerato carico
-	maxLoad := math.Max(loadEgress, math.Max(loadCPU, math.Max(loadViewers, loadSessions)))
-
-	return maxLoad, nil
+	return viewers >= EgressMaxViewers
 }
