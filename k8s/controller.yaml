@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: controller
+  template:
+    metadata:
+      labels:
+        app: controller
+    spec:
+      serviceAccountName: controller-sa
+      initContainers:
+        - name: wait-for-redis
+          image: busybox:1.28
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -zv redis 6379; do echo waiting for redis; sleep 2; done;",
+            ]
+      containers:
+        - name: controller
+          image: k3d-media-registry:5888/media-tree/controller:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          env:
+            - name: "MY_IP"
+              value: "192.168.1.16"
+            - name: SERVER_PORT
+              value: "8080"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              value: ""
+            - name: REDIS_DB
+              value: "0"
+            - name: DOCKER_NETWORK
+              value: "k3d-media-tree"
+            - name: REGISTRY
+              value: "k3d-media-registry:5888"
+            - name: IMAGE_PREFIX
+              value: "media-tree"
+            - name: NAMESPACE
+              value: "default"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: controller
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+  selector:
+    app: controller

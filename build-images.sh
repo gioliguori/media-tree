@@ -2,46 +2,55 @@
 
 set -e
 
-echo "Building Media Tree Docker images..."
+REGISTRY="localhost:5888"
+echo "Building Media Tree Docker images for Registry: $REGISTRY"
+
+#  Cleanup
+echo "Pulizia ambiente pre-build..."
+kubectl delete pods -l app=media-tree --ignore-not-found || true
+# Svuota Redis
+kubectl exec -it deployment/redis -- redis-cli FLUSHALL 2>/dev/null || true
 
 # Vai alla root del progetto
 cd "$(dirname "$0")"
 
-# Build Janus VideoRoom
-echo "Building janus-videoroom..."
-docker build -t media-tree/janus-videoroom:latest \
-  -f janus-videoroom/Dockerfile \
-  janus-videoroom/
+echo "Building Janus components..."
 
-# Build Janus Streaming
-echo "Building janus-streaming..."
-docker build -t media-tree/janus-streaming:latest \
-  -f janus-streaming/Dockerfile \
-  janus-streaming/
+# Janus VideoRoom
+docker build -t $REGISTRY/media-tree/janus-videoroom:latest \
+  -f janus-videoroom/Dockerfile janus-videoroom/
+docker push $REGISTRY/media-tree/janus-videoroom:latest
 
-# Build Injection Node
-echo "Building injection-node..."
-docker build -t media-tree/injection-node:latest \
-  -f injection-node/Dockerfile \
-  .
+# Janus Streaming
+docker build -t $REGISTRY/media-tree/janus-streaming:latest \
+  -f janus-streaming/Dockerfile janus-streaming/
+docker push $REGISTRY/media-tree/janus-streaming:latest
 
-# Build Relay Node
-echo "Building relay-node..."
-docker build -t media-tree/relay-node:latest \
-  -f relay-node/Dockerfile \
-  .
+echo "Building Node.js services and Controller..."
 
-# Build Egress Node
-echo "Building egress-node..."
-docker build -t media-tree/egress-node:latest \
-  -f egress-node/Dockerfile \
-  .
+# Controller
+docker build -t $REGISTRY/media-tree/controller:latest \
+  -f controller/Dockerfile controller/
+docker push $REGISTRY/media-tree/controller:latest
 
+# Injection Node
+docker build -t $REGISTRY/media-tree/injection-node:latest \
+  -f injection-node/Dockerfile .
+docker push $REGISTRY/media-tree/injection-node:latest
 
-echo "Building metrics-agent..."
-docker build -t media-tree/metrics-agent:latest ./metrics-agent/
+# Relay Node
+docker build -t $REGISTRY/media-tree/relay-node:latest \
+  -f relay-node/Dockerfile .
+docker push $REGISTRY/media-tree/relay-node:latest
 
-echo "All images built successfully!"
-echo ""
-echo "Available images:"
-docker images | grep media-tree
+# Egress Node
+docker build -t $REGISTRY/media-tree/egress-node:latest \
+  -f egress-node/Dockerfile .
+docker push $REGISTRY/media-tree/egress-node:latest
+
+# Metrics Agent
+# docker build -t $REGISTRY/media-tree/metrics-agent:latest \
+#   ./metrics-agent/
+# docker push $REGISTRY/media-tree/metrics-agent:latest
+
+echo "All images built and pushed to $REGISTRY successfully!"

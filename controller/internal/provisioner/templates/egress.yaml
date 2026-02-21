@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .NodeId }}"
+  labels:
+    app: "media-tree"
+    type: "egress"
+    nodeId: "{{ .NodeId }}"
+    media-mesh.nodeId: "{{ .NodeId }}"
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  # Forziamo il pod sull'agente k3d scelto dal controller per via del mapping porte UDP
+  nodeSelector:
+    kubernetes.io/hostname: "{{ .SelectedNode }}"
+
+  containers:
+    - name: "egress-node"
+      image: "k3d-media-registry:5888/media-tree/egress-node:latest"
+      imagePullPolicy: Always
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
+      env:
+        - name: "NODE_ID"
+          value: "{{ .NodeId }}"
+        - name: "ROLE"
+          value: "edge"
+        - name: "NODE_HOST"
+          valueFrom:
+            fieldRef:
+              fieldPath: "status.hostIP"
+        - name: "API_PORT"
+          value: "7070"
+        - name: "REDIS_HOST"
+          value: "redis"
+        - name: "REDIS_PORT"
+          value: "6379"
+        - name: "RTP_AUDIO_PORT"
+          value: "5002"
+        - name: "RTP_VIDEO_PORT"
+          value: "5004"
+        - name: "JANUS_STREAMING_WS_URL"
+          value: "ws://localhost:8188"
+        - name: "JANUS_STREAMING_MOUNTPOINT_SECRET"
+          value: "adminpwd"
+        - name: "WHEP_BASE_PATH"
+          value: "/whep"
+        - name: "WHEP_TOKEN"
+          value: "verysecret"
+
+    - name: "janus"
+      image: "k3d-media-registry:5888/media-tree/janus-streaming:latest"
+      imagePullPolicy: Always
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"
+        limits:
+          cpu: "1000m"
+          memory: "768Mi"
+      env:
+        - name: "JANUS_NAT_1_1_MAPPING"
+          value: "{{ .PublicIP }}"
+        - name: "JANUS_RTP_PORT_RANGE"
+          value: "{{ .WebRTCRange }}"
+        - name: "JANUS_STREAMING_RTP_PORT_RANGE"
+          value: "6000-6100"

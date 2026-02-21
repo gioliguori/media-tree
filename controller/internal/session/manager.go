@@ -126,8 +126,8 @@ func (sm *SessionManager) CreateSession(
 	}
 
 	whipEndpoint := fmt.Sprintf("http://%s:%d%s",
-		injectionNode.InternalHost,
-		injectionNode.InternalAPIPort,
+		injectionNode.ExternalHost,
+		injectionNode.ExternalAPIPort,
 		injectionResp.Endpoint,
 	)
 
@@ -349,6 +349,7 @@ func (sm *SessionManager) DestroySessionPath(
 	}
 
 	// Libera slot Edge
+	sm.redis.RemoveRoute(ctx, sessionId, relayId, egressId)
 	sm.redis.ReleaseEdgeSlot(ctx, sessionId, relayId)
 	sm.redis.RemoveEgressFromSession(ctx, sessionId, egressId)
 	sm.redis.RemoveEgressParent(ctx, sessionId, egressId)
@@ -519,8 +520,8 @@ func (sm *SessionManager) GetSessionDetails(
 	// Get injection node info per ricostruire l'endpoint
 	injectionNode, err := sm.redis.GetNodeProvisioning(ctx, injectionId)
 	whipEndpoint := fmt.Sprintf("http://%s:%d/whip/endpoint/%s",
-		injectionNode.InternalHost,
-		injectionNode.InternalAPIPort,
+		injectionNode.ExternalHost,
+		injectionNode.ExternalAPIPort,
 		sessionId,
 	)
 	// Parse timestamp

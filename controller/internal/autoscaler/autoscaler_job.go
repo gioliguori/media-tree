@@ -85,6 +85,8 @@ func (job *AutoscalerJob) orchestratorLoop(ctx context.Context) {
 
 func (job *AutoscalerJob) runTick(ctx context.Context) {
 
+	return
+
 	job.manageInjectionPool(ctx)
 
 	job.manageRelayPool(ctx)

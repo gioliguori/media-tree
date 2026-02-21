@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .NodeId }}"
+  labels:
+    app: "media-tree"
+    type: "relay"
+    nodeId: "{{ .NodeId }}"
+    media-mesh.nodeId: "{{ .NodeId }}"
+spec:
+  containers:
+    - name: "nodejs"
+      image: "k3d-media-registry:5888/media-tree/relay-node:latest"
+      imagePullPolicy: "Always"
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+      env:
+        - name: "NODE_ID"
+          value: "{{ .NodeId }}"
+        - name: "ROLE"
+          value: "{{ .Role }}"
+        - name: "REDIS_HOST"
+          value: "redis"
+        - name: "REDIS_PORT"
+          value: "6379"
+        - name: "API_PORT"
+          value: "7070"
+        - name: "RTP_AUDIO_PORT"
+          value: "5002"
+        - name: "RTP_VIDEO_PORT"
+          value: "5004"
+        - name: "NODE_HOST"
+          valueFrom:
+            fieldRef:
+              fieldPath: "status.podIP"
