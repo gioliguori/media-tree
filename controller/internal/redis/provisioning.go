@@ -22,6 +22,7 @@ type NodeProvisioningData struct {
 	JanusContainerId string `json:"janusContainerId,omitempty" redis:"janusContainerId"`
 
 	// Port mappings
+	InternalAPIPort int    `json:"internalAPIPort" redis:"internalAPIPort"`
 	ExternalAPIPort int    `json:"externalAPIPort" redis:"externalAPIPort"`
 	JanusHTTPPort   int    `json:"janusHTTPPort,omitempty" redis:"janusHTTPPort"`
 	JanusWSPort     int    `json:"janusWSPort,omitempty" redis:"janusWSPort"`
@@ -49,6 +50,7 @@ func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.Node
 		ContainerId:      nodeInfo.ContainerId,
 		JanusContainerId: nodeInfo.JanusContainerId,
 		InternalHost:     nodeInfo.InternalHost,
+		InternalAPIPort:  nodeInfo.InternalAPIPort,
 		ExternalAPIPort:  nodeInfo.ExternalAPIPort,
 		JanusHTTPPort:    nodeInfo.JanusHTTPPort,
 		JanusWSPort:      nodeInfo.JanusWSPort,
@@ -124,7 +126,7 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, nodeId string) (*domai
 	}
 
 	// Porte API interne
-	nodeInfo.InternalAPIPort = 7070
+	nodeInfo.InternalAPIPort = data.InternalAPIPort
 	nodeInfo.InternalRTPAudio = 5002
 	nodeInfo.InternalRTPVideo = 5004
 
@@ -234,7 +236,7 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context) ([]*domain.NodeInfo
 		}
 
 		// Porte API interne
-		nodeInfo.InternalAPIPort = 7070
+		nodeInfo.InternalAPIPort = data.InternalAPIPort
 		nodeInfo.InternalRTPAudio = 5002
 		nodeInfo.InternalRTPVideo = 5004
 

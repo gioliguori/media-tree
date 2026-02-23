@@ -5,7 +5,7 @@ echo "Pulisco vecchi cluster..."
 k3d cluster delete media-tree || true
 k3d registry delete media-registry || true
 
-# Pulisce i volumi k3d orfani (causa principale di crash ripetuti).
+# Pulisce i volumi k3d orfani
 # k3d cluster delete non rimuove i volumi Docker associati a k3s,
 # che si corrompono tra una sessione e l'altra.
 echo "Pulisco volumi k3d orfani..."
@@ -23,14 +23,12 @@ k3d registry create media-registry --port 5888 || true
 
 k3d cluster create media-tree \
   --registry-use k3d-media-registry:5888 \
-  --agents 2 \
-  --port "11000:7070@agent:0" --port "20000-20010:20000-20010/udp@agent:0" \
-  --port "12000:7070@agent:1" --port "20100-20110:20100-20110/udp@agent:1" \
+  --agents 3 \
+  --port "11000:11000@agent:0" --port "20000-20010:20000-20010/udp@agent:0" \
+  --port "12000:12000@agent:1" --port "20100-20110:20100-20110/udp@agent:1" \
+  --port "13000:13000@agent:2" --port "20200-20220:20200-20220/udp@agent:2" \
   --k3s-arg "--disable=traefik@server:0" \
   #--port "13000:7070@agent:2" --port "20200-20220:20200-20220/udp@agent:2" \
-
-  #--port "30000-30200:30000-30200/tcp@loadbalancer" \
-  #--k3s-arg "--service-node-port-range=30000-30200@server:0"
 
 # Installa il Metrics Server
 # echo "Installing Metrics Server..."
@@ -45,21 +43,14 @@ kubectl wait --for=condition=Ready nodes --all --timeout=120s
 
 echo "Next: ./build-images.sh && kubectl apply -f k8s/"
 
-
 # Build e Push delle immagini
 chmod +x ./build-images.sh
 ./build-images.sh
 
 kubectl apply -f k8s/
-
-
-# in altro terminale 
-# kubectl port-forward svc/controller 8080:8080
-
-# kubectl port-forward svc/redis 6379:6379
 echo ""
 echo "in altro terminale"
 echo ""
-echo "kubectl port-forward svc/controller 8080:8080"
+echo "kubectl port-forward svc/media- controller 8080:8080"
 echo ""
 echo "kubectl port-forward svc/redis 6379:6379"

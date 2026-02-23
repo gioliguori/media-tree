@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller
+  name: media-controller
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: controller
+      app: "media-controller"
   template:
     metadata:
       labels:
-        app: controller
+        app: media-controller
     spec:
       serviceAccountName: controller-sa
       initContainers:
@@ -60,11 +60,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: controller
+  name: media-controller
 spec:
   type: ClusterIP
   ports:
     - port: 8080
       targetPort: 8080
   selector:
-    app: controller
+    app: media-controller

@@ -3,7 +3,7 @@ kind: Pod
 metadata:
   name: "{{ .NodeId }}"
   labels:
-    app: "media-tree"
+    app: "relay-pod"
     type: "relay"
     nodeId: "{{ .NodeId }}"
     media-mesh.nodeId: "{{ .NodeId }}"
@@ -29,7 +29,7 @@ spec:
         - name: "REDIS_PORT"
           value: "6379"
         - name: "API_PORT"
-          value: "7070"
+          value: "7071"
         - name: "RTP_AUDIO_PORT"
           value: "5002"
         - name: "RTP_VIDEO_PORT"

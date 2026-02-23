@@ -58,7 +58,7 @@ func NewK8sProvisioner(redisClient *redis.Client) (*K8sProvisioner, error) {
 	labAgents := []AgentConfig{
 		{Name: "k3d-media-tree-agent-0", PublicIP: publicIP, ExtPort: 11000, WebRTC: "20000-20010"},
 		{Name: "k3d-media-tree-agent-1", PublicIP: publicIP, ExtPort: 12000, WebRTC: "20100-20110"},
-		//{Name: "k3d-media-tree-agent-2", PublicIP: publicIP, ExtPort: 13000, WebRTC: "20200-20220"},
+		{Name: "k3d-media-tree-agent-2", PublicIP: publicIP, ExtPort: 13000, WebRTC: "20200-20210"},
 	}
 
 	return &K8sProvisioner{
@@ -96,11 +96,13 @@ func (p *K8sProvisioner) CreateNode(ctx context.Context, spec domain.NodeSpec, r
 	// Prepara gli argomenti per il template
 	data := map[string]any{
 		"NodeId":       spec.NodeId,
+		"NodeType":     string(spec.NodeType),
 		"RelayRootId":  spec.RelayRootId,
 		"Role":         role,
 		"SelectedNode": agent.Name,
 		"WebRTCRange":  agent.WebRTC,
 		"PublicIP":     agent.PublicIP,
+		"ApiPort":      agent.ExtPort,
 	}
 
 	tmpl, err := template.ParseFS(templateFS, "templates/"+string(spec.NodeType)+".yaml")
@@ -142,7 +144,7 @@ func (p *K8sProvisioner) CreateNode(ctx context.Context, spec domain.NodeSpec, r
 		Role:             role,
 		MaxSlots:         spec.MaxSlots,
 		ContainerId:      spec.NodeId, // In K8s usiamo Pod Name come ID univoco
-		InternalAPIPort:  7070,
+		InternalAPIPort:  agent.ExtPort,
 		InternalRTPAudio: 5002,
 		InternalRTPVideo: 5004,
 		ExternalHost:     "localhost",
@@ -203,7 +205,7 @@ func (p *K8sProvisioner) scheduleAndAllocate(ctx context.Context, nType domain.N
 
 	// Elenco agenti occupati
 	pods, _ := p.clientset.CoreV1().Pods(p.namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app=media-tree,type in (injection,egress)",
+		LabelSelector: "app in (injection-pod, egress-pod)",
 	})
 
 	occupied := make(map[string]bool)

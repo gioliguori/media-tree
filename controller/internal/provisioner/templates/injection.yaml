@@ -3,7 +3,7 @@ kind: Pod
 metadata:
   name: "{{ .NodeId }}"
   labels:
-    app: "media-tree"
+    app: "injection-pod"
     type: "injection"
     nodeId: "{{ .NodeId }}"
     media-mesh.nodeId: "{{ .NodeId }}"
@@ -13,6 +13,13 @@ spec:
   # Forziamo il pod sull'agente k3d scelto dal controller per via del mapping porte UDP
   nodeSelector:
     kubernetes.io/hostname: "{{ .SelectedNode }}"
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              type: "{{ .NodeType }}"
+          topologyKey: "kubernetes.io/hostname"
 
   containers:
     - name: "injection-node"
@@ -34,8 +41,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: "status.hostIP"
+        # - name: "API_PORT"
+        #   value: "7070"
         - name: "API_PORT"
-          value: "7070"
+          value: "{{ .ApiPort }}"
         - name: "REDIS_HOST"
           value: "redis"
         - name: "REDIS_PORT"
