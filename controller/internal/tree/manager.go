@@ -61,7 +61,39 @@ func (tm *TreeManager) CreateNode(ctx context.Context, nodeType domain.NodeType,
 		// Logica speciale: l'injection richiede sempre un RelayRoot statico
 		injId, _ := tm.generateNodeID(ctx, "injection")
 		rootId, _ := tm.generateNodeID(ctx, "relay-root")
-		return tm.createInjectionPair(ctx, injId, rootId, maxSlots)
+
+		log.Printf("[TreeManager] Logic Pair: %s <-> %s", injId, rootId)
+
+		// Chiamiamo il Provisioner passando entrambi gli Id
+		node, err := tm.provisioner.CreateNode(ctx, domain.NodeSpec{
+			NodeId:      injId,
+			NodeType:    nodeType,
+			MaxSlots:    maxSlots,
+			RelayRootId: rootId,
+		}, role)
+
+		if err != nil {
+			return nil, fmt.Errorf("provisioner failed for injection: %w", err)
+		}
+
+		// Registrazione nei Pool
+		tm.redis.AddNodeToPool(ctx, "injection", injId)
+
+		// Registrazione del Relay Root
+		tm.redis.AddNodeToPool(ctx, "relay", rootId)
+
+		// Creazione Topologia
+		if err := tm.redis.AddNodeChild(ctx, injId, rootId); err != nil {
+			log.Printf("[WARN] Failed to link child: %v", err)
+		}
+		if err := tm.redis.AddNodeParent(ctx, rootId, injId); err != nil {
+			log.Printf("[WARN] Failed to link parent: %v", err)
+		}
+
+		rootInfo, _ := tm.redis.GetNodeProvisioning(ctx, rootId)
+
+		return []*domain.NodeInfo{node, rootInfo}, nil
+
 	}
 
 	// Logica Standard per Relay ed Egress
@@ -89,59 +121,6 @@ func (tm *TreeManager) CreateNode(ctx context.Context, nodeType domain.NodeType,
 	return []*domain.NodeInfo{node}, nil
 }
 
-// Crea 1 Injection + 1 RelayRoot, li collega e li mette nei pool
-// Viene usato sia all'avvio (CreateTree) sia durante lo scaling (ScaleUpInjection)
-func (tm *TreeManager) createInjectionPair(ctx context.Context, injId, rootId string, maxSlots int) ([]*domain.NodeInfo, error) {
-	log.Printf("[TreeManager] Provisioning pair: %s <-> %s", injId, rootId)
-
-	created := []*domain.NodeInfo{}
-
-	// Crea Injection
-	injSpec := domain.NodeSpec{
-		NodeId:   injId,
-		NodeType: domain.NodeTypeInjection,
-		MaxSlots: maxSlots,
-	}
-	injNode, err := tm.provisioner.CreateNode(ctx, injSpec, "ingress")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create injection %s: %w", injId, err)
-	}
-	created = append(created, injNode)
-
-	// Crea Relay Root
-	relaySpec := domain.NodeSpec{
-		NodeId:   rootId,
-		NodeType: domain.NodeTypeRelay,
-		MaxSlots: maxSlots,
-	}
-	relayNode, err := tm.provisioner.CreateNode(ctx, relaySpec, "root")
-	if err != nil {
-		// Rollback
-		log.Printf("[WARN] Relay provisioning failed. Rolling back injection %s...", injId)
-		_ = tm.provisioner.DestroyNode(ctx, injNode)
-		return nil, fmt.Errorf("failed to create relay root %s: %w", rootId, err)
-	}
-	created = append(created, relayNode)
-
-	//  Redis Topology (Parent/Child)
-	if err := tm.redis.AddNodeChild(ctx, injId, rootId); err != nil {
-		log.Printf("[WARN] Failed to link child: %v", err)
-	}
-	if err := tm.redis.AddNodeParent(ctx, rootId, injId); err != nil {
-		log.Printf("[WARN] Failed to link parent: %v", err)
-	}
-
-	// Redis Pools
-	if err := tm.redis.AddNodeToPool(ctx, "injection", injId); err != nil {
-		log.Printf("[WARN] Failed to add injection to pool: %v", err)
-	}
-	if err := tm.redis.AddNodeToPool(ctx, "relay", rootId); err != nil {
-		log.Printf("[WARN] Failed to add relay to pool: %v", err)
-	}
-
-	return created, nil
-}
-
 // DestroyAllNodes pulisce tutto il sistema in parallelo
 func (tm *TreeManager) DestroyAllNodes(ctx context.Context) error {
 	nodes, err := tm.redis.GetAllProvisionedNodes(ctx)
@@ -157,17 +136,6 @@ func (tm *TreeManager) DestroyAllNodes(ctx context.Context) error {
 			tm.provisioner.DestroyNode(ctx, n)
 		}(node)
 	}
-
-	// metrics agent
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// NodeInfo fake
-		agentInfo := &domain.NodeInfo{NodeId: "metrics-agent"}
-		if err := tm.provisioner.DestroyNode(ctx, agentInfo); err != nil {
-			log.Printf("[WARN] Metrics agent was not running or could not be stopped")
-		}
-	}()
 
 	wg.Wait()
 	return nil

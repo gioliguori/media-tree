@@ -11,6 +11,7 @@ import (
 	"controller/internal/api"
 	"controller/internal/autoscaler"
 	"controller/internal/config"
+	"controller/internal/metrics"
 	"controller/internal/provisioner"
 	"controller/internal/redis"
 	"controller/internal/session"
@@ -30,23 +31,39 @@ func main() {
 	redisClient := redis.NewClient(cfg)
 	defer redisClient.Close()
 
-	pingCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel() // cleanup
-	if err := redisClient.Ping(pingCtx); err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+	// Wait for Redis
+	var pingErr error
+	for i := range 10 {
+		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		pingErr = redisClient.Ping(pingCtx)
+		cancel()
+		if pingErr == nil {
+			break
+		}
+		log.Printf("Waiting for Redis... (%d/10)", i+1)
+		time.Sleep(2 * time.Second)
+	}
+	if pingErr != nil {
+		log.Fatalf("Could not connect to Redis: %v", pingErr)
 	}
 	log.Println("Connected to Redis successfully!")
 
 	// Creazione entità
 
 	// Provisioner (Docker)
-	dockerProvisioner, err := provisioner.NewDockerProvisioner(cfg.DockerNetwork, redisClient)
+	// dockerProvisioner, err := provisioner.NewDockerProvisioner(cfg.DockerNetwork, redisClient)
+	// if err != nil {
+	// 	log.Fatalf("Failed to create Docker Provisioner: %v", err)
+	// }
+
+	// Creazione Provisioner Kubernetes
+	k8sProvisioner, err := provisioner.NewK8sProvisioner(redisClient)
 	if err != nil {
-		log.Fatalf("Failed to create Docker Provisioner: %v", err)
+		log.Fatalf("Failed to create K8s Provisioner: %v", err)
 	}
 
 	// Node Manager
-	nodeManager := tree.NewTreeManager(redisClient, dockerProvisioner)
+	nodeManager := tree.NewTreeManager(redisClient, k8sProvisioner)
 
 	// Session Manager
 	sessionManager := session.NewSessionManager(redisClient)
@@ -62,14 +79,23 @@ func main() {
 		if err := nodeManager.Bootstrap(ctx); err != nil {
 			log.Printf("[WARN] Bootstrap failed: %v", err)
 		}
-		if err := dockerProvisioner.CreateAgent(ctx); err != nil {
-			log.Printf("Failed to start metrics agent: %v", err)
-		}
+		// if err := dockerProvisioner.CreateAgent(ctx); err != nil {
+		// 	log.Printf("Failed to start metrics agent: %v", err)
+		// }
 	} else {
 		log.Printf("[Main] System already has %d active nodes", len(activeNodes))
 	}
 
 	// Avvio background jobs
+
+	// Inizializzazione Metrics Collector
+	metricsCollector, err := metrics.NewK8sMetricsCollector(redisClient)
+	if err != nil {
+		log.Printf("[WARN] Metrics Server not accessible: %v", err)
+	} else {
+		metricsCollector.Start(ctx)
+		defer metricsCollector.Stop()
+	}
 
 	// Session Cleanup
 	sessionManager.StartCleanupJob(ctx)

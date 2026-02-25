@@ -89,7 +89,7 @@ func (s *Server) setupRoutes() {
 
 	s.router.Static("/web", "./web")
 	// Root Endpoint
-	s.router.GET("/api", func(c *gin.Context) {
+	s.router.GET("/manager/info", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"service": "media-tree-controller",
 			"version": "0.1.0",
@@ -147,6 +147,6 @@ func loggerMiddleware() gin.HandlerFunc {
 		duration := time.Since(start)
 		statusCode := c.Writer.Status()
 
-		log.Printf("[API] %s %s - %d (%v)", method, path, statusCode, duration)
+		log.Printf("[API] %s %s - %d (%v) from %s", method, path, statusCode, duration, c.ClientIP())
 	}
 }

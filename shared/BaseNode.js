@@ -96,8 +96,8 @@ export class BaseNode {
   }
 
   async start() {
-    this.server = this.app.listen(this.port, () => {
-      console.log(`[${this.nodeId}] API port : ${this.port}`);
+    this.server = this.app.listen(this.port, '0.0.0.0', () => {
+      console.log(`[${this.nodeId}] API listening on 0.0.0.0:${this.port}`);
     });
 
     await this.updateTopology();

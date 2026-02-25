@@ -22,14 +22,15 @@ type NodeProvisioningData struct {
 	JanusContainerId string `json:"janusContainerId,omitempty" redis:"janusContainerId"`
 
 	// Port mappings
-	ExternalAPIPort int `json:"externalAPIPort" redis:"externalAPIPort"`
-	JanusHTTPPort   int `json:"janusHTTPPort,omitempty" redis:"janusHTTPPort"`
-	JanusWSPort     int `json:"janusWSPort,omitempty" redis:"janusWSPort"`
-	WebRTCPortStart int `json:"webrtcPortStart,omitempty" redis:"webrtcPortStart"`
-	WebRTCPortEnd   int `json:"webrtcPortEnd,omitempty" redis:"webrtcPortEnd"`
-	StreamPortStart int `json:"streamPortStart,omitempty" redis:"streamPortStart"`
-	StreamPortEnd   int `json:"streamPortEnd,omitempty" redis:"streamPortEnd"`
-
+	InternalAPIPort int    `json:"internalAPIPort" redis:"internalAPIPort"`
+	ExternalAPIPort int    `json:"externalAPIPort" redis:"externalAPIPort"`
+	JanusHTTPPort   int    `json:"janusHTTPPort,omitempty" redis:"janusHTTPPort"`
+	JanusWSPort     int    `json:"janusWSPort,omitempty" redis:"janusWSPort"`
+	WebRTCPortStart int    `json:"webrtcPortStart,omitempty" redis:"webrtcPortStart"`
+	WebRTCPortEnd   int    `json:"webrtcPortEnd,omitempty" redis:"webrtcPortEnd"`
+	StreamPortStart int    `json:"streamPortStart,omitempty" redis:"streamPortStart"`
+	StreamPortEnd   int    `json:"streamPortEnd,omitempty" redis:"streamPortEnd"`
+	InternalHost    string `json:"internalHost" redis:"internalHost"`
 	// Metadata
 	CreatedBy string `json:"createdBy" redis:"createdBy"`
 	CreatedAt int64  `json:"createdAt" redis:"createdAt"`
@@ -48,6 +49,8 @@ func (c *Client) SaveNodeProvisioning(ctx context.Context, nodeInfo *domain.Node
 		MaxSlots:         nodeInfo.MaxSlots,
 		ContainerId:      nodeInfo.ContainerId,
 		JanusContainerId: nodeInfo.JanusContainerId,
+		InternalHost:     nodeInfo.InternalHost,
+		InternalAPIPort:  nodeInfo.InternalAPIPort,
 		ExternalAPIPort:  nodeInfo.ExternalAPIPort,
 		JanusHTTPPort:    nodeInfo.JanusHTTPPort,
 		JanusWSPort:      nodeInfo.JanusWSPort,
@@ -110,6 +113,7 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, nodeId string) (*domai
 		MaxSlots:         data.MaxSlots,
 		ContainerId:      data.ContainerId,
 		CreatedAt:        data.CreatedAt,
+		InternalHost:     data.InternalHost,
 		JanusContainerId: data.JanusContainerId,
 		ExternalAPIPort:  data.ExternalAPIPort,
 		JanusHTTPPort:    data.JanusHTTPPort,
@@ -121,11 +125,8 @@ func (c *Client) GetNodeProvisioning(ctx context.Context, nodeId string) (*domai
 		ExternalHost:     "localhost",
 	}
 
-	// Internal network info (per comunicazione Docker tra nodi)
-	nodeInfo.InternalHost = data.NodeId
-
 	// Porte API interne
-	nodeInfo.InternalAPIPort = 7070
+	nodeInfo.InternalAPIPort = data.InternalAPIPort
 	nodeInfo.InternalRTPAudio = 5002
 	nodeInfo.InternalRTPVideo = 5004
 
@@ -222,6 +223,7 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context) ([]*domain.NodeInfo
 			MaxSlots:         data.MaxSlots,
 			ContainerId:      data.ContainerId,
 			CreatedAt:        data.CreatedAt,
+			InternalHost:     data.InternalHost,
 			JanusContainerId: data.JanusContainerId,
 			ExternalAPIPort:  data.ExternalAPIPort,
 			JanusHTTPPort:    data.JanusHTTPPort,
@@ -233,10 +235,8 @@ func (c *Client) GetAllProvisionedNodes(ctx context.Context) ([]*domain.NodeInfo
 			ExternalHost:     "localhost",
 		}
 
-		nodeInfo.InternalHost = data.NodeId
-
 		// Porte API interne
-		nodeInfo.InternalAPIPort = 7070
+		nodeInfo.InternalAPIPort = data.InternalAPIPort
 		nodeInfo.InternalRTPAudio = 5002
 		nodeInfo.InternalRTPVideo = 5004
 

@@ -326,8 +326,8 @@ nat: {
 	# Multiple public IP addresses can be specified as a comma separated list
 	# if the Janus is deployed in a DMZ between two 1-1 NAT for internal and
 	# external users.
-	#nat_1_1_mapping = "1.2.3.4"
-	#keep_private_host = true
+	nat_1_1_mapping = "${JANUS_NAT_1_1_MAPPING}"
+	keep_private_host = false
 
 	# You can configure a TURN server in two different ways: specifying a
 	# statically configured TURN server, and thus provide the address of the
@@ -396,6 +396,7 @@ nat: {
 	# has been configured. By default, Janus ignores all interfaces whose
 	# name starts with 'vmnet', to skip VMware interfaces:
 	ice_ignore_list = "vmnet"
+	#ice_ignore_list = "vmnet,10.,172." 
 
 	# In case you want to allow Janus to start even if the configured STUN or TURN
 	# server is unreachable, you can set 'ignore_unreachable_ice_server' to true.

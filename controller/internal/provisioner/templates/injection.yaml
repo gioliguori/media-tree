@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .NodeId }}"
+  labels:
+    app: "injection-pod"
+    type: "injection"
+    nodeId: "{{ .NodeId }}"
+    media-mesh.nodeId: "{{ .NodeId }}"
+    relay-root-id: "{{ .RelayRootId }}"
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  # Forziamo il pod sull'agente k3d scelto dal controller per via del mapping porte UDP
+  nodeSelector:
+    kubernetes.io/hostname: "{{ .SelectedNode }}"
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              type: "{{ .NodeType }}"
+          topologyKey: "kubernetes.io/hostname"
+
+  containers:
+    - name: "injection-node"
+      image: "k3d-media-registry:5888/media-tree/injection-node:latest"
+      imagePullPolicy: Always
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "1000m"
+          memory: "512Mi"
+      env:
+        - name: "NODE_ID"
+          value: "{{ .NodeId }}"
+        - name: "ROLE"
+          value: "ingress"
+        - name: "NODE_HOST"
+          valueFrom:
+            fieldRef:
+              fieldPath: "status.hostIP"
+        # - name: "API_PORT"
+        #   value: "7070"
+        - name: "API_PORT"
+          value: "{{ .ApiPort }}"
+        - name: "REDIS_HOST"
+          value: "redis"
+        - name: "REDIS_PORT"
+          value: "6379"
+        - name: "RTP_AUDIO_PORT"
+          value: "5000"
+        - name: "RTP_VIDEO_PORT"
+          value: "5002"
+        - name: "JANUS_VIDEOROOM_WS_URL"
+          value: "ws://localhost:8188"
+        - name: "JANUS_VIDEOROOM_ROOM_SECRET"
+          value: "adminpwd"
+        - name: "WHIP_BASE_PATH"
+          value: "/whip"
+        - name: "WHIP_TOKEN"
+          value: "verysecret"
+
+    - name: "janus"
+      image: "k3d-media-registry:5888/media-tree/janus-videoroom:latest"
+      imagePullPolicy: Always
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "1000m"
+          memory: "384Mi"
+      env:
+        - name: "JANUS_NAT_1_1_MAPPING"
+          value: "{{ .PublicIP }}"
+        - name: "JANUS_RTP_PORT_RANGE"
+          value: "{{ .WebRTCRange }}"
+
+    - name: "relay-root"
+      image: "k3d-media-registry:5888/media-tree/relay-node:latest"
+      imagePullPolicy: Always
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "1000m"
+          memory: "512Mi"
+      env:
+        - name: "NODE_ID"
+          value: "{{ .RelayRootId }}"
+        - name: "ROLE"
+          value: "root"
+        - name: "REDIS_HOST"
+          value: "redis"
+        - name: "REDIS_PORT"
+          value: "6379"
+        - name: "API_PORT" #7071
+          value: "7071"
+        - name: "NODE_HOST"
+          valueFrom:
+            fieldRef:
+              fieldPath: "status.hostIP"
+        - name: "RTP_AUDIO_PORT"
+          value: "5002"
+        - name: "RTP_VIDEO_PORT"
+          value: "5004"

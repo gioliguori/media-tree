@@ -67,6 +67,9 @@ export class EgressNode extends BaseNode {
     async onInitialize() {
         console.log(`[${this.nodeId}] Initializing WHEP server...`);
 
+        // file statici test visivo
+        this.app.use(express.static('web'));
+
         // Connessione a Janus per gestione mountpoint
         const { connection, session, streaming } = await connectToJanusStreaming(this.nodeId, {
             wsUrl: this.janusUrl,
@@ -83,8 +86,6 @@ export class EgressNode extends BaseNode {
             rest: { app: this.app, basePath: this.whepBasePath }
         });
 
-        // file statici test visivo
-        this.app.use(express.static('web'));
 
         console.log(`[${this.nodeId}] WHEP server initialized Janus: ${this.janusUrl}`);
     }

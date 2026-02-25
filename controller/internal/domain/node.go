@@ -13,9 +13,10 @@ const (
 // NodeSpec è la specifica per creare un nodo
 // Usata dal controller per richiedere provisioning
 type NodeSpec struct {
-	NodeId   string   `json:"nodeId"`
-	NodeType NodeType `json:"nodeType"`
-	MaxSlots int      `json:"maxSlots"`
+	NodeId      string   `json:"nodeId"`
+	RelayRootId string   `json:"relayRootId,omitempty"`
+	NodeType    NodeType `json:"nodeType"`
+	MaxSlots    int      `json:"maxSlots"`
 }
 
 // NodeInfo è quello che ritorna il provisioner dopo aver creato un nodo

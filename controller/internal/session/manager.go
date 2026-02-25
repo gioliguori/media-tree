@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"controller/internal/redis"
@@ -126,8 +125,8 @@ func (sm *SessionManager) CreateSession(
 	}
 
 	whipEndpoint := fmt.Sprintf("http://%s:%d%s",
-		injectionNode.InternalHost,
-		injectionNode.InternalAPIPort,
+		injectionNode.ExternalHost,
+		injectionNode.ExternalAPIPort,
 		injectionResp.Endpoint,
 	)
 
@@ -305,7 +304,8 @@ func (sm *SessionManager) DestroySessionComplete(
 	chain, _ := sm.redis.GetSessionChain(ctx, sessionId)
 	for _, nid := range chain {
 		sm.redis.PublishNodeSessionDestroyed(ctx, nid, sessionId)
-		if !strings.Contains(nid, "relay-root") {
+		nodeInfo, err := sm.redis.GetNodeProvisioning(ctx, nid)
+		if err != nil || nodeInfo.Role != "root" {
 			sm.redis.ReleaseDeepReserve(ctx, sessionId, nid)
 		}
 	}
@@ -349,6 +349,7 @@ func (sm *SessionManager) DestroySessionPath(
 	}
 
 	// Libera slot Edge
+	sm.redis.RemoveRoute(ctx, sessionId, relayId, egressId)
 	sm.redis.ReleaseEdgeSlot(ctx, sessionId, relayId)
 	sm.redis.RemoveEgressFromSession(ctx, sessionId, egressId)
 	sm.redis.RemoveEgressParent(ctx, sessionId, egressId)
@@ -519,8 +520,8 @@ func (sm *SessionManager) GetSessionDetails(
 	// Get injection node info per ricostruire l'endpoint
 	injectionNode, err := sm.redis.GetNodeProvisioning(ctx, injectionId)
 	whipEndpoint := fmt.Sprintf("http://%s:%d/whip/endpoint/%s",
-		injectionNode.InternalHost,
-		injectionNode.InternalAPIPort,
+		injectionNode.ExternalHost,
+		injectionNode.ExternalAPIPort,
 		sessionId,
 	)
 	// Parse timestamp
