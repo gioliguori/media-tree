@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"controller/internal/redis"
@@ -305,7 +304,8 @@ func (sm *SessionManager) DestroySessionComplete(
 	chain, _ := sm.redis.GetSessionChain(ctx, sessionId)
 	for _, nid := range chain {
 		sm.redis.PublishNodeSessionDestroyed(ctx, nid, sessionId)
-		if !strings.Contains(nid, "relay-root") {
+		nodeInfo, err := sm.redis.GetNodeProvisioning(ctx, nid)
+		if err != nil || nodeInfo.Role != "root" {
 			sm.redis.ReleaseDeepReserve(ctx, sessionId, nid)
 		}
 	}

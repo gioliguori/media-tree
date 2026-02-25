@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	SessionInactiveThreshold = 10 * time.Minute // 5min (1min per test)
-	PathInactiveThreshold    = 10 * time.Minute // 5min (1min per test)
+	SessionInactiveThreshold = 1 * time.Minute  // 5min (1min per test)
+	PathInactiveThreshold    = 1 * time.Minute  // 5min (1min per test)
 	CleanupInterval          = 30 * time.Second // Check ogni 30s
 )
 

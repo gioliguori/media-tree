@@ -7,6 +7,7 @@ metadata:
     type: "injection"
     nodeId: "{{ .NodeId }}"
     media-mesh.nodeId: "{{ .NodeId }}"
+    relay-root-id: "{{ .RelayRootId }}"
 spec:
   hostNetwork: true
   dnsPolicy: ClusterFirstWithHostNet
@@ -30,7 +31,7 @@ spec:
           cpu: "100m"
           memory: "128Mi"
         limits:
-          cpu: "800m"
+          cpu: "1000m"
           memory: "512Mi"
       env:
         - name: "NODE_ID"
@@ -70,7 +71,7 @@ spec:
           cpu: "100m"
           memory: "128Mi"
         limits:
-          cpu: "800m"
+          cpu: "1000m"
           memory: "384Mi"
       env:
         - name: "JANUS_NAT_1_1_MAPPING"
@@ -86,7 +87,7 @@ spec:
           cpu: "100m"
           memory: "128Mi"
         limits:
-          cpu: "500m"
+          cpu: "1000m"
           memory: "512Mi"
       env:
         - name: "NODE_ID"

@@ -11,6 +11,7 @@ import (
 	"controller/internal/api"
 	"controller/internal/autoscaler"
 	"controller/internal/config"
+	"controller/internal/metrics"
 	"controller/internal/provisioner"
 	"controller/internal/redis"
 	"controller/internal/session"
@@ -86,6 +87,15 @@ func main() {
 	}
 
 	// Avvio background jobs
+
+	// Inizializzazione Metrics Collector
+	metricsCollector, err := metrics.NewK8sMetricsCollector(redisClient)
+	if err != nil {
+		log.Printf("[WARN] Metrics Server not accessible: %v", err)
+	} else {
+		metricsCollector.Start(ctx)
+		defer metricsCollector.Stop()
+	}
 
 	// Session Cleanup
 	sessionManager.StartCleanupJob(ctx)
