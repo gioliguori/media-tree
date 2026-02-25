@@ -396,7 +396,7 @@ nat: {
 	# has been configured. By default, Janus ignores all interfaces whose
 	# name starts with 'vmnet', to skip VMware interfaces:
 	ice_ignore_list = "vmnet"
-	ice_ignore_list = "vmnet,10.,172." 
+	#ice_ignore_list = "vmnet,10.,172." 
 
 	# In case you want to allow Janus to start even if the configured STUN or TURN
 	# server is unreachable, you can set 'ignore_unreachable_ice_server' to true.
